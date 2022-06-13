@@ -122,8 +122,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
     // TODO: make a dataset (ArrowColumnEncoder) specifically for ArrowColumns
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain("formatted")
-//    val plan = df.queryExecution.executedPlan.execute()
-//    val firstOfPlan = plan.first()
+    val plan = df.queryExecution.executedPlan.execute()
+    val firstOfPlan = plan.first()
     checkFirst(df.first())
     // Perform ColumnarSort
     df.sort("numA", "numB")

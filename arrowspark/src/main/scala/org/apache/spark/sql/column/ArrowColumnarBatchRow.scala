@@ -1,8 +1,7 @@
 package org.apache.spark.sql.column
 
-import org.apache.arrow.vector.{ValueVector, VectorSchemaRoot}
-import org.apache.spark.SparkEnv
-import org.apache.spark.io.CompressionCodec
+import org.apache.arrow.vector.ipc.ArrowStreamWriter
+import org.apache.arrow.vector.{FieldVector, VectorSchemaRoot}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.types.{DataType, Decimal}
@@ -11,6 +10,10 @@ import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
 import org.apache.spark.util.NextIterator
 
 import java.io._
+import java.nio.channels.Channels
+import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
+
+// TODO: replace whatever is required by ArrowColumnarBatchRow!
 
 class ArrowColumnarBatchRow(protected val columns: Array[ArrowColumnVector]) extends InternalRow with AutoCloseable with Serializable {
   override def numFields: Int = columns.length
@@ -37,6 +40,13 @@ class ArrowColumnarBatchRow(protected val columns: Array[ArrowColumnVector]) ext
   override def update(i: Int, value: Any): Unit = throw new UnsupportedOperationException()
   override def setNullAt(i: Int): Unit = update(i, null)
 
+  def copyNToRoot(n: Int, root: VectorSchemaRoot): Unit = {
+    for ( (vec, col) <- root.getFieldVectors.slice(0, n) zip columns.slice(0, n)) {
+      vec.reset()
+      vec.copyFrom(0, 0, col.getValueVector)
+    }
+  }
+
   /** Note: uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing */
   override def copy(): InternalRow = {
@@ -51,61 +61,76 @@ class ArrowColumnarBatchRow(protected val columns: Array[ArrowColumnVector]) ext
   }
 
   override def close(): Unit = columns foreach(column => column.close())
-
-  /** according to: https://arrow.apache.org/docs/java/ipc.html#writing-and-reading-streaming-format */
-  private def writeExternal(bos: ByteArrayOutputStream): Unit = {
-    // TODO: array to vararg?
-    val root = VectorSchemaRoot.of( columns.toStream map { column => column.getValueVector} )
-
-  }
-
-  private def readExternal(objectInput: ObjectInput): Unit = ???
 }
 
 object ArrowColumnarBatchRow {
   /**  Note: similar to getByteArrayRdd(...)
-   * Encodes the first n columns of a series of ArrowColumnarBatchRows*/
-  def encode(n: Int, iter: Iterator[ArrowColumnarBatchRow]): Iterator[(Long, Array[Byte])] = {
-//    var count: Long = 0
-//    val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-    val bos = new ByteArrayOutputStream()
+   * Encodes the first n columns of a series of ArrowColumnarBatchRows
+   * according to: https://arrow.apache.org/docs/java/ipc.html#writing-and-reading-streaming-format
+   *
+   * Note: "The recommended usage for VectorSchemaRoot is creating a single VectorSchemaRoot
+   * based on the known schema and populated data over and over into the same VectorSchemaRoot
+   * in a stream of batches rather than creating a new VectorSchemaRoot instance each time"
+   * source: https://jorisvandenbossche.github.io/arrow-docs-preview/html-option-1/java/vector_schema_root.html#vectorschemaroot */
+  def encode(n: Int, iter: Iterator[ArrowColumnarBatchRow]): Iterator[Array[Byte]] = {
+    new NextIterator[Array[Byte]] {
+      var root: Option[VectorSchemaRoot] = None
+      lazy val bos = new ByteArrayOutputStream()
+      var writer: Option[ArrowStreamWriter] = None
 
+      private def init(first: ArrowColumnarBatchRow): Unit = {
+        root = Some(VectorSchemaRoot.of( first.columns.slice(0, n).map(
+          column => column.getValueVector.asInstanceOf[FieldVector]
+        ).toSeq :_* ))
+        writer = Some( new ArrowStreamWriter(root.get, null, Channels.newChannel(bos)) )
 
+        writer.get.start()
+        writer.get.writeBatch()
+      }
 
-
-
-//    val oos = new ObjectOutputStream(codec.compressedOutputStream(bos))
-//
-//    while ((n < 0 || count < n) && iter.hasNext) {
-//      oos.writeInt(1)
-//      iter.next().writeExternal(oos)
-//      count += 1
-//    }
-//
-//    oos.writeInt(0)
-//    oos.flush()
-//    oos.close()
-//    Iterator((count, bos.toByteArray))
-  }
-
-  /** Note: similar to decodeUnsafeRows */
-  def decode(bytes: Array[Byte]): Iterator[ArrowColumnarBatchRow] = {
-    val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-    val bis = new ByteArrayInputStream(bytes)
-    val ois = new ObjectInputStream(codec.compressedInputStream(bis))
-
-    new NextIterator[ArrowColumnarBatchRow] {
-      override protected def getNext(): ArrowColumnarBatchRow = {
-        if (ois.readInt() == 0) {
+      override protected def getNext(): Array[Byte] = {
+        if (!iter.hasNext) {
           finished = true
           return null
         }
-        val wrapper = new ArrowColumnarBatchRow(Array.empty)
-        wrapper.readExternal(ois)
-        wrapper
+
+        val batch = iter.next()
+        if (root.isEmpty || writer.isEmpty)
+          init(batch)
+        else
+          batch.copyNToRoot(n, root.get)
+
+
+        bos.toByteArray
       }
 
-      override protected def close(): Unit = ois.close()
+      override protected def close(): Unit = {
+        if (writer.isDefined)
+          writer.get.end()
+        bos.close()
+      }
     }
   }
+
+  /** Note: similar to decodeUnsafeRows */
+    // TODO: implement
+  def decode(bytes: Array[Byte]): Iterator[ArrowColumnarBatchRow] = ???
+//    val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+//    val bis = new ByteArrayInputStream(bytes)
+//    val ois = new ObjectInputStream(codec.compressedInputStream(bis))
+//
+//    new NextIterator[ArrowColumnarBatchRow] {
+//      override protected def getNext(): ArrowColumnarBatchRow = {
+//        if (ois.readInt() == 0) {
+//          finished = true
+//          return null
+//        }
+//        val wrapper = new ArrowColumnarBatchRow(Array.empty)
+//        wrapper.readExternal(ois)
+//        wrapper
+//      }
+//
+//      override protected def close(): Unit = ois.close()
+//    }
+//  }
 }
