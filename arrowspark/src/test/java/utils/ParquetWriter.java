@@ -2,7 +2,10 @@ package utils;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
@@ -16,7 +19,6 @@ import org.apache.parquet.io.OutputFile;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -54,26 +56,18 @@ public class ParquetWriter {
         for (Field field : arrowSchema.getFields()) {
             FieldVector vector = field.createVector(allocater);
 
-            switch (field.getType().getTypeID()) {
-                case Int: ((IntVector) vector).allocateNew(recordsToWrite.size()); break;
-                case Utf8: ((VarCharVector) vector).allocateNew(recordsToWrite.size()); break;
-                default: throw new RuntimeException("[ParquetWriter] type not supported");
+            if (field.getType().getTypeID() == ArrowType.ArrowTypeID.Int) {
+                ((IntVector) vector).allocateNew(recordsToWrite.size());
+            } else {
+                throw new RuntimeException("[ParquetWriter] type not supported");
             }
 
             int i = 0;
             for (GenericData.Record record : recordsToWrite) {
-                switch (field.getType().getTypeID()) {
-                    case Int:
-                        assert vector instanceof IntVector;
-                        // we allocated enough space for all records, so we prefer set() over setSafe()
-                        ((IntVector) vector).set(i, (int)record.get(field.getName()));
-                        break;
-                    case Utf8:
-                        assert vector instanceof VarCharVector;
-                        // we allocated enough space for all records, so we prefer set() over setSafe()
-                        ((VarCharVector) vector).set(i, ((String)record.get(field.getName())).getBytes(StandardCharsets.UTF_8));
-                        break;
-                    default: throw new RuntimeException("[ParquetWriter] type not supported");
+                if (field.getType().getTypeID() == ArrowType.ArrowTypeID.Int) {// we allocated enough space for all records, so we prefer set() over setSafe()
+                    ((IntVector) vector).set(i, (int) record.get(field.getName()));
+                } else {
+                    throw new RuntimeException("[ParquetWriter] type not supported");
                 }
                 ++i;
             }
