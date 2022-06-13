@@ -24,6 +24,11 @@ def scala_version = '2.12.15'
 def spark_version = '3.3.0-SNAPSHOT'
 def parquet_version = '1.12.2'
 
+test {
+    useJUnitPlatform()
+}
+
+
 dependencies {
         // Scala
         implementation 'org.scala-lang:scala-library:' + scala_version

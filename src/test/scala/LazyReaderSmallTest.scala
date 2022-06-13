@@ -119,6 +119,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val temp = RowEncoder(StructType(temp_list))
 
     // Construct DataFrame
+    // TODO: make a dataset (ArrowColumnEncoder) specifically for ArrowColumns
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain("formatted")
     val plan = df.queryExecution.executedPlan.execute()
