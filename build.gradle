@@ -1,0 +1,73 @@
+plugins {
+    id "com.github.johnrengelman.shadow" version "7.1.2"
+    id 'java'
+}
+
+apply plugin: 'scala'
+apply plugin: 'java'
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+group 'nl.liacs.mijpelaar.arrowspark'
+
+repositories {
+//	mavenLocal()
+//    flatDir {
+//        dirs 'libs'
+//    }
+	mavenCentral()
+    maven {
+        url 'https://repository.apache.org/snapshots'
+    }
+}
+
+def scala_version = '2.12.15'
+def spark_version = '3.3.0-SNAPSHOT'
+def parquet_version = '1.12.2'
+
+dependencies {
+        // Scala
+        implementation 'org.scala-lang:scala-library:' + scala_version
+////
+        // Command line arguments
+        implementation 'info.picocli:picocli:4.6.3'
+        // Apache Spark Submodules
+        implementation 'org.apache.spark:spark-sql_2.12:' + spark_version
+
+        // (Unit) Testing
+        implementation 'org.junit.jupiter:junit-jupiter:5.8.2'
+        implementation 'org.scalatest:scalatest_2.12:3.3.0-SNAP3'
+        implementation 'co.helmethair:scalatest-junit-runner:0.1.11'
+        implementation 'org.apache.parquet:parquet-avro:1.12.3'
+        implementation 'org.apache.parquet:parquet-arrow:' + parquet_version
+}
+
+// https://stackoverflow.com/questions/42527631/how-to-make-gradle-fail-the-build-if-a-file-dependency-is-not-found
+//task ensureDepsExist() {
+//    doLast {
+//        configurations.implementation.canBeResolved(true)
+//        Set<File> impFiles = configurations.implementation.resolve()
+//        impFiles.forEach {f ->
+//            if (!f.exists())
+//                ant.fail "${f} could not be found"
+//        }
+//    }
+//}
+//compileScala.dependsOn ensureDepsExist
+
+//////////// Jarfile Generation Section ////////////
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
+import java.nio.file.Paths
+
+/** Builds a full jar JAR, with all dependencies contained */
+shadowJar {
+    zip64(true)
+    mergeServiceFiles()
+
+    manifest {
+        attributes(
+                'Manifest-Version': 1.0,
+                'Main-Class': 'org.nativevanilla.comparator.Comparator'
+        )
+    }
+}
