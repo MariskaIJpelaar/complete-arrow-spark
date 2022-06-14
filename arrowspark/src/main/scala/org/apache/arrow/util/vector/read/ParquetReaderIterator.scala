@@ -13,8 +13,9 @@ import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.parquet.io.api.{GroupConverter, PrimitiveConverter}
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources.PartitionedFile
-import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarBatchRow}
+import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import scala.collection.JavaConverters.asScalaBufferConverter
 
@@ -38,7 +39,7 @@ private class DumpGroupConverter extends GroupConverter {
 }
 
 
-class ParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ColumnarBatchRow] {
+class ParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] {
   if (file.length > Integer.MAX_VALUE)
     throw new RuntimeException("[IntegerParquetReaderIterator] Partition is too large")
 
@@ -60,7 +61,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
 
   override def hasNext: Boolean = pageReadStore != null
 
-  override def next(): ColumnarBatchRow = {
+  override def next(): ArrowColumnarBatchRow = {
     if (!hasNext)
       throw new RuntimeException("[IntegerParquetReaderIterator] has no next")
 
@@ -96,7 +97,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
 
     vectorSchemaRoot.setRowCount(rows)
     val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
-    new ColumnarBatchRow(Array.tabulate(data.length)(i => new ArrowColumnVector(data(i))))
+    new ArrowColumnarBatchRow(Array.tabulate(data.length)(i => new ArrowColumnVector(data(i))))
   }
 }
 

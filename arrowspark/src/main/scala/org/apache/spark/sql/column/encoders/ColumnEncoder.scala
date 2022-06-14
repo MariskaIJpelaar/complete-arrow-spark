@@ -1,18 +1,18 @@
 package org.apache.spark.sql.column.encoders
 
-import org.apache.spark.sql.catalyst.DeserializerBuildHelper.{createDeserializerForDuration, createDeserializerForInstant, createDeserializerForJavaBigDecimal, createDeserializerForLocalDate, createDeserializerForLocalDateTime, createDeserializerForPeriod, createDeserializerForSqlDate, createDeserializerForSqlTimestamp, createDeserializerForString, expressionWithNullSafety}
-import org.apache.spark.sql.catalyst.SerializerBuildHelper.{createSerializerForAnyDate, createSerializerForAnyTimestamp, createSerializerForJavaDuration, createSerializerForJavaInstant, createSerializerForJavaLocalDate, createSerializerForJavaPeriod, createSerializerForLocalDateTime, createSerializerForMapObjects, createSerializerForSqlDate, createSerializerForSqlTimestamp, createSerializerForString}
-import org.apache.spark.sql.catalyst.{ScalaReflection, WalkedTypePath}
+import org.apache.spark.sql.catalyst.DeserializerBuildHelper._
+import org.apache.spark.sql.catalyst.SerializerBuildHelper._
 import org.apache.spark.sql.catalyst.analysis.GetColumnByOrdinal
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.objects.{Invoke, MapObjects, NewInstance, StaticInvoke, ValidateExternalType}
+import org.apache.spark.sql.catalyst.expressions.objects._
 import org.apache.spark.sql.catalyst.expressions.{BoundReference, CheckOverflow, CreateArray, CreateNamedStruct, Expression, GetStructField, If, IsNull, Literal}
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData}
-import org.apache.spark.sql.column.TColumn
-import org.apache.spark.sql.column.expressions.objects.{CreateExternalColumn, GetExternalColumn}
+import org.apache.spark.sql.catalyst.{ScalaReflection, WalkedTypePath}
+import org.apache.spark.sql.column.{ColumnBatch, TColumn}
+import org.apache.spark.sql.column.expressions.objects.{CreateExternalColumnBatch, GetExternalColumnBatch}
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{ArrayType, BooleanType, ByteType, DataType, DateType, DayTimeIntervalType, Decimal, DecimalType, DoubleType, FloatType, IntegerType, LongType, MapType, ObjectType, PythonUserDefinedType, SQLUserDefinedType, ShortType, StringType, StructType, TimestampNTZType, TimestampType, UDTRegistration, UserDefinedType, YearMonthIntervalType}
+import org.apache.spark.sql.types._
 import org.apache.spark.util.Utils
 
 import scala.annotation.tailrec
@@ -20,12 +20,12 @@ import scala.collection.Map
 import scala.reflect.ClassTag
 
 object ColumnEncoder {
-  def apply(schema: StructType): ExpressionEncoder[TColumn] = {
-    val cls = classOf[TColumn]
+  def apply(schema: StructType): ExpressionEncoder[ColumnBatch] = {
+    val cls = classOf[ColumnBatch]
     val inputObject = BoundReference(0, ObjectType(cls), nullable = true)
     val serializer = serializerFor(inputObject, schema, lenient = false)
     val deserializer = deserializerFor(GetColumnByOrdinal(0, serializer.dataType), schema)
-    new ExpressionEncoder[TColumn](serializer, deserializer, ClassTag(cls))
+    new ExpressionEncoder[ColumnBatch](serializer, deserializer, ClassTag(cls))
   }
 
   private def serializerFor(inputObject: Expression, inputType: DataType, lenient: Boolean): Expression = inputType match {
@@ -136,7 +136,7 @@ object ColumnEncoder {
       val nonNullOutput = CreateNamedStruct(fields.zipWithIndex.flatMap { case (field, index) =>
         val fieldValue = serializerFor(
           ValidateExternalType(
-            GetExternalColumn(inputObject),
+            GetExternalColumnBatch(inputObject),
 //            GetExternalRowField(inputObject, index, field.name),
             field.dataType,
             lenient),
@@ -167,7 +167,7 @@ object ColumnEncoder {
   private def deserializerFor(input: Expression, schema: StructType): Expression = {
     CreateArray(schema.zipWithIndex.map { case (_, i) =>
       val field = deserializerFor(GetStructField(input, i))
-      CreateExternalColumn(Seq(field))
+      CreateExternalColumnBatch(Seq(field))
     })
   }
 
@@ -260,7 +260,7 @@ object ColumnEncoder {
       }
       If(IsNull(input),
         Literal.create(null, externalDataTypeFor(input.dataType)),
-        CreateExternalColumn(convertedFields))
+        CreateExternalColumnBatch(convertedFields))
   }
 
   private def expressionForNullableExpr(
@@ -298,3 +298,83 @@ object ColumnEncoder {
     case udt: UserDefinedType[_] => ObjectType(udt.userClass)
   }
 }
+
+///**
+// * Function that serializes an object of type `T` to an [[InternalRow]]. This class is not
+// * thread-safe. Note that multiple calls to `apply(..)` return the same actual [[InternalRow]]
+// * object.  Thus, the caller should copy the result before making another call if required.
+// */
+//class Serializer[T: ClassTag](private val expressions: Seq[Expression])
+//  extends (T => InternalRow) with Serializable {
+//  @transient
+//  private[this] var inputCol: GenericColumn[T] = _
+//
+//  @transient
+//  private[this] var extractProjection: UnsafeProjection = _
+//
+//  override def apply(t: T): InternalRow = try {
+//    if (extractProjection == null) {
+//      inputCol = new GenericColumn[T](1)
+//      extractProjection = GenerateUnsafeProjection.generate(expressions)
+//    }
+//    inputCol.set(0, t)
+//    extractProjection(inputCol.asInstanceOf[InternalRow])
+//  } catch {
+//    case e: Exception =>
+//      throw QueryExecutionErrors.expressionEncodingError(e, expressions)
+//  }
+//}
+//
+///**
+// * Function that deserializes an [[InternalRow]] into an object of type `T`. This class is not
+// * thread-safe.
+// */
+//class Deserializer[T](private val expressions: Seq[Expression])
+//  extends (InternalRow => T) with Serializable {
+//  @transient
+//  private[this] var constructProjection: Projection = _
+//
+//  override def apply(row: InternalRow): T = try {
+//    if (constructProjection == null) {
+//      constructProjection = SafeProjection.create(expressions)
+//    }
+//    constructProjection(row).asInstanceOf[TColumn].get(0).asInstanceOf[T]
+//  } catch {
+//    case e: Exception =>
+//      throw QueryExecutionErrors.expressionDecodingError(e, expressions)
+//  }
+//}
+//
+//class ColumnEncoder[T: ClassTag](expressionEncoder: ExpressionEncoder[T]) extends Encoder[T] {
+//  override def schema: StructType = expressionEncoder.schema
+//  override def clsTag: ClassTag[T] = expressionEncoder.clsTag
+//  def assertUnresolved(): Unit = expressionEncoder.assertUnresolved()
+//  def encoder: ExpressionEncoder[T] = expressionEncoder
+//
+//  /** Functions to get private members of ExpressionEncoder */
+//  private def getPrivate[U](name: String): U = {
+//    val field = classOf[ExpressionEncoder[U]].getDeclaredField(name)
+//    field.setAccessible(true)
+//    field.get(expressionEncoder).asInstanceOf[U]
+//  }
+//
+//  protected lazy val optimizedDeserializer: Seq[Expression] = getPrivate("optimizedDeserializer")
+//  protected lazy val optimizedSerializer: Seq[Expression] = getPrivate("optimizedSerializer")
+//
+//  /**
+//   * Create a serializer that can convert an object of type `T` to a Spark SQL TColumn.
+//   *
+//   * Note that the returned [[Serializer]] is not thread safe. Multiple calls to
+//   * `serializer.apply(..)` are allowed to return the same actual [[InternalRow]] object.  Thus,
+//   *  the caller should copy the result before making another call if required.
+//   */
+//  def createSerializer(): Serializer[T] = new Serializer[T](optimizedSerializer)
+//
+//  /**
+//   * Create a deserializer that can convert a Spark SQL TColumn into an object of type `T`.
+//   *
+//   * Note that you must `resolveAndBind` an encoder to a specific schema before you can create a
+//   * deserializer.
+//   */
+//  def createDeserializer(): Deserializer[T] = new Deserializer[T](optimizedDeserializer)
+//}

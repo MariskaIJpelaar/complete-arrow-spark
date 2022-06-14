@@ -6,7 +6,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.TimeTravelSpec
 import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
-import org.apache.spark.sql.column.{ColumnDataFrame, ColumnDataset}
+import org.apache.spark.sql.column.ColumnDataset
 import org.apache.spark.sql.connector.catalog.TableCapability.BATCH_READ
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, SupportsCatalogOptions, SupportsRead, TableProvider}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2Utils}
@@ -23,7 +23,7 @@ private[sql] object ColumnDataSourceV2Utils extends Logging {
                     userSpecifiedSchema: Option[StructType],
                     extraOptions: CaseInsensitiveMap[String],
                     source: String,
-                    paths: String*): Option[ColumnDataFrame] = {
+                    paths: String*): Option[ColumnDataset] = {
     val catalogManager = sparkSession.sessionState.catalogManager
     val conf = sparkSession.sessionState.conf
     val sessionOptions = DataSourceV2Utils.extractSessionConfigs(provider, conf)

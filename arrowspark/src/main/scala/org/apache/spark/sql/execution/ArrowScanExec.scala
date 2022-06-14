@@ -7,12 +7,14 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeReference, BoundReference, Expression, PlanExpression, Predicate}
 import org.apache.spark.sql.catalyst.{InternalRow, TableIdentifier}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.sources.{BaseRelation, Filter}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.vectorized.ColumnarBatchRow
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.TypeTag
 
@@ -25,12 +27,13 @@ trait ArrowFileFormat extends FileFormat {
                                      requiredSchema: StructType,
                                      filters: Seq[Filter],
                                      options: Map[String, String],
-                                     hadoopConf: Configuration) : PartitionedFile => Iterator[ColumnarBatchRow]
+                                     hadoopConf: Configuration) : PartitionedFile => Iterator[ArrowColumnarBatchRow]
 }
 
 case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with Logging {
 
   // note: this function is directly copied from SparkPlan.executeTake(n, takeFromEnd)
+  /** TODO: perhaps remove this function */
   private def determinePartsToScan(partsScanned: Int, bufEmpty: Boolean, n: Int, bufLen: Int, totalParts: Int): Range = {
     // The number of partitions to try in this iteration. It is ok for this number to be
     // greater than totalParts because we actually cap it at totalParts in runJob.
@@ -52,40 +55,29 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
   }
 
-//  override def executeTake(n: Int): Array[InternalRow] = {
-//    if (n == 0)
-//      return new Array[ColumnarBatchRow](0).asInstanceOf[Array[InternalRow]]
-//
-//    val childRDD = execute().mapPartitionsInternal { res =>
-//      res.next().asInstanceOf[UnsafeRow]
-//
-//      ArrowInternalColumn.encode(n, res.asInstanceOf[Iterator[ArrowInternalColumn]])
-//    }
-//
-//    val buf = new ArrayBuffer[InternalRow]
-//    val totalParts = childRDD.partitions.length
-//    var partsScanned = 0
-//
-//    // We either read until n, or until end of partitions
-//    while (buf.length < n && partsScanned < totalParts) {
-//      val partsToScan = determinePartsToScan(partsScanned, buf.isEmpty, n, buf.length, totalParts)
-//      val res = sparkContext.runJob(childRDD, (it: Iterator[(Long, Array[Byte])]) =>
-//        if (it.hasNext) it.next() else (0L, Array.emptyByteArray), partsToScan)
-//
-//      var i = 0
-//      while (buf.length < n && i < res.length) {
-//        val partitions: Iterator[InternalRow] = ArrowInternalColumn.decode(res(i)._2)
-//        // is this the last Partition?
-//        if (n - buf.length >= res(i)._1)
-//          buf ++= partitions.toArray[InternalRow]
-//        else
-//          buf ++= partitions.take(n - buf.length).toArray[InternalRow]
-//        i += 1
-//      }
-//      partsScanned += partsToScan.size
-//    }
-//    buf.toArray
-//  }
+  /** Takes the first n columns */
+  override def executeTake(n: Int): Array[InternalRow] = {
+    if (n == 0)
+      return new Array[ColumnarBatchRow](0).asInstanceOf[Array[InternalRow]]
+
+    val childRDD = execute().mapPartitionsInternal { res =>
+      ArrowColumnarBatchRow.encode(n, res.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
+    }
+
+    val buf = new ArrayBuffer[InternalRow]
+    val totalParts = childRDD.partitions.length
+
+    // read all partitions
+    val res = sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) =>
+      if (it.hasNext) it.next() else Array.emptyByteArray, 0 until totalParts)
+
+    res.indices foreach { i =>
+      val partitions: Iterator[InternalRow] = ArrowColumnarBatchRow.decode(res(i))
+      buf ++= partitions.toArray[InternalRow]
+    }
+
+    buf.toArray
+  }
 
   // copied from org/apache/spark/sql/execution/DataSourceScanExec.scala
   @transient
@@ -96,7 +88,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
 
   // copied and edited from org/apache/spark/sql/execution/DataSourceScanExec.scala
   private def createFileScanArrowRDD[T: ClassTag](
-                                                   readFunc: PartitionedFile => Iterator[ColumnarBatchRow],
+                                                   readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
                                                    selectedPartitions: Array[PartitionDirectory],
                                                    fsRelation: HadoopFsRelation)
       (implicit tag: TypeTag[T]) : FileScanArrowRDD[T] = {
@@ -145,7 +137,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
 
   // copied and edited from org/apache/spark/sql/execution/DataSourceScanExec.scala
   private def createBucketFileScanArrowRDD[T: ClassTag](
-                                                         readFunc: PartitionedFile => Iterator[ColumnarBatchRow],
+                                                         readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
                                                          numBuckets: Int,
                                                          selectedPartitions: Array[PartitionDirectory])
       (implicit tag: TypeTag[T]) : FileScanArrowRDD[T]  = {
@@ -240,7 +232,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
   }
 
   lazy val inputRDD: RDD[InternalRow] = {
-    val root: PartitionedFile => Iterator[ColumnarBatchRow] = fs.relation.fileFormat.asInstanceOf[ArrowFileFormat].buildArrowReaderWithPartitionValues(
+    val root: PartitionedFile => Iterator[ArrowColumnarBatchRow] = fs.relation.fileFormat.asInstanceOf[ArrowFileFormat].buildArrowReaderWithPartitionValues(
       fs.relation.sparkSession, fs.relation.dataSchema, fs.relation.partitionSchema, fs.requiredSchema, pushedDownFilters,
       fs.relation.options,  fs.relation.sparkSession.sessionState.newHadoopConfWithOptions(fs.relation.options)
     )

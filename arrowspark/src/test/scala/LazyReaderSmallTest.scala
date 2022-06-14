@@ -6,7 +6,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
-import org.apache.spark.sql.column.{ColumnDataFrame, ColumnDataFrameReader, TColumn}
+import org.apache.spark.sql.column.{ColumnDataFrameReader, ColumnDataset, TColumn}
 import org.apache.spark.sql.types.{IntegerType, StructField, StructType}
 import org.apache.spark.sql.util.SpArrowExtensionWrapper
 import org.scalatest.funsuite.AnyFunSuite
@@ -120,9 +120,10 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Construct DataFrame
     // TODO: make a dataset (ArrowColumnEncoder) specifically for ArrowColumns
-    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+    val df: ColumnDataset = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain("formatted")
     val plan = df.queryExecution.executedPlan.execute()
+
     val firstOfPlan = plan.first()
     checkFirst(df.first())
     // Perform ColumnarSort

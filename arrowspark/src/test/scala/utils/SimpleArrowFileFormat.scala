@@ -7,12 +7,12 @@ import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.ArrowFileFormat
 import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat, ParquetUtils}
 import org.apache.spark.sql.execution.datasources.{OutputWriterFactory, PartitionedFile}
 import org.apache.spark.sql.sources.{DataSourceRegister, Filter}
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.vectorized.ColumnarBatchRow
 
 /** SimpleArrowFileFormat that does not support filters or options
  * Note: some functions have been copied from:
@@ -34,7 +34,7 @@ class SimpleArrowFileFormat extends ArrowFileFormat with DataSourceRegister with
   override def toString: String = "Simple-SpArrow-Format"
 
   /** Returns a function that can be used to read a single file in as an Iterator of Array[ValueVector] */
-  override def buildArrowReaderWithPartitionValues(sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType, requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String], hadoopConf: Configuration): PartitionedFile => Iterator[ColumnarBatchRow] = {
+  override def buildArrowReaderWithPartitionValues(sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType, requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String], hadoopConf: Configuration): PartitionedFile => Iterator[ArrowColumnarBatchRow] = {
     (file: PartitionedFile) => { new ParquetReaderIterator(file, rootAllocator)}
   }
 }

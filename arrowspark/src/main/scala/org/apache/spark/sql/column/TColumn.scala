@@ -3,6 +3,7 @@ package org.apache.spark.sql.column
 import org.apache.spark.sql.column.expressions.GenericColumn
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 import scala.util.hashing.MurmurHash3
 
@@ -11,10 +12,27 @@ object TColumn {
   def unapplySeq(col: TColumn): Seq[Option[Any]] = col.toSeq
 
   /** This method can be used to construct a TColumn with the given values */
-  def apply[T](values: T*)(implicit tag: ClassTag[T]): TColumn = new GenericColumn[T](values.toArray)
+  def apply[T](values: T*)(implicit tag: ClassTag[T]): TColumn = new GenericColumn(values.toArray.asInstanceOf[Array[Any]])
 
   /** This method can be used to construct a TColumn from a Seq of values */
-  def fromSeq[T](values: Seq[T])(implicit tag: ClassTag[T]): TColumn = new GenericColumn[T](values.toArray)
+  def fromSeq[T](values: Seq[T])(implicit tag: ClassTag[T]): TColumn = new GenericColumn(values.toArray.asInstanceOf[Array[Any]])
+
+  /** This method can be used to construct an Array of TColumns from an Array of ColumnBatches */
+  def fromBatches(batches: Array[ColumnBatch]): Array[TColumn] = {
+    val columns: ArrayBuffer[TColumn] = new ArrayBuffer()
+
+    batches foreach { batch =>
+      0 until batch.length foreach { i =>
+        if (i >= columns.length)
+          columns ++ new ArrayBuffer[TColumn](i - columns.length + 1)
+
+        if (!batch.isNullAt(i))
+          columns(i).concat(batch.get(i).get)
+      }
+    }
+
+    columns.toArray
+  }
 
   /** Returns an empty TColumn */
   val empty: TColumn = apply()
@@ -51,13 +69,16 @@ trait TColumn extends Serializable {
   /** Checks whether the value at position i is null */
   def isNullAt(i: Int): Boolean = get(i).isDefined
 
-  override def toString: String = this.mkString("[", ",", "]")
+  override def toString: String = this.mkString("{", ",", "}")
 
   /** Make a copy of the current Column object */
   def copy(): TColumn
 
   /** Returns true if there are any NULL values in this row */
   def anyNull: Boolean = 0 until length exists (i => isNullAt(i))
+
+  /** Concats this TColumn with an other TColumn and returns the result */
+  def concat(other: TColumn): TColumn
 
   override def equals(o: Any): Boolean = {
     if (!o.isInstanceOf[TColumn]) return false

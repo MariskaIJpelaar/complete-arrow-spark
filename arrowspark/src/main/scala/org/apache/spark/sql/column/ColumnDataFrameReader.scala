@@ -15,18 +15,19 @@ import java.util.Locale
  * Dataset[TColumn] */
 class ColumnDataFrameReader(sparkSession: SparkSession) extends DataFrameReader(sparkSession) {
  /** Loads input in as ColumnDataFrame, for data sources that don't require a path */
- def loadDF(): ColumnDataFrame = loadDF(Seq.empty: _*)
+ def loadDF(): ColumnDataset = loadDF(Seq.empty: _*)
+
  /** Loads input in as a ColumnDataFrame, for data sources that require a path */
- def loadDF(path: String): ColumnDataFrame = {
-   if (sparkSession.sessionState.conf.legacyPathOptionBehavior) {
-    option("path", path).loadDF(Seq.empty: _*)
-   } else {
-    loadDF(Seq(path): _*)
-   }
+ def loadDF(path: String): ColumnDataset = {
+  if (sparkSession.sessionState.conf.legacyPathOptionBehavior) {
+   option("path", path).loadDF(Seq.empty: _*)
+  } else {
+   loadDF(Seq(path): _*)
+  }
  }
  /** Loads input in as a DataFrame, for data sources with multiple paths
   * Only works if the source is an HadoopFsRelationProvider */
- def loadDF(paths: String*): ColumnDataFrame = {
+ def loadDF(paths: String*): ColumnDataset = {
   if (source.toLowerCase(Locale.ROOT) == DDLUtils.HIVE_PROVIDER)
    throw QueryCompilationErrors.cannotOperateOnHiveDataSourceFilesError("read")
 
@@ -41,7 +42,7 @@ class ColumnDataFrameReader(sparkSession: SparkSession) extends DataFrameReader(
  }
 
  /** Mostly copied from DataFrameReader */
- protected def loadV1Source(paths: String*): ColumnDataFrame = {
+ protected def loadV1Source(paths: String*): ColumnDataset = {
   val legacyPathOptionBehavior = sparkSession.sessionState.conf.legacyPathOptionBehavior
   val (finalPaths, finalOptions) = if (!legacyPathOptionBehavior && paths.length == 1) {
    (Nil, extraOptions + ("path" -> paths.head))
