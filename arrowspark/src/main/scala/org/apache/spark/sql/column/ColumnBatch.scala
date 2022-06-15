@@ -36,7 +36,7 @@ trait ColumnBatch extends Serializable {
   protected def getInternal(i: Int): Option[TColumn]
 
   /** Checks whether the value at position i is null */
-  def isNullAt(i: Int): Boolean = get(i).isDefined
+  def isNullAt(i: Int): Boolean = get(i).isEmpty
 
   override def toString: String = this.mkString("[", ";", "]")
 

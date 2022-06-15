@@ -15,22 +15,40 @@ import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector]) extends InternalRow with AutoCloseable with Serializable {
-  override def numFields: Int = columns.length
+  override def numFields: Int = sizes.sum
+  private lazy val sizes: Array[Int] = columns.map( column => column.getValueVector.getValueCount )
+
+  // TODO: make test?
+  private def mapOrdinalToIndexPair(ordinal: Int): ArrowColumnarBatchRow.IndexPair = {
+    var row = ordinal
+    var col = 0
+    var sum = 0
+    sizes.iterator.takeWhile( size => sum + size <= ordinal ).foreach { size => col += 1; sum += size; row -= size; }
+    ArrowColumnarBatchRow.IndexPair(row, col)
+  }
 
   // supported getters
 //  def getColumn(colId: Int): ArrowColumnVector = columns(colId)
 //  def get(colId: Int, rowId: Int): AnyRef = getColumn(colId).getValueVector.getObject(rowId)
-  // TODO: keep or not?
-  override def get(ordinal: Int, dataType: DataType): AnyRef = columns(ordinal)
-  override def isNullAt(ordinal: Int): Boolean = ordinal < 0 || ordinal >= columns.length
-  // TODO: def. change later!
-  override def getInt(ordinal: Int): Int = columns(ordinal).getInt(0)
+//  override def get(ordinal: Int, dataType: DataType): AnyRef =
+  override def isNullAt(ordinal: Int): Boolean = {
+    if (ordinal < 0 || ordinal >= columns.length)
+      return true
+    val mappedPair: ArrowColumnarBatchRow.IndexPair = mapOrdinalToIndexPair(ordinal)
+    columns(mappedPair.colIndex).isNullAt(mappedPair.rowIndex)
+  }
+
+  override def getInt(ordinal: Int): Int = {
+    val mappedPair: ArrowColumnarBatchRow.IndexPair = mapOrdinalToIndexPair(ordinal)
+    columns(mappedPair.colIndex).getInt(mappedPair.rowIndex)
+  }
+//  override def getArray(ordinal: Int): ArrayData = columns(ordinal).
 
 
 
   // unsupported getters
 //  override def isNullAt(ordinal: Int): Boolean = throw new UnsupportedOperationException()
-//  override def get(ordinal: Int, dataType: DataType): AnyRef = throw new UnsupportedOperationException()
+  override def get(ordinal: Int, dataType: DataType): AnyRef = throw new UnsupportedOperationException()
   override def getByte(ordinal: Int): Byte = throw new UnsupportedOperationException()
   override def getShort(ordinal: Int): Short = throw new UnsupportedOperationException()
 //  override def getInt(ordinal: Int): Int = throw new UnsupportedOperationException()
@@ -74,6 +92,8 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 }
 
 object ArrowColumnarBatchRow {
+  private case class IndexPair(rowIndex: Int, colIndex: Int)
+
   /**  Note: similar to getByteArrayRdd(...)
    * Encodes the first n columns of a series of ArrowColumnarBatchRows
    * according to: https://arrow.apache.org/docs/java/ipc.html#writing-and-reading-streaming-format

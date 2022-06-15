@@ -3,13 +3,14 @@ package org.apache.spark.sql.column.encoders
 import org.apache.spark.sql.catalyst.DeserializerBuildHelper._
 import org.apache.spark.sql.catalyst.SerializerBuildHelper._
 import org.apache.spark.sql.catalyst.analysis.GetColumnByOrdinal
-import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
+import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.expressions.objects._
 import org.apache.spark.sql.catalyst.expressions.{BoundReference, CheckOverflow, CreateArray, CreateNamedStruct, Expression, GetStructField, If, IsNull, Literal}
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData}
 import org.apache.spark.sql.catalyst.{ScalaReflection, WalkedTypePath}
+import org.apache.spark.sql.column.encoders.ColumnEncoder.serializerFor
 import org.apache.spark.sql.column.{ColumnBatch, TColumn}
-import org.apache.spark.sql.column.expressions.objects.{CreateExternalColumnBatch, GetExternalColumnBatch}
+import org.apache.spark.sql.column.expressions.objects.{CreateExternalColumn, CreateExternalColumnBatch, GetExternalColumn, GetExternalColumnBatch}
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
@@ -23,9 +24,38 @@ object ColumnEncoder {
   def apply(schema: StructType): ExpressionEncoder[ColumnBatch] = {
     val cls = classOf[ColumnBatch]
     val inputObject = BoundReference(0, ObjectType(cls), nullable = true)
-    val serializer = serializerFor(inputObject, schema, lenient = false)
-    val deserializer = deserializerFor(GetColumnByOrdinal(0, serializer.dataType), schema)
+//    val serializer = serializerFor(inputObject, schema, lenient = false)
+    val serializer = serializerFor(inputObject)
+    val arr_schema = new StructType( schema.fields.map { field =>
+      field.copy(dataType = ArrayType.apply(field.dataType))
+    } )
+    val deserializer = deserializerFor(arr_schema)
     new ExpressionEncoder[ColumnBatch](serializer, deserializer, ClassTag(cls))
+  }
+
+  private def serializerFor(inputObject: Expression): Expression = {
+    // TODO: probably wrong, but does not seem to be used atm
+    val batch = GetExternalColumnBatch(inputObject)
+    GetExternalColumn(batch)
+
+//      val fields = schema.zipWithIndex.flatMap { case (field, index) =>
+//        val input = BoundReference(index, field.dataType, nullable = true)
+//        val column = GetExternalColumn(input)
+//        val expression = ValidateExternalType(column, field.dataType, lenient = false)
+//        val fieldValue = serializerFor(expression, field.dataType, lenient = false)
+//        val convertedField = if (field.nullable) {
+//          If(
+//            Invoke(input, "isNullAt", BooleanType, Literal(index) :: Nil),
+//            Literal.create(null, fieldValue.dataType),
+//            fieldValue
+//          )
+//        } else {
+//          fieldValue
+//        }
+//        Literal(field.name) :: convertedField :: Nil
+//      }
+//
+//      GetExternalColumnBatch(CreateArray(fields))
   }
 
   private def serializerFor(inputObject: Expression, inputType: DataType, lenient: Boolean): Expression = inputType match {
@@ -164,104 +194,110 @@ object ColumnEncoder {
   }
 
   /** Note below methods are copied from RowEncoder */
-  private def deserializerFor(input: Expression, schema: StructType): Expression = {
-    CreateArray(schema.zipWithIndex.map { case (_, i) =>
-      val field = deserializerFor(GetStructField(input, i))
-      CreateExternalColumnBatch(Seq(field))
-    })
+  private def deserializerFor(schema: StructType): Expression = {
+//    GetColumnByOrdinal(0, serializer.dataType)
+//    val arr = schema.zipWithIndex.map { case (_, i) =>
+//      deserializerFor(GetStructField(input, i))
+//    }
+    val arr = schema.zipWithIndex.map { case (_, i) =>
+//      GetColumnByOrdinal(i, ObjectType(classOf[TColumn]))
+        CreateExternalColumn(GetColumnByOrdinal(i, ObjectType(classOf[TColumn])) :: Nil)
+//      deserializerFor(GetStructField(schema, i))
+    }
+    CreateExternalColumnBatch(arr)
   }
 
-  private def deserializerFor(input: Expression): Expression = {
-    deserializerFor(input, input.dataType)
-  }
-
-  @tailrec
-  private def deserializerFor(input: Expression, dataType: DataType): Expression = dataType match {
-    case dt if ScalaReflection.isNativeType(dt) => input
-
-    case p: PythonUserDefinedType => deserializerFor(input, p.sqlType)
-
-    case udt: UserDefinedType[_] =>
-      val annotation = udt.userClass.getAnnotation(classOf[SQLUserDefinedType])
-      val udtClass: Class[_] = if (annotation != null) {
-        annotation.udt()
-      } else {
-        UDTRegistration.getUDTFor(udt.userClass.getName).getOrElse {
-          throw QueryExecutionErrors.userDefinedTypeNotAnnotatedAndRegisteredError(udt)
-        }
-      }
-      val obj = NewInstance(
-        udtClass,
-        Nil,
-        dataType = ObjectType(udtClass))
-      Invoke(obj, "deserialize", ObjectType(udt.userClass), input :: Nil)
-
-    case TimestampType =>
-      if (SQLConf.get.datetimeJava8ApiEnabled) {
-        createDeserializerForInstant(input)
-      } else {
-        createDeserializerForSqlTimestamp(input)
-      }
-
-    // SPARK-38813: Remove TimestampNTZ type support in Spark 3.3 with minimal code changes.
-    case TimestampNTZType if Utils.isTesting =>
-      createDeserializerForLocalDateTime(input)
-
-    case DateType =>
-      if (SQLConf.get.datetimeJava8ApiEnabled) {
-        createDeserializerForLocalDate(input)
-      } else {
-        createDeserializerForSqlDate(input)
-      }
-
-    case _: DayTimeIntervalType => createDeserializerForDuration(input)
-
-    case _: YearMonthIntervalType => createDeserializerForPeriod(input)
-
-    case _: DecimalType => createDeserializerForJavaBigDecimal(input, returnNullable = false)
-
-    case StringType => createDeserializerForString(input, returnNullable = false)
-
-    case ArrayType(et, _) =>
-      val arrayData =
-        Invoke(
-          MapObjects(deserializerFor, input, et),
-          "array",
-          ObjectType(classOf[Array[_]]), returnNullable = false)
-      // TODO should use `scala.collection.immutable.ArrayDeq.unsafeMake` method to create
-      //  `immutable.Seq` in Scala 2.13 when Scala version compatibility is no longer required.
-      StaticInvoke(
-        scala.collection.mutable.WrappedArray.getClass,
-        ObjectType(classOf[scala.collection.Seq[_]]),
-        "make",
-        arrayData :: Nil,
-        returnNullable = false)
-
-    case MapType(kt, vt, valueNullable) =>
-      val keyArrayType = ArrayType(kt, containsNull = false)
-      val keyData = deserializerFor(Invoke(input, "keyArray", keyArrayType))
-
-      val valueArrayType = ArrayType(vt, valueNullable)
-      val valueData = deserializerFor(Invoke(input, "valueArray", valueArrayType))
-
-      StaticInvoke(
-        ArrayBasedMapData.getClass,
-        ObjectType(classOf[Map[_, _]]),
-        "toScalaMap",
-        keyData :: valueData :: Nil,
-        returnNullable = false)
-
-    case StructType(fields) =>
-      val convertedFields = fields.zipWithIndex.map { case (f, i) =>
-        If(
-          Invoke(input, "isNullAt", BooleanType, Literal(i) :: Nil),
-          Literal.create(null, externalDataTypeFor(f.dataType)),
-          deserializerFor(GetStructField(input, i)))
-      }
-      If(IsNull(input),
-        Literal.create(null, externalDataTypeFor(input.dataType)),
-        CreateExternalColumnBatch(convertedFields))
-  }
+//  private def deserializerFor(input: Expression): Expression = {
+//    deserializerFor(input, input.dataType)
+//  }
+//
+//  @tailrec
+//  private def deserializerFor(input: Expression, dataType: DataType): Expression = dataType match {
+//    case dt if ScalaReflection.isNativeType(dt) => input
+//
+//    case p: PythonUserDefinedType => deserializerFor(input, p.sqlType)
+//
+//    case udt: UserDefinedType[_] =>
+//      val annotation = udt.userClass.getAnnotation(classOf[SQLUserDefinedType])
+//      val udtClass: Class[_] = if (annotation != null) {
+//        annotation.udt()
+//      } else {
+//        UDTRegistration.getUDTFor(udt.userClass.getName).getOrElse {
+//          throw QueryExecutionErrors.userDefinedTypeNotAnnotatedAndRegisteredError(udt)
+//        }
+//      }
+//      val obj = NewInstance(
+//        udtClass,
+//        Nil,
+//        dataType = ObjectType(udtClass))
+//      Invoke(obj, "deserialize", ObjectType(udt.userClass), input :: Nil)
+//
+//    case TimestampType =>
+//      if (SQLConf.get.datetimeJava8ApiEnabled) {
+//        createDeserializerForInstant(input)
+//      } else {
+//        createDeserializerForSqlTimestamp(input)
+//      }
+//
+//    // SPARK-38813: Remove TimestampNTZ type support in Spark 3.3 with minimal code changes.
+//    case TimestampNTZType if Utils.isTesting =>
+//      createDeserializerForLocalDateTime(input)
+//
+//    case DateType =>
+//      if (SQLConf.get.datetimeJava8ApiEnabled) {
+//        createDeserializerForLocalDate(input)
+//      } else {
+//        createDeserializerForSqlDate(input)
+//      }
+//
+//    case _: DayTimeIntervalType => createDeserializerForDuration(input)
+//
+//    case _: YearMonthIntervalType => createDeserializerForPeriod(input)
+//
+//    case _: DecimalType => createDeserializerForJavaBigDecimal(input, returnNullable = false)
+//
+//    case StringType => createDeserializerForString(input, returnNullable = false)
+//
+//    case ArrayType(et, _) =>
+//      val arrayData =
+//        Invoke(
+//          MapObjects(deserializerFor, input, et),
+//          "array",
+//          ObjectType(classOf[Array[_]]), returnNullable = false)
+//      // TODO should use `scala.collection.immutable.ArrayDeq.unsafeMake` method to create
+//      //  `immutable.Seq` in Scala 2.13 when Scala version compatibility is no longer required.
+//      StaticInvoke(
+//        scala.collection.mutable.WrappedArray.getClass,
+//        ObjectType(classOf[scala.collection.Seq[_]]),
+//        "make",
+//        arrayData :: Nil,
+//        returnNullable = false)
+//
+//    case MapType(kt, vt, valueNullable) =>
+//      val keyArrayType = ArrayType(kt, containsNull = false)
+//      val keyData = deserializerFor(Invoke(input, "keyArray", keyArrayType))
+//
+//      val valueArrayType = ArrayType(vt, valueNullable)
+//      val valueData = deserializerFor(Invoke(input, "valueArray", valueArrayType))
+//
+//      StaticInvoke(
+//        ArrayBasedMapData.getClass,
+//        ObjectType(classOf[Map[_, _]]),
+//        "toScalaMap",
+//        keyData :: valueData :: Nil,
+//        returnNullable = false)
+//
+//    case StructType(fields) =>
+//      val convertedFields = fields.zipWithIndex.map { case (f, i) =>
+//        If(
+//          Invoke(input, "isNullAt", BooleanType, Literal(i) :: Nil),
+//          Literal.create(null, externalDataTypeFor(f.dataType)),
+//          deserializerFor(GetStructField(input, i)))
+//      }
+//      If(IsNull(input),
+//        Literal.create(null, externalDataTypeFor(input.dataType)),
+//        CreateExternalColumn(convertedFields))
+//  }
 
   private def expressionForNullableExpr(
    expr: Expression,

@@ -24,10 +24,10 @@ object TColumn {
     batches foreach { batch =>
       0 until batch.length foreach { i =>
         if (i >= columns.length)
-          columns ++ new ArrayBuffer[TColumn](i - columns.length + 1)
+          columns += TColumn.empty
 
         if (!batch.isNullAt(i))
-          columns(i).concat(batch.get(i).get)
+          columns(i) = columns(i).concat(batch.get(i).get)
       }
     }
 

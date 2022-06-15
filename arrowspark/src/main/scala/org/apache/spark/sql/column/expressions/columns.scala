@@ -7,7 +7,7 @@ import scala.reflect.ClassTag.Nothing
 
 class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
   /** No-arg constructor for serialization */
-  protected def this() = this(null)
+  protected def this() = this(new Array[Any](0))
 
   def this(size: Int) = this(new Array[Any](size))
 
@@ -18,7 +18,11 @@ class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
   override def copy(): TColumn = this
 
   /** Type of the column */
-  override def colType: Class[_] = if (values.length > 0 ) values(0).getClass else Nothing.getClass
+  override def colType: Class[_] = {
+    val firstValid = values.find( item => item != null)
+    if (firstValid.isEmpty) return Nothing.getClass
+    firstValid.get.getClass
+  }
 
   /** Returns the value at position i. If the value is null, None is returned */
   override protected def getInternal(i: Int): Option[Any] = {
@@ -30,6 +34,8 @@ class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
   override def concat(other: TColumn): TColumn = {
     if (!other.isInstanceOf[GenericColumn])
       return this
+    if (values.length == 0)
+      return other
     if (other.colType != colType)
       return this
     new GenericColumn(this.values ++ other.asInstanceOf[GenericColumn].values)
