@@ -4,6 +4,7 @@ import org.apache.spark.annotation.{DeveloperApi, Unstable}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.column.encoders.ColumnEncoder
 import org.apache.spark.sql.execution.QueryExecution
+import org.apache.spark.sql.types.ArrayType
 import org.apache.spark.sql.{Dataset, Encoder, SQLContext, SparkSession}
 
 import scala.language.implicitConversions
@@ -12,7 +13,9 @@ object ColumnDataset {
   def ofColumns(sparkSession: SparkSession, logicalPlan: LogicalPlan): ColumnDataset = sparkSession.withActive {
     val qe = sparkSession.sessionState.executePlan(logicalPlan)
     qe.assertAnalyzed()
-    val temp = ColumnEncoder(qe.analyzed.schema)
+    val schema = qe.analyzed.schema
+    schema.fields.transform( field => field.copy(dataType = ArrayType.apply(field.dataType)) )
+    val temp = ColumnEncoder(schema)
     new ColumnDataset(qe, temp)
   }
 

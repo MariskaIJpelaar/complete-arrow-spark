@@ -5,7 +5,7 @@ import org.apache.spark.sql.catalyst.SerializerBuildHelper._
 import org.apache.spark.sql.catalyst.analysis.GetColumnByOrdinal
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.expressions.objects._
-import org.apache.spark.sql.catalyst.expressions.{BoundReference, CheckOverflow, CreateArray, CreateNamedStruct, Expression, GetStructField, If, IsNull, Literal}
+import org.apache.spark.sql.catalyst.expressions.{BoundReference, CheckOverflow, CreateArray, CreateNamedStruct, Expression, GetStructField, If, IsNull, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData}
 import org.apache.spark.sql.catalyst.{ScalaReflection, WalkedTypePath}
 import org.apache.spark.sql.column.encoders.ColumnEncoder.serializerFor
@@ -25,18 +25,20 @@ object ColumnEncoder {
     val cls = classOf[ColumnBatch]
     val inputObject = BoundReference(0, ObjectType(cls), nullable = true)
 //    val serializer = serializerFor(inputObject, schema, lenient = false)
-    val serializer = serializerFor(inputObject)
-    val arr_schema = new StructType( schema.fields.map { field =>
-      field.copy(dataType = ArrayType.apply(field.dataType))
-    } )
-    val deserializer = deserializerFor(arr_schema)
+    val serializer = serializerFor(schema, inputObject)
+//    val arr_schema = new StructType( schema.fields.map { field =>
+//      field.copy(dataType = ArrayType.apply(field.dataType))
+//    } )
+    val deserializer = deserializerFor(schema)
     new ExpressionEncoder[ColumnBatch](serializer, deserializer, ClassTag(cls))
   }
 
-  private def serializerFor(inputObject: Expression): Expression = {
-    // TODO: probably wrong, but does not seem to be used atm
+  private def serializerFor(schema: StructType, inputObject: Expression): Expression = {
     val batch = GetExternalColumnBatch(inputObject)
-    GetExternalColumn(batch)
+    val fields = schema.fields.zipWithIndex.map { case (field, index) =>
+      GetExternalColumn(index, batch, field.dataType)
+    }
+    CreateArray(fields)
 
 //      val fields = schema.zipWithIndex.flatMap { case (field, index) =>
 //        val input = BoundReference(index, field.dataType, nullable = true)
@@ -199,9 +201,10 @@ object ColumnEncoder {
 //    val arr = schema.zipWithIndex.map { case (_, i) =>
 //      deserializerFor(GetStructField(input, i))
 //    }
-    val arr = schema.zipWithIndex.map { case (_, i) =>
+    val arr = schema.zipWithIndex.map { case (field, i) =>
 //      GetColumnByOrdinal(i, ObjectType(classOf[TColumn]))
-        CreateExternalColumn(GetColumnByOrdinal(i, ObjectType(classOf[TColumn])) :: Nil)
+//        CreateExternalColumn(GetColumnByOrdinal(i, ObjectType(classOf[TColumn])) :: Nil)
+        CreateExternalColumn(BoundReference(i, field.dataType, nullable = true))
 //      deserializerFor(GetStructField(schema, i))
     }
     CreateExternalColumnBatch(arr)

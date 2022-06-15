@@ -1,6 +1,8 @@
 package org.apache.spark.sql.column.expressions
 
+import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.column.{ColumnBatch, TColumn}
+import org.apache.spark.sql.types.{ArrayType, DataType}
 
 import scala.reflect.ClassTag.Nothing
 
@@ -10,6 +12,8 @@ class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
   protected def this() = this(new Array[Any](0))
 
   def this(size: Int) = this(new Array[Any](size))
+
+  def this(arrayData: ArrayData) = this(arrayData.array)
 
   /** Number of elements in the Column */
   override def length: Int = values.length

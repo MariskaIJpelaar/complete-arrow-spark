@@ -3,13 +3,13 @@ package org.apache.spark.sql.column.expressions.objects
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.Block.BlockHelper
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, FalseLiteral}
-import org.apache.spark.sql.catalyst.expressions.{Expression, NonSQLExpression, UnaryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Expression, LeafExpression, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.column.expressions.{GenericColumn, GenericColumnBatch}
 import org.apache.spark.sql.column.{ColumnBatch, TColumn}
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.types.{DataType, ObjectType}
 
-case class CreateExternalColumn(children: Seq[Expression]) extends Expression with NonSQLExpression {
+case class CreateExternalColumn(child: Expression) extends UnaryExpression with NonSQLExpression {
   // TODO: better
   override def toString(): String = "CreateExternalColumn"
 
@@ -25,28 +25,32 @@ case class CreateExternalColumn(children: Seq[Expression]) extends Expression wi
     val genericColumnClass = classOf[GenericColumn].getName
     val values = ctx.freshName("values")
 
-    val childrenCodes = children.zipWithIndex.map { case (e, i) =>
-      val eval = e.genCode(ctx)
+    val eval = child.genCode(ctx)
+    val childCode =
       s"""
          |${eval.code}
-         |if (${eval.isNull}) {
-         |  $values[$i] = null;
-         |} else {
-         |  $values[$i] = ${eval.value};
-         |}
        """.stripMargin
-    }
+//    val childrenCodes = children.zipWithIndex.map { case (e, i) =>
+//      val eval = e.genCode(ctx)
+//      s"""
+//         |${eval.code}
+//         |if (${eval.isNull}) {
+//         |  $values[$i] = null;
+//         |} else {
+//         |  $values[$i] = ${eval.value};
+//         |}
+//       """.stripMargin
+//    }
 
     val childrenCode = ctx.splitExpressionsWithCurrentInputs(
-      expressions = childrenCodes,
+      expressions = childCode :: Nil,
       funcName = "createExternalColumn",
       extraArguments = "Object[]" -> values :: Nil)
 
     val code =
       code"""
-            |java.lang.Object[] $values = new java.lang.Object[${children.size}];
             |$childrenCode
-            |final $columnClass ${ev.value} = new $genericColumnClass($values);
+            |final $columnClass ${ev.value} = new $genericColumnClass(${eval.value});
        """.stripMargin
 
     ev.copy(code = code, isNull = FalseLiteral)
@@ -54,7 +58,7 @@ case class CreateExternalColumn(children: Seq[Expression]) extends Expression wi
 
   override def dataType: DataType = ObjectType(classOf[TColumn])
 
-  override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): Expression = copy(children = newChildren)
+  override protected def withNewChildInternal(newChild: Expression): Expression = copy(child = newChild)
 }
 
 /** Constructs a new external column, using the result of evaluating the specified
@@ -109,7 +113,7 @@ case class CreateExternalColumnBatch(children: Seq[Expression]) extends Expressi
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): CreateExternalColumnBatch = copy(children = newChildren)
 }
 
-case class GetExternalColumn(child: Expression) extends UnaryExpression with NonSQLExpression {
+case class GetExternalColumn(index: Int, child: Expression, dataType: DataType) extends UnaryExpression with NonSQLExpression {
   override def nullable: Boolean = false
 
   override protected def withNewChildInternal(newChild: Expression): Expression = copy(child = newChild)
@@ -135,7 +139,7 @@ case class GetExternalColumn(child: Expression) extends UnaryExpression with Non
     ev.copy(code = code, isNull = FalseLiteral)
   }
 
-  override def dataType: DataType = ObjectType(classOf[TColumn])
+  //  override def dataType: DataType = ObjectType(classOf[TColumn])
 }
 
 
