@@ -47,10 +47,17 @@ case class CreateExternalColumn(child: Expression) extends UnaryExpression with 
       funcName = "createExternalColumn",
       extraArguments = "Object[]" -> values :: Nil)
 
+    val tmp = ctx.freshName("tmp")
+
     val code =
       code"""
             |$childrenCode
-            |final $columnClass ${ev.value} = new $genericColumnClass(${eval.value});
+            |$genericColumnClass $tmp;
+            |if (${eval.isNull})
+            |   $tmp = new $genericColumnClass();
+            |else
+            |   $tmp = new $genericColumnClass(${eval.value});
+            |final $columnClass ${ev.value} = $tmp;
        """.stripMargin
 
     ev.copy(code = code, isNull = FalseLiteral)

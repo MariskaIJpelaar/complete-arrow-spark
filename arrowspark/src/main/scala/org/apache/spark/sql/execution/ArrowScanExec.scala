@@ -28,6 +28,8 @@ trait ArrowFileFormat extends FileFormat {
                                      filters: Seq[Filter],
                                      options: Map[String, String],
                                      hadoopConf: Configuration) : PartitionedFile => Iterator[ArrowColumnarBatchRow]
+
+  override def supportBatch(sparkSession: SparkSession, dataSchema: StructType): Boolean = true
 }
 
 case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with Logging {
@@ -57,26 +59,29 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
 
   /** Takes the first n columns */
   override def executeTake(n: Int): Array[InternalRow] = {
-    if (n == 0)
-      return new Array[ColumnarBatchRow](0).asInstanceOf[Array[InternalRow]]
+    val rdd = execute()
+    rdd.take(n)
 
-    val childRDD = execute().mapPartitionsInternal { res =>
-      ArrowColumnarBatchRow.encode(n, res.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
-    }
-
-    val buf = new ArrayBuffer[InternalRow]
-    val totalParts = childRDD.partitions.length
-
-    // read all partitions
-    val res = sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) =>
-      if (it.hasNext) it.next() else Array.emptyByteArray, 0 until totalParts)
-
-    res.indices foreach { i =>
-      val partitions: Iterator[InternalRow] = ArrowColumnarBatchRow.decode(res(i))
-      buf ++= partitions.toArray[InternalRow]
-    }
-
-    buf.toArray
+//    if (n == 0)
+//      return new Array[ColumnarBatchRow](0).asInstanceOf[Array[InternalRow]]
+//
+//    val childRDD = execute().mapPartitionsInternal{ res =>
+//      ArrowColumnarBatchRow.encode(n, res.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
+//    }
+//
+//    val buf = new ArrayBuffer[InternalRow]
+//    val totalParts = childRDD.partitions.length
+//
+//    // read all partitions
+//    val res = sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) =>
+//      if (it.hasNext) it.next() else Array.emptyByteArray, 0 until totalParts)
+//
+//    res.indices foreach { i =>
+//      val partitions: Iterator[InternalRow] = ArrowColumnarBatchRow.decode(res(i))
+//      buf ++= partitions.toArray[InternalRow]
+//    }
+//
+//    buf.toArray
   }
 
   // copied from org/apache/spark/sql/execution/DataSourceScanExec.scala

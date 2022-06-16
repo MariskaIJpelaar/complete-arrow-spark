@@ -63,7 +63,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
 
   override def next(): ArrowColumnarBatchRow = {
     if (!hasNext)
-      throw new RuntimeException("[IntegerParquetReaderIterator] has no next")
+      throw new RuntimeException("[ParquetReaderIterator] has no next")
 
     val colReader = new ColumnReadStoreImpl(pageReadStore, new DumpGroupConverter(),
       parquetSchema, reader.getFileMetaData.getCreatedBy)
@@ -72,7 +72,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
     val vectors = vectorSchemaRoot.getFieldVectors
 
     if (pageReadStore.getRowCount > Integer.MAX_VALUE)
-      throw new RuntimeException(s"[IntegerParquetReaderIterator] file '${file.filePath}' has too many rows" )
+      throw new RuntimeException(s"[ParquetReaderIterator] file '${file.filePath}' has too many rows" )
 
     val rows = pageReadStore.getRowCount.toInt
 

@@ -4,6 +4,7 @@ import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.execution.QueryExecutionException
@@ -11,6 +12,7 @@ import org.apache.spark.util.NextIterator
 import org.apache.spark.{Partition, SparkUpgradeException, TaskContext}
 
 import java.io.{Closeable, FileNotFoundException, IOException}
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
 
@@ -36,6 +38,30 @@ class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkS
 
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
+
+  /** Note: copied and adapted from RDD.scala
+   * Currently, we kind of ignore the num until we can specify a working meaning...
+   * Fixme: perhaps implement a reader that only reads the first x columns? */
+  override def take(num: Int): Array[T] = {
+    if (num == 0)
+      new Array[T](0)
+
+    val childRDD = this.mapPartitionsInternal{
+      res => ArrowColumnarBatchRow.encode(num, res.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
+    }
+
+    val buf = new ArrayBuffer[T]
+    val totalParts = this.partitions.length
+    val parts = 0 until totalParts
+    val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) =>
+      if (it.hasNext) it.next() else Array.emptyByteArray, parts)
+
+    res.foreach { item =>
+      val parts = ArrowColumnarBatchRow.decode(item)
+      buf ++= parts.toArray.asInstanceOf[Array[T]]
+    }
+    buf.toArray
+  }
 
   override def compute(split: Partition, context: TaskContext): Iterator[T] = {
     val iterator = new Iterator[Object] with AutoCloseable {

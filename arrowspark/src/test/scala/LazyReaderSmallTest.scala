@@ -113,18 +113,18 @@ class LazyReaderSmallTest extends AnyFunSuite {
       .withExtensions(SpArrowExtensionWrapper.injectArrowFileSourceStrategy).getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
 
-    val temp_list = new util.ArrayList[StructField](2)
-    temp_list.add(StructField("numA", IntegerType, nullable = true))
-    temp_list.add(StructField("numB", IntegerType, nullable = true))
-    val temp = RowEncoder(StructType(temp_list))
+//    val temp_list = new util.ArrayList[StructField](2)
+//    temp_list.add(StructField("numA", IntegerType, nullable = true))
+//    temp_list.add(StructField("numB", IntegerType, nullable = true))
+//    val temp = RowEncoder(StructType(temp_list))
 
     // Construct DataFrame
     // TODO: make a dataset (ArrowColumnEncoder) specifically for ArrowColumns
     val df: ColumnDataset = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain("formatted")
-    val plan = df.queryExecution.executedPlan.execute()
+//    val plan = df.queryExecution.executedPlan.execute()
 
-    val firstOfPlan = plan.first()
+//    val firstOfPlan = plan.first()
     checkFirst(df.first())
     // Perform ColumnarSort
     df.sort("numA", "numB")
