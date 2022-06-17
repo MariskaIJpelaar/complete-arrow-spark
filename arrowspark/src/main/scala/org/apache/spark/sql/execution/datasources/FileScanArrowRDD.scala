@@ -4,7 +4,6 @@ import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.execution.QueryExecutionException
@@ -189,6 +188,8 @@ class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkS
       }
 
       override def next(): Object = {
+        // TODO: perhaps we should do a while here?
+        // At least: we seem only to get One partition, so perhaps, we should also have one result?
         val nextElement = currentIterator.get.next()
         incTaskInputMetricsBytesRead()
         nextElement match {
