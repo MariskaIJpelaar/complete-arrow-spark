@@ -103,9 +103,6 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
-    // Compute answer
-    computeAnswer()
-
     val spark = SparkSession.builder().appName("LazyReaderSmallTest")
       .config("spark.memory.offHeap.enabled", "true")
       .config("spark.memory.offHeap.size", "3048576")
@@ -129,6 +126,9 @@ class LazyReaderSmallTest extends AnyFunSuite {
     // Perform ColumnarSort
     df.sort("numA", "numB")
     df.explain("formatted")
+
+    // Compute answer
+    computeAnswer()
 
     // Check if result is equal to our computed table
     checkAnswer(df.collect().asInstanceOf[Array[ValueVector]])

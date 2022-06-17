@@ -131,7 +131,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
         } else {
           Seq.empty
         }
-      }
+      }.sortBy(_.filePath)
     }.sortBy(_.length)(implicitly[Ordering[Long]].reverse)
 
     val partitions =
