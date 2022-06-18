@@ -7,12 +7,12 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.execution.QueryExecutionException
+import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
 import org.apache.spark.{Partition, SparkUpgradeException, TaskContext}
 
 import java.io.{Closeable, FileNotFoundException, IOException}
 import scala.collection.mutable.ArrayBuffer
-import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
 
 /**
@@ -27,13 +27,11 @@ import scala.reflect.runtime.universe._
  * @param sparkSession the SparkSession associated with this RDD
  * @param readFunction function to read in a PartitionedArrowFile and convert it to an Iterator of Array[ValueVector]
  * @param filePartitions the partitions to operate on
- * @tparam T the RDD primitive data type (as defined by the Scala Standard)
  */
-class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkSession,
+class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
                                      readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow],
                                      @transient val filePartitions: Seq[FilePartition])
-                                    (implicit tag: TypeTag[T])
-                                     extends RDD[T](sparkSession.sparkContext, Nil) {
+                                     extends RDD[ArrowColumnarBatchRow](sparkSession.sparkContext, Nil) {
 
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
@@ -41,29 +39,30 @@ class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkS
   /** Note: copied and adapted from RDD.scala
    * Currently, we kind of ignore the num until we can specify a working meaning...
    * Fixme: perhaps implement a reader that only reads the first x columns? */
-  override def take(num: Int): Array[T] = {
+  override def take(num: Int): Array[ArrowColumnarBatchRow] = {
     if (num == 0)
-      new Array[T](0)
+      new Array[ArrowColumnVector](0)
 
-    val childRDD = this.mapPartitionsInternal{
-      res => ArrowColumnarBatchRow.encode(num, res.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
-    }
+    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(num, res) }
 
-    val buf = new ArrayBuffer[T]
     val totalParts = this.partitions.length
     val parts = 0 until totalParts
-    val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) =>
-      if (it.hasNext) it.next() else Array.emptyByteArray, parts)
 
-    res.foreach { item =>
-      val parts = ArrowColumnarBatchRow.decode(item)
-      buf ++= parts.toArray.asInstanceOf[Array[T]]
-    }
-    buf.toArray
+
+    val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
+      if (!it.hasNext) Array.emptyByteArray else it.next()
+    }, parts)
+
+
+    // TODO: fix corrupt stream...
+    res.map(result => {
+      val cols = ArrowColumnarBatchRow.take(num, ArrowColumnarBatchRow.decode(result))
+      new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
+    })
   }
 
-  override def compute(split: Partition, context: TaskContext): Iterator[T] = {
-    val iterator = new Iterator[Object] with AutoCloseable {
+  override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
+    val iterator = new Iterator[ArrowColumnarBatchRow] with AutoCloseable {
       private val inputMetrics = context.taskMetrics().inputMetrics
       private val existingBytesRead = inputMetrics.bytesRead
 
@@ -188,9 +187,11 @@ class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkS
 //        (currentIterator.isDefined && currentIterator.get.hasNext) || nextIterator()
       }
 
-      override def next(): Object = {
+      override def next(): ArrowColumnarBatchRow = {
         val array = new ArrayBuffer[ArrowColumnarBatchRow]()
         nextIterator()
+
+        var numFields = 0
 
         while (currentIterator.isDefined && currentIterator.get.hasNext) {
           val nextElement = currentIterator.get.next()
@@ -199,11 +200,12 @@ class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkS
             case partition: ArrowColumnarBatchRow =>
               inputMetrics.incRecordsRead(partition.numFields)
               array += partition
+              numFields = partition.numFields
           }
         }
 
-        // TODO: instead of sending Array, combine the batches :)
-        array.toArray
+        val cols = ArrowColumnarBatchRow.take(numFields, array.toIterator)
+        new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
       }
 
       override def close(): Unit = {
@@ -216,7 +218,7 @@ class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkS
     // Register an on-task-completion callback to close the input stream
     context.addTaskCompletionListener[Unit](_ => iterator.close())
 
-    iterator.asInstanceOf[Iterator[T]]
+    iterator
   }
 
 

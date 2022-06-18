@@ -97,7 +97,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
 
     vectorSchemaRoot.setRowCount(rows)
     val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
-    new ArrowColumnarBatchRow(Array.tabulate(data.length)(i => new ArrowColumnVector(data(i))))
+    new ArrowColumnarBatchRow(Array.tabulate(data.length)(i => new ArrowColumnVector(data(i))), rows)
   }
 }
 

@@ -2,7 +2,9 @@ package org.apache.spark.sql.column
 
 import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
-import org.apache.arrow.vector.{FieldVector, VectorSchemaRoot}
+import org.apache.arrow.vector.{FieldVector, VectorSchemaRoot, ZeroVector}
+import org.apache.spark.SparkEnv
+import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.types.{DataType, Decimal}
@@ -14,7 +16,7 @@ import java.io._
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
-class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector]) extends InternalRow with AutoCloseable with Serializable {
+class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val length: Long) extends InternalRow with AutoCloseable with Serializable {
   /** Option 1: batch is each column concatenated to make a big 1D Array */
 //override def numFields: Int = sizes.sum
 //  private lazy val sizes: Array[Int] = columns.map( column => column.getValueVector.getValueCount )
@@ -92,7 +94,7 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
-    })
+    }, length)
   }
 
   override def close(): Unit = columns foreach(column => column.close())
@@ -100,6 +102,42 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 
 object ArrowColumnarBatchRow {
   private case class IndexPair(rowIndex: Int, colIndex: Int)
+
+  /**
+   * Returns the merged arrays from multiple ArrowColumnarBatchRows
+   * @param n the number of columns to take
+   * @param batches batches to create array from
+   * @return array of merged columns
+   */
+  def take(n: Int, batches: Iterator[ArrowColumnarBatchRow]): Array[ArrowColumnVector] = {
+    if (!batches.hasNext)
+      return Array.tabulate[ArrowColumnVector](n)( i => new ArrowColumnVector( new ZeroVector(i.toString) ) )
+
+    val first = batches.next()
+    val array = Array.tabulate[ArrowColumnVector](n) { i =>
+      val column = first.columns(i)
+      val vector = column.getValueVector
+      val allocator = vector.getAllocator
+      val tp = vector.getTransferPair(allocator)
+
+      tp.transfer()
+      new ArrowColumnVector(tp.getTo)
+    }
+
+    // Note: until we get any problems, we are going to assume the batches are in-order :)
+    var size = first.length
+
+    batches.foreach { batch =>
+      (array, batch.columns.slice(0, n)).zipped foreach { case (output, input) =>
+        if (size + batch.length > Integer.MAX_VALUE)
+          throw new RuntimeException("[ArrowColumnarBatchRow::take() are too big to be combined!")
+        output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
+        size += batch.length
+      }
+    }
+
+    array
+  }
 
   /**  Note: similar to getByteArrayRdd(...)
    * Encodes the first n columns of a series of ArrowColumnarBatchRows
@@ -109,10 +147,14 @@ object ArrowColumnarBatchRow {
    * based on the known schema and populated data over and over into the same VectorSchemaRoot
    * in a stream of batches rather than creating a new VectorSchemaRoot instance each time"
    * source: https://arrow.apache.org/docs/6.0/java/vector_schema_root.html */
-  def encode(n: Int, iter: Iterator[ArrowColumnarBatchRow]): Iterator[Array[Byte]] = {
+  def encode(n: Int, iter: Iterator[org.apache.spark.sql.column.ArrowColumnarBatchRow]): Iterator[Array[Byte]] = {
     new NextIterator[Array[Byte]] {
       private var root: Option[VectorSchemaRoot] = None
       private lazy val bos = new ByteArrayOutputStream()
+      private lazy val oos = {
+        val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+        new ObjectOutputStream(codec.compressedOutputStream(bos))
+      }
       private var writer: Option[ArrowStreamWriter] = None
 
       private def init(first: ArrowColumnarBatchRow): Unit = {
@@ -131,7 +173,9 @@ object ArrowColumnarBatchRow {
           return null
         }
 
-        val batch = iter.next()
+        val batch: org.apache.spark.sql.column.ArrowColumnarBatchRow = iter.next()
+        oos.writeLong(batch.length)
+
         if (root.isEmpty || writer.isEmpty)
           init(batch)
         else
@@ -142,6 +186,7 @@ object ArrowColumnarBatchRow {
       }
 
       override protected def close(): Unit = {
+        oos.close()
         if (writer.isDefined)
           writer.get.end()
         bos.close()
@@ -153,11 +198,17 @@ object ArrowColumnarBatchRow {
   def decode(bytes: Array[Byte]): Iterator[ArrowColumnarBatchRow] = {
     new NextIterator[ArrowColumnarBatchRow] {
       private lazy val bis = new ByteArrayInputStream(bytes)
+      private lazy val ois = {
+        val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+        new ObjectInputStream(codec.compressedInputStream(bis))
+      }
       private lazy val allocator = new RootAllocator()
       private lazy val reader = new ArrowStreamReader(bis, allocator)
 
 
       override protected def getNext(): ArrowColumnarBatchRow = {
+        val length = ois.readLong()
+
         val hasNext = reader.loadNextBatch()
         if (!hasNext) {
           finished = true
@@ -171,10 +222,11 @@ object ArrowColumnarBatchRow {
 
           tp.transfer()
           new ArrowColumnVector(tp.getTo)
-        }).toArray)
+        }).toArray, length)
       }
 
       override protected def close(): Unit = {
+        ois.close()
         reader.close()
         bis.close()
       }

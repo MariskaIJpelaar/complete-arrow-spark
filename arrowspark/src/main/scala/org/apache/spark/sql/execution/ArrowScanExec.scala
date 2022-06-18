@@ -11,12 +11,8 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.sources.{BaseRelation, Filter}
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.vectorized.ColumnarBatchRow
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
-import scala.reflect.ClassTag
-import scala.reflect.runtime.universe.TypeTag
 
 
 trait ArrowFileFormat extends FileFormat {
@@ -92,11 +88,9 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
   }
 
   // copied and edited from org/apache/spark/sql/execution/DataSourceScanExec.scala
-  private def createFileScanArrowRDD[T: ClassTag](
-                                                   readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
-                                                   selectedPartitions: Array[PartitionDirectory],
-                                                   fsRelation: HadoopFsRelation)
-      (implicit tag: TypeTag[T]) : FileScanArrowRDD[T] = {
+  private def createFileScanArrowRDD(readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
+                                     selectedPartitions: Array[PartitionDirectory],
+                                     fsRelation: HadoopFsRelation): FileScanArrowRDD = {
     val openCostInBytes = fsRelation.sparkSession.sessionState.conf.filesOpenCostInBytes
     val maxSplitBytes = FilePartition.maxSplitBytes(fsRelation.sparkSession, selectedPartitions)
     logInfo(s"Planning scan with bin packing, max size: $maxSplitBytes bytes, " +
@@ -137,15 +131,13 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     val partitions =
       FilePartition.getFilePartitions(fs.relation.sparkSession, splitFiles, maxSplitBytes)
 
-    new FileScanArrowRDD[T](fsRelation.sparkSession, readFunc, partitions)
+    new FileScanArrowRDD(fsRelation.sparkSession, readFunc, partitions)
   }
 
   // copied and edited from org/apache/spark/sql/execution/DataSourceScanExec.scala
-  private def createBucketFileScanArrowRDD[T: ClassTag](
-                                                         readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
-                                                         numBuckets: Int,
-                                                         selectedPartitions: Array[PartitionDirectory])
-      (implicit tag: TypeTag[T]) : FileScanArrowRDD[T]  = {
+  private def createBucketFileScanArrowRDD(readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
+                                           numBuckets: Int,
+                                           selectedPartitions: Array[PartitionDirectory]): FileScanArrowRDD  = {
     logInfo(s"Planning with $numBuckets buckets")
     val filesGroupedToBuckets =
       selectedPartitions.flatMap { p =>
@@ -183,7 +175,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
       }
     }
 
-    new FileScanArrowRDD[T](fs.relation.sparkSession, readFunc, filePartitions)
+    new FileScanArrowRDD(fs.relation.sparkSession, readFunc, filePartitions)
   }
 
   // copied from org/apache/spark/sql/execution/DataSourceScanExec.scala
@@ -242,9 +234,9 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
       fs.relation.options,  fs.relation.sparkSession.sessionState.newHadoopConfWithOptions(fs.relation.options)
     )
     if (fs.bucketedScan)
-      createBucketFileScanArrowRDD(root, fs.relation.bucketSpec.get.numBuckets, dynamicallySelectedPartitions)
+      createBucketFileScanArrowRDD(root, fs.relation.bucketSpec.get.numBuckets, dynamicallySelectedPartitions).asInstanceOf[RDD[InternalRow]]
     else
-      createFileScanArrowRDD(root, dynamicallySelectedPartitions, fs.relation)
+      createFileScanArrowRDD(root, dynamicallySelectedPartitions, fs.relation).asInstanceOf[RDD[InternalRow]]
   }
 
   override def relation: BaseRelation = fs.relation
