@@ -184,18 +184,26 @@ class FileScanArrowRDD[T: ClassTag] (@transient private val sparkSession: SparkS
         // InterruptibleIterator, but we inline it here instead of wrapping the iterator in order
         // to avoid performance overhead.
         context.killTaskIfInterrupted()
-        (currentIterator.isDefined && currentIterator.get.hasNext) || nextIterator()
+        files.hasNext
+//        (currentIterator.isDefined && currentIterator.get.hasNext) || nextIterator()
       }
 
       override def next(): Object = {
-        // TODO: perhaps we should do a while here?
-        // At least: we seem only to get One partition, so perhaps, we should also have one result?
-        val nextElement = currentIterator.get.next()
-        incTaskInputMetricsBytesRead()
-        nextElement match {
-          case partition: ArrowColumnarBatchRow => inputMetrics.incRecordsRead(partition.numFields)
+        val array = new ArrayBuffer[ArrowColumnarBatchRow]()
+        nextIterator()
+
+        while (currentIterator.isDefined && currentIterator.get.hasNext) {
+          val nextElement = currentIterator.get.next()
+          incTaskInputMetricsBytesRead()
+          nextElement match {
+            case partition: ArrowColumnarBatchRow =>
+              inputMetrics.incRecordsRead(partition.numFields)
+              array += partition
+          }
         }
-        nextElement
+
+        // TODO: instead of sending Array, combine the batches :)
+        array.toArray
       }
 
       override def close(): Unit = {
