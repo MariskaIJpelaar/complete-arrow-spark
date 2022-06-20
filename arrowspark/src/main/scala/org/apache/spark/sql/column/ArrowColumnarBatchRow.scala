@@ -129,6 +129,7 @@ object ArrowColumnarBatchRow {
 
     batches.foreach { batch =>
       (array, batch.columns.slice(0, n)).zipped foreach { case (output, input) =>
+        // TODO: it could be that the valuevectoris not updated...
         if (size + batch.length > Integer.MAX_VALUE)
           throw new RuntimeException("[ArrowColumnarBatchRow::take() are too big to be combined!")
         output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
@@ -173,8 +174,8 @@ object ArrowColumnarBatchRow {
       oos.writeLong(batch.length)
     }
 
-    oos.flush()
     writer.close()
+    oos.flush()
     oos.close()
     Iterator(bos.toByteArray)
   }

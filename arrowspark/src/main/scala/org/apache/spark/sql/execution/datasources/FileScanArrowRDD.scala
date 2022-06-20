@@ -12,7 +12,6 @@ import org.apache.spark.util.NextIterator
 import org.apache.spark.{Partition, SparkUpgradeException, TaskContext}
 
 import java.io.{Closeable, FileNotFoundException, IOException}
-import scala.collection.mutable.ArrayBuffer
 import scala.reflect.runtime.universe._
 
 /**
@@ -181,29 +180,37 @@ class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
         // InterruptibleIterator, but we inline it here instead of wrapping the iterator in order
         // to avoid performance overhead.
         context.killTaskIfInterrupted()
-        files.hasNext
-//        (currentIterator.isDefined && currentIterator.get.hasNext) || nextIterator()
+//        files.hasNext
+        (currentIterator.isDefined && currentIterator.get.hasNext) || nextIterator()
       }
 
       override def next(): ArrowColumnarBatchRow = {
-        val array = new ArrayBuffer[ArrowColumnarBatchRow]()
-        nextIterator()
-
-        var numFields = 0
-
-        while (currentIterator.isDefined && currentIterator.get.hasNext) {
-          val nextElement = currentIterator.get.next()
-          incTaskInputMetricsBytesRead()
-          nextElement match {
-            case partition: ArrowColumnarBatchRow =>
-              inputMetrics.incRecordsRead(partition.numFields)
-              array += partition
-              numFields = partition.numFields
-          }
+        val nextElement = currentIterator.get.next()
+        incTaskInputMetricsBytesRead()
+        nextElement match {
+          case partition: ArrowColumnarBatchRow =>
+            inputMetrics.incRecordsRead(partition.numFields)
+            partition
         }
 
-        val cols = ArrowColumnarBatchRow.take(numFields, array.toIterator)
-        new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
+//        val array = new ArrayBuffer[ArrowColumnarBatchRow]()
+//        nextIterator()
+//
+//        var numFields = 0
+//
+//        while (currentIterator.isDefined && currentIterator.get.hasNext) {
+//          val nextElement = currentIterator.get.next()
+//          incTaskInputMetricsBytesRead()
+//          nextElement match {
+//            case partition: ArrowColumnarBatchRow =>
+//              inputMetrics.incRecordsRead(partition.numFields)
+//              array += partition
+//              numFields = partition.numFields
+//          }
+//        }
+//
+//        val cols = ArrowColumnarBatchRow.take(numFields, array.toIterator)
+//        new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
       }
 
       override def close(): Unit = {
