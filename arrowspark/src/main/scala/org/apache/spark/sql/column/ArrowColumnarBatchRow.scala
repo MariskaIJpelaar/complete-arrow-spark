@@ -16,7 +16,7 @@ import java.io._
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
-class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val length: Long) extends InternalRow with AutoCloseable with Serializable {
+class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   /** Option 1: batch is each column concatenated to make a big 1D Array */
 //override def numFields: Int = sizes.sum
 //  private lazy val sizes: Array[Int] = columns.map( column => column.getValueVector.getValueCount )
@@ -102,7 +102,7 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
-    }, length)
+    }, numRows)
   }
 
   override def close(): Unit = columns foreach(column => column.close())
@@ -125,10 +125,10 @@ object ArrowColumnarBatchRow {
     }
 
     val first = batches.next()
-    if (numCols.isEmpty && first.length > Integer.MAX_VALUE)
+    if (numCols.isEmpty && first.numRows > Integer.MAX_VALUE)
       throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
 
-    val N = if (numCols.isDefined) numCols.get else first.length.toInt
+    val N = if (numCols.isDefined) numCols.get else first.numFields
     val array = Array.tabulate[ArrowColumnVector](N) { i =>
       val column = first.columns(i)
       val vector = column.getValueVector
@@ -143,16 +143,16 @@ object ArrowColumnarBatchRow {
     }
 
     // Note: until we get any problems, we are going to assume the batches are in-order :)
-    var size = first.length
+    var size = first.numRows
 
     batches.foreach { batch =>
       val columns = if (numCols.isDefined) batch.columns.slice(0, numCols.get) else batch.columns
       (array, columns).zipped foreach { case (output, input) =>
         // TODO: it could be that the valuevector is not updated...
-        if (size + batch.length > Integer.MAX_VALUE)
+        if (size + batch.numRows > Integer.MAX_VALUE)
           throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
         output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
-        size += batch.length
+        size += batch.numRows
       }
     }
 
@@ -173,17 +173,25 @@ object ArrowColumnarBatchRow {
     if (!iter.hasNext)
       return Iterator(Array.emptyByteArray)
 
-    val left = numRows
-    // TODO: keep track of how many rows are encoded and stop on time
+    // how many rows are left to read?
+    var left = numRows
 
+    // Prepare first batch
+    // This needs to be done separately as we need the schema for the VectorSchemaRoot
     val first = iter.next()
+    val first_length = first.numRows.min(left.getOrElse(Int.MaxValue).toLong)
+    if (first_length > Integer.MAX_VALUE)
+      throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
     val columns = if (numCols.isDefined) first.columns.slice(0, numCols.get) else first.columns
     val root = VectorSchemaRoot.of(columns.map(column => {
       if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
-      // TODO:
-      column.getValueVector.asInstanceOf[FieldVector]
+      val vector = column.getValueVector
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.splitAndTransfer(0, first_length.toInt)
+      tp.getTo.asInstanceOf[FieldVector]
     }).toSeq: _*)
 
+    // Setup the streams and writers
     val bos = new ByteArrayOutputStream()
     val oos = {
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
@@ -191,22 +199,26 @@ object ArrowColumnarBatchRow {
     }
     val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
     writer.start()
-    writer.writeBatch()
-    if (numRows.isDefined)
-      oos.writeLong(numRows.get)
-    else
-      oos.writeLong(first.length)
 
-    while (iter.hasNext) {
+    // write first batch
+    writer.writeBatch()
+    oos.writeLong(first_length)
+    if (left.isDefined) left = Some((left.get - first_length).toInt)
+
+
+    // while we still have some reading to do
+    while (iter.hasNext && (left.isEmpty || left.get > 0)) {
       val batch = iter.next()
-      batch.copyNToRoot(root, numCols, numRows)
+      val batch_length = batch.numRows.min(left.getOrElse(Int.MaxValue).toLong)
+      if (batch_length > Integer.MAX_VALUE)
+        throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
+      batch.copyNToRoot(root, numCols, numRows = Some(batch_length.toInt))
       writer.writeBatch()
-      if (numRows.isDefined)
-        oos.writeLong(numRows.get)
-      else
-        oos.writeLong(batch.length)
+      oos.writeLong(batch_length)
+      if (left.isDefined) left = Some((left.get-batch_length).toInt)
     }
 
+    // clean up and return the singleton-iterator
     writer.close()
     oos.flush()
     oos.close()
