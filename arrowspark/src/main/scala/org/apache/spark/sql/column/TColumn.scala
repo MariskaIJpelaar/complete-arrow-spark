@@ -27,7 +27,7 @@ object TColumn {
           columns += TColumn.empty
 
         if (!batch.isNullAt(i))
-          columns(i) = columns(i).concat(batch.get(i).get)
+          columns(i) = columns(i).concat(batch.getColumn(i).get)
       }
     }
 
@@ -97,6 +97,18 @@ trait TColumn extends Serializable {
   }
 
   /* ---------------------- utility methods for Scala ---------------------- */
+  /** Returns an iterator over de values of the columns */
+  def getIterator: Iterator[Option[Any]] = new Iterator[Option[Any]] {
+    private var index = 0
+    override def hasNext: Boolean = index < length
+
+    override def next(): Option[Any] = {
+      val value = get(index)
+      index += 1
+      value
+    }
+  }
+
   /** Return a Scala Seq representing the Column.
    *  Elements are placed in the same order in the Seq */
   def toSeq: Seq[Option[Any]] = Seq.tabulate(length)( i => get(i) )

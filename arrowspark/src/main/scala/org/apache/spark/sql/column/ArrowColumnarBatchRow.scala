@@ -77,10 +77,18 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
   override def update(i: Int, value: Any): Unit = throw new UnsupportedOperationException()
   override def setNullAt(i: Int): Unit = update(i, null)
 
-  def copyNToRoot(n: Int, root: VectorSchemaRoot): Unit = {
-    for ( (vec, col) <- root.getFieldVectors.slice(0, n) zip columns.slice(0, n)) {
+  def copyNToRoot(root: VectorSchemaRoot, numCols: Option[Int] = None, numRows: Option[Int] = None): Unit = {
+    val fieldVecs = if (numCols.isDefined) root.getFieldVectors.slice(0, numCols.get) else root.getFieldVectors.slice(0, root.getFieldVectors.size())
+    val cols = if (numCols.isDefined) columns.slice(0, numCols.get) else columns
+    for ( (vec, col) <- fieldVecs zip cols) {
       vec.reset()
-      vec.copyFrom(0, 0, col.getValueVector)
+
+      val tp = col.getValueVector.getTransferPair(col.getValueVector.getAllocator)
+      if (numRows.isDefined)
+        tp.splitAndTransfer(0, numRows.get)
+      else
+        tp.transfer()
+      vec.copyFrom(0, 0, tp.getTo)
     }
   }
 
@@ -105,22 +113,32 @@ object ArrowColumnarBatchRow {
 
   /**
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
-   * @param n the number of columns to take
+   * @param numCols the number of columns to take
    * @param batches batches to create array from
    * @return array of merged columns
    */
-  def take(n: Int, batches: Iterator[ArrowColumnarBatchRow]): Array[ArrowColumnVector] = {
-    if (!batches.hasNext)
-      return Array.tabulate[ArrowColumnVector](n)( i => new ArrowColumnVector( new ZeroVector(i.toString) ) )
+  def take(batches: Iterator[ArrowColumnarBatchRow], numCols: Option[Int] = None, numRows: Option[Int] = None): Array[ArrowColumnVector] = {
+    if (!batches.hasNext) {
+      if (numCols.isDefined)
+        return Array.tabulate[ArrowColumnVector](numCols.get)(i => new ArrowColumnVector( new ZeroVector(i.toString) ) )
+      return new Array[ArrowColumnVector](0)
+    }
 
     val first = batches.next()
-    val array = Array.tabulate[ArrowColumnVector](n) { i =>
+    if (numCols.isEmpty && first.length > Integer.MAX_VALUE)
+      throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
+
+    val N = if (numCols.isDefined) numCols.get else first.length.toInt
+    val array = Array.tabulate[ArrowColumnVector](N) { i =>
       val column = first.columns(i)
       val vector = column.getValueVector
       val allocator = vector.getAllocator
       val tp = vector.getTransferPair(allocator)
 
-      tp.transfer()
+      if (numRows.isDefined)
+        tp.splitAndTransfer(0, numRows.get)
+      else
+        tp.transfer()
       new ArrowColumnVector(tp.getTo)
     }
 
@@ -128,10 +146,11 @@ object ArrowColumnarBatchRow {
     var size = first.length
 
     batches.foreach { batch =>
-      (array, batch.columns.slice(0, n)).zipped foreach { case (output, input) =>
-        // TODO: it could be that the valuevectoris not updated...
+      val columns = if (numCols.isDefined) batch.columns.slice(0, numCols.get) else batch.columns
+      (array, columns).zipped foreach { case (output, input) =>
+        // TODO: it could be that the valuevector is not updated...
         if (size + batch.length > Integer.MAX_VALUE)
-          throw new RuntimeException("[ArrowColumnarBatchRow::take() are too big to be combined!")
+          throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
         output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
         size += batch.length
       }
@@ -141,21 +160,29 @@ object ArrowColumnarBatchRow {
   }
 
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
-   * Encodes the first n columns of a series of ArrowColumnarBatchRows
+   * Encodes the first numRows rows of the first numCols columns of a series of ArrowColumnarBatchRows
    * according to: https://arrow.apache.org/docs/java/ipc.html#writing-and-reading-streaming-format
    *
    * Note: "The recommended usage for VectorSchemaRoot is creating a single VectorSchemaRoot
    * based on the known schema and populated data over and over into the same VectorSchemaRoot
    * in a stream of batches rather than creating a new VectorSchemaRoot instance each time"
    * source: https://arrow.apache.org/docs/6.0/java/vector_schema_root.html */
-  def encode(n: Int, iter: Iterator[org.apache.spark.sql.column.ArrowColumnarBatchRow]): Iterator[Array[Byte]] = {
+  def encode(iter: Iterator[org.apache.spark.sql.column.ArrowColumnarBatchRow],
+             numCols: Option[Int] = None,
+             numRows: Option[Int] = None): Iterator[Array[Byte]] = {
     if (!iter.hasNext)
       return Iterator(Array.emptyByteArray)
 
+    val left = numRows
+    // TODO: keep track of how many rows are encoded and stop on time
+
     val first = iter.next()
-    val root = VectorSchemaRoot.of(first.columns.slice(0, n).map(
-      column => column.getValueVector.asInstanceOf[FieldVector]
-    ).toSeq: _*)
+    val columns = if (numCols.isDefined) first.columns.slice(0, numCols.get) else first.columns
+    val root = VectorSchemaRoot.of(columns.map(column => {
+      if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
+      // TODO:
+      column.getValueVector.asInstanceOf[FieldVector]
+    }).toSeq: _*)
 
     val bos = new ByteArrayOutputStream()
     val oos = {
@@ -165,13 +192,19 @@ object ArrowColumnarBatchRow {
     val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
     writer.start()
     writer.writeBatch()
-    oos.writeLong(first.length)
+    if (numRows.isDefined)
+      oos.writeLong(numRows.get)
+    else
+      oos.writeLong(first.length)
 
     while (iter.hasNext) {
       val batch = iter.next()
-      batch.copyNToRoot(n, root)
+      batch.copyNToRoot(root, numCols, numRows)
       writer.writeBatch()
-      oos.writeLong(batch.length)
+      if (numRows.isDefined)
+        oos.writeLong(numRows.get)
+      else
+        oos.writeLong(batch.length)
     }
 
     writer.close()

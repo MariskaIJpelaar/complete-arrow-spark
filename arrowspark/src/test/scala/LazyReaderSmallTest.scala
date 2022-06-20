@@ -5,9 +5,7 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.encoders.RowEncoder
-import org.apache.spark.sql.column.{ColumnDataFrameReader, ColumnDataset, TColumn}
-import org.apache.spark.sql.types.{IntegerType, StructField, StructType}
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, ColumnBatch, ColumnDataFrame, ColumnDataFrameReader, TColumn}
 import org.apache.spark.sql.util.SpArrowExtensionWrapper
 import org.scalatest.funsuite.AnyFunSuite
 import utils.{MultiIterator, ParquetWriter}
@@ -67,17 +65,34 @@ class LazyReaderSmallTest extends AnyFunSuite {
     })
   }
 
-  def checkFirst(answer: TColumn): Unit = {
-    assert(answer.length == table.size())
+  def checkFirst(answer: ArrowColumnarBatchRow): Unit = {
+    val correct_row = table.get(0)
+    0 until num_cols foreach { i => assert(correct_row.productElement(i).equals(answer.getArray(i).array(0))) }
+  }
 
-    0 until answer.length foreach { i =>
-      val ans = answer.get(i)
-      assert(ans.isDefined)
-      val col = table.get(i).colA
-      assert(ans.get == col)
+  def checkFirst(answer: ColumnBatch): Unit = {
+    val ans_row = answer.getRow(0)
+    val correct_row = table.get(0)
+    assert(ans_row.isDefined)
+    0 until num_cols foreach { i => assert(correct_row.productElement(i).equals(ans_row.get.get(i)))}
+  }
+
+  def checkAnswer(answer: Array[ColumnBatch]): Unit = {
+    val cols = TColumn.fromBatches(answer)
+    assert(cols.length == num_cols)
+
+    val iterators: util.List[util.Iterator[Object]] = new util.ArrayList[util.Iterator[Object]]()
+    iterators.add(table.iterator().asInstanceOf[util.Iterator[Object]])
+    cols.foreach( vec => iterators.add(vec.getIterator.asInstanceOf[util.Iterator[Object]]))
+
+    val zipper: MultiIterator = new MultiIterator(iterators)
+    while (zipper.hasNext) {
+      val next = zipper.next()
+      assert(next.size() == num_cols+1)
+      val row: Row = next.get(0).asInstanceOf[Row]
+      val cols = next.subList(1, next.size())
+      0 until num_cols foreach { i => assert(row.productElement(i).equals(cols.get(i)))}
     }
-
-
   }
 
   def checkAnswer(answer: Array[ValueVector]) : Unit = {
@@ -117,12 +132,14 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Construct DataFrame
     // TODO: make a dataset (ArrowColumnEncoder) specifically for ArrowColumns
-    val df: ColumnDataset = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain("formatted")
-//    val plan = df.queryExecution.executedPlan.execute()
+    val plan = df.queryExecution.executedPlan.execute()
 
-//    val firstOfPlan = plan.first()
+    val firstOfPlan = plan.first()
+    checkFirst(firstOfPlan.asInstanceOf[ArrowColumnarBatchRow])
     checkFirst(df.first())
+    checkAnswer(df.collect())
     // Perform ColumnarSort
     df.sort("numA", "numB")
     df.explain("formatted")

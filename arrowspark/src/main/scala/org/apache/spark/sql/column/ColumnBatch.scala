@@ -1,5 +1,6 @@
 package org.apache.spark.sql.column
 
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.column.expressions.GenericColumnBatch
 
 import scala.collection.mutable
@@ -27,16 +28,19 @@ trait ColumnBatch extends Serializable {
   def length: Int
 
   /** Returns the i-th column. If the value is null, None is returned */
-  def apply(i: Int): Option[TColumn] = get(i)
+  def apply(i: Int): Option[TColumn] = getColumn(i)
 
   /** Returns the i-th column. If the value is null, None is returned */
-  def get(i: Int): Option[TColumn] = { getInternal(i) }
+  def getColumn(i: Int): Option[TColumn] = { getInternal(i) }
 
   /** Returns the i-th column. If the value is null, None is returned */
   protected def getInternal(i: Int): Option[TColumn]
 
   /** Checks whether the value at position i is null */
-  def isNullAt(i: Int): Boolean = get(i).isEmpty
+  def isNullAt(i: Int): Boolean = getColumn(i).isEmpty
+
+  /** Returns the i-th Row */
+  def getRow(i: Int): Option[Row]
 
   override def toString: String = this.mkString("[", ";", "]")
 
@@ -52,7 +56,7 @@ trait ColumnBatch extends Serializable {
 
     if (other eq null) return false
     if (length != other.length) return false
-    (0 until length) forall (i => get(i).equals(other.get(i)))
+    (0 until length) forall (i => getColumn(i).equals(other.getColumn(i)))
   }
 
   override def hashCode(): Int = {
@@ -65,7 +69,7 @@ trait ColumnBatch extends Serializable {
   /* ---------------------- utility methods for Scala ---------------------- */
   /** Return a Scala Seq representing the Column.
    *  Elements are placed in the same order in the Seq */
-  def toSeq: Seq[Option[TColumn]] = Seq.tabulate(length)( i => get(i) )
+  def toSeq: Seq[Option[TColumn]] = Seq.tabulate(length)( i => getColumn(i) )
 
   /** Displays all elements of this sequence in a string */
   def mkString: String = mkString("")
@@ -77,10 +81,10 @@ trait ColumnBatch extends Serializable {
    * using start, end, and separator string */
   def mkString(start: String, sep: String, end: String): String = {
     val builder = new mutable.StringBuilder(start)
-    if (length > 0) builder.append(get(0))
+    if (length > 0) builder.append(getColumn(0))
     1 until length foreach { i =>
       builder.append(sep)
-      builder.append(get(i).toString)
+      builder.append(getColumn(i).toString)
     }
     builder.append(end)
     builder.toString()

@@ -1,8 +1,9 @@
 package org.apache.spark.sql.column.expressions
 
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.expressions.GenericRow
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.column.{ColumnBatch, TColumn}
-import org.apache.spark.sql.types.{ArrayType, DataType}
 
 import scala.reflect.ClassTag.Nothing
 
@@ -63,4 +64,11 @@ class GenericColumnBatch(protected[sql] val columns: Array[TColumn]) extends Col
 
   /** Make a copy of the current object */
   override def copy(): ColumnBatch = this
+
+  /** Returns the i-th Row */
+  override def getRow(i: Int): Option[Row] = {
+    val values = Array[Any](columns.length)
+    columns.zipWithIndex foreach { case (column, index) => values(index) = column.get(i) }
+    Some(new GenericRow(values))
+  }
 }
