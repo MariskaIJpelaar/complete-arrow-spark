@@ -53,8 +53,6 @@ class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
       if (!it.hasNext) Array.emptyByteArray else it.next()
     }, parts)
 
-
-    // TODO: fix corrupt stream...
     res.map(result => {
       val cols = ArrowColumnarBatchRow.take(num, ArrowColumnarBatchRow.decode(result))
       new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
