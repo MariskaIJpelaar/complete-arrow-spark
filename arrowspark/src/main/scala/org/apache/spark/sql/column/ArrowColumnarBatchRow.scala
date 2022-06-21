@@ -4,7 +4,7 @@ import org.apache.arrow.memory.{ArrowBuf, RootAllocator}
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
-import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorLoader, VectorSchemaRoot, ZeroVector}
+import org.apache.arrow.vector.{BitVectorHelper, FieldVector, TypeLayout, VectorLoader, VectorSchemaRoot, ZeroVector}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
@@ -80,10 +80,10 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
   override def update(i: Int, value: Any): Unit = throw new UnsupportedOperationException()
   override def setNullAt(i: Int): Unit = update(i, null)
 
-  /** Note: copied from org.apache.arrow.vector.VectorUnloader */
-  def loadToRoot(root: VectorSchemaRoot, numRows: Option[Int] = None): Unit = {
-    val nodes = new util.ArrayList[ArrowFieldNode];
-    val buffers = new util.ArrayList[ArrowBuf];
+  /** copied from org.apache.arrow.vector.VectorUnloader */
+  def toArrowRecordBatch(numCols: Int, numRows: Option[Int] = None): ArrowRecordBatch = {
+    val nodes = new util.ArrayList[ArrowFieldNode]
+    val buffers = new util.ArrayList[ArrowBuf]
     val codec = NoCompressionCodec.INSTANCE
 
     val rowCount = if (numRows.isEmpty) this.numRows else numRows.get
@@ -103,22 +103,8 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
         appendNodes(child, nodes, buffers)
     }
 
-    columns.slice(0, root.getFieldVectors.size()) foreach( column => appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
-    new VectorLoader(root).load(new ArrowRecordBatch(rowCount.toInt, nodes, buffers, CompressionUtil.createBodyCompression(codec), true))
-
-//    val fieldVecs = if (numCols.isDefined) root.getFieldVectors.slice(0, numCols.get) else root.getFieldVectors.slice(0, root.getFieldVectors.size())
-//    val cols = if (numCols.isDefined) columns.slice(0, numCols.get) else columns
-//    for ( (vec, col) <- fieldVecs zip cols) {
-//      vec.reset()
-//
-//      val tp = col.getValueVector.getTransferPair(col.getValueVector.getAllocator)
-//      if (numRows.isDefined)
-//        tp.splitAndTransfer(0, numRows.get)
-//      else
-//        tp.transfer()
-//      vec.getDataBuffer.setBytes(0, tp.getTo.getDataBuffer, 0, numRows.get)
-//      vec
-//    }
+    columns.slice(0, numCols) foreach( column => appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
+    new ArrowRecordBatch(rowCount.toInt, nodes, buffers, CompressionUtil.createBodyCompression(codec), true)
   }
 
   /** Note: uses slicing instead of complete copy,
@@ -140,6 +126,33 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 object ArrowColumnarBatchRow {
   private case class IndexPair(rowIndex: Int, colIndex: Int)
 
+  /** Note: inspiration from org.apache.arrow.vector.BitVectorHelper::setBit */
+  private def validityRangeSetter(validityBuffer: ArrowBuf, bytes: Range): Unit = {
+    if (bytes.isEmpty)
+      return
+
+    val start_byte = BitVectorHelper.byteIndex(bytes.head)
+    val last_byte = BitVectorHelper.byteIndex(bytes.last)
+    val start_bit = BitVectorHelper.bitIndex(bytes.head)
+    val last_bit = BitVectorHelper.bitIndex(bytes.last)
+    val num_bytes = last_byte - start_byte + 1
+    val largest_bit = 8
+
+    val old: Array[Byte] = new Array[Byte](num_bytes)
+    validityBuffer.getBytes(start_byte, old, 0, num_bytes)
+
+    old.zipWithIndex foreach { case (byte, index) =>
+      val msb = if (index == 0) last_bit+1 else largest_bit
+      var bitMask = (1 << msb) -1 // everything is valid, from msb-1 to the last bit
+      val lsb = if (index == old.length) start_bit else 0 // everything is valid from msb-1 to lsb
+      bitMask = (bitMask >> lsb) << lsb
+
+      old(index) = (byte | bitMask).toByte
+    }
+
+    validityBuffer.setBytes(start_byte, old, 0, num_bytes)
+  }
+
   /**
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
    * @param numCols the number of columns to take
@@ -157,18 +170,30 @@ object ArrowColumnarBatchRow {
     if (numCols.isEmpty && first.numRows > Integer.MAX_VALUE)
       throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
 
-    val N = if (numCols.isDefined) numCols.get else first.numFields
+    val N = numCols.getOrElse(first.numFields)
     val array = Array.tabulate[ArrowColumnVector](N) { i =>
       val column = first.columns(i)
       val vector = column.getValueVector
       val allocator = vector.getAllocator
+
       val tp = vector.getTransferPair(allocator)
 
       if (numRows.isDefined)
         tp.splitAndTransfer(0, numRows.get)
       else
         tp.transfer()
-      new ArrowColumnVector(tp.getTo)
+
+      val old_vec = tp.getTo
+
+      vector.clear()
+      if (numRows.isDefined) vector.setInitialCapacity(numRows.get)
+      vector.allocateNew()
+      while (old_vec.getDataBuffer.readableBytes() > vector.getValueCapacity) vector.reAlloc()
+      validityRangeSetter(vector.getValidityBuffer, 0 until old_vec.getDataBuffer.readableBytes().toInt)
+      vector.getDataBuffer.setBytes(0, old_vec.getDataBuffer)
+
+//      vector.copyFromSafe(0, 0, old_vec)
+      new ArrowColumnVector(vector)
     }
 
     // Note: until we get any problems, we are going to assume the batches are in-order :)
@@ -176,14 +201,19 @@ object ArrowColumnarBatchRow {
 
     batches.foreach { batch =>
       val columns = if (numCols.isDefined) batch.columns.slice(0, numCols.get) else batch.columns
+      val current_size = batch.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
       (array, columns).zipped foreach { case (output, input) =>
-        // TODO: it could be that the valuevector is not updated...
-        val current_size = batch.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
+        // TODO: set validityBuffer
         if (size + current_size > Integer.MAX_VALUE)
           throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
-        output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
-        size += current_size
+//        output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
+        output.getValueVector.getDataBuffer.setBytes(size.toInt, input.getValueVector.getDataBuffer)
       }
+      size += current_size
+    }
+
+    array foreach { vector =>
+      vector.getValueVector.setValueCount(size.toInt)
     }
 
     array
@@ -242,7 +272,7 @@ object ArrowColumnarBatchRow {
       val batch_length = batch.numRows.min(left.getOrElse(Int.MaxValue).toLong)
       if (batch_length > Integer.MAX_VALUE)
         throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-      batch.loadToRoot(root, numRows = Some(batch_length.toInt))
+      new VectorLoader(root).load(batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Some(batch_length.toInt)))
       writer.writeBatch()
       oos.writeLong(batch_length)
       if (left.isDefined) left = Some((left.get-batch_length).toInt)
