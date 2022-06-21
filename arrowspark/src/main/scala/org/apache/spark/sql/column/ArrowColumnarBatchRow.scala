@@ -211,13 +211,14 @@ object ArrowColumnarBatchRow {
       (array, columns).zipped foreach { case (output, input) =>
         if (size + current_size > Integer.MAX_VALUE)
           throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
-        val vector = input.getValueVector
-        readableBytes = vector.getDataBuffer.readableBytes().max(readableBytes)
+        val ivector = input.getValueVector
+        readableBytes = ivector.getDataBuffer.readableBytes().max(readableBytes)
+        val ovector = output.getValueVector
         // make sure we have enough space
-        while (vector.getBufferSizeFor(vector.getValueCapacity) < num_bytes+readableBytes) vector.reAlloc()
+        while (ovector.getBufferSizeFor(ovector.getValueCapacity) < num_bytes+readableBytes) ovector.reAlloc()
         // copy contents
-        validityRangeSetter(output.getValueVector.getValidityBuffer, size until size+current_size)
-        output.getValueVector.getDataBuffer.setBytes(size.toInt, input.getValueVector.getDataBuffer)
+        validityRangeSetter(ovector.getValidityBuffer, size until size+current_size)
+        output.getValueVector.getDataBuffer.setBytes(size.toInt, ivector.getDataBuffer)
       }
       num_bytes += readableBytes
       size += current_size

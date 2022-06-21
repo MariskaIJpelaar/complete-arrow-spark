@@ -32,14 +32,14 @@ class LazyReaderSmallTest extends AnyFunSuite {
   case class Row(var colA: Int, var colB: Int)
   private val table : util.List[Row] = new util.ArrayList[Row]()
 
-  def generateParquets(): Unit = {
+  def generateParquets(random: Boolean): Unit = {
     val directory = new Directory(new File(directory_name))
     assert(!directory.exists || directory.deleteRecursively())
 
     val records: util.List[GenericData.Record] = new util.ArrayList[GenericData.Record]()
-    0 until size foreach { _ =>
-      val numA: Int = generateRandomNumber()
-      val numB: Int = generateRandomNumber()
+    0 until size foreach { i =>
+      val numA: Int = if (random) generateRandomNumber() else i*2
+      val numB: Int = if (random) generateRandomNumber() else i*2 + 1
       table.add(Row(numA, numB))
       records.add(new GenericRecordBuilder(schema).set("numA", numA).set("numB", numB).build())
     }
@@ -55,6 +55,16 @@ class LazyReaderSmallTest extends AnyFunSuite {
     ParquetWriter.write_batch(schema, writeables, true)
   }
 
+  def generateSpark(): SparkSession = {
+    val spark = SparkSession.builder().appName("LazyReaderSmallTest")
+      .config("spark.memory.offHeap.enabled", "true")
+      .config("spark.memory.offHeap.size", "3048576")
+      .master("local")
+      .withExtensions(SpArrowExtensionWrapper.injectArrowFileSourceStrategy).getOrCreate()
+    spark.sparkContext.setLogLevel("ERROR")
+    spark
+  }
+
   def computeAnswer() : Unit = {
     // from: https://stackoverflow.com/questions/4805606/how-to-sort-by-two-fields-in-java
     Collections.sort(table, new Comparator[Row]() {
@@ -65,30 +75,42 @@ class LazyReaderSmallTest extends AnyFunSuite {
     })
   }
 
-  def checkFirst(answer: ArrowColumnarBatchRow): Unit = {
-    val correct_row = table.get(0)
-    0 until num_cols foreach { i => {
-      // TODO: temporary
-      if (!correct_row.productElement(i).equals(answer.getArray(i).array(0)))
-        println("AAAAA")
-      assert(correct_row.productElement(i).equals(answer.getArray(i).array(0)))
-    }}
+  def checkFirstNonRandom(answer: ArrowColumnarBatchRow): Unit = {
+    val val_one = answer.getArray(0).array(0)
+    val val_two = answer.getArray(num_cols-1).array(0)
+    assert(val_one.isInstanceOf[Int])
+    assert(val_two.isInstanceOf[Int])
+    assert(val_one.asInstanceOf[Int] + 1 == val_two.asInstanceOf[Int])
   }
 
-  def checkFirst(answer: ColumnBatch): Unit = {
-    val ans_row = answer.getRow(0)
-    val correct_row = table.get(0)
-    assert(ans_row.isDefined)
-    0 until num_cols foreach { i => {
-      var other = ans_row.get.get(i)
-      other match {
-        case option: Option[Any] =>
-          assert(option.isDefined)
-          other = option.get
-        case _ =>
+  def checkFirstNonRandom(answer: ColumnBatch): Unit = {
+    val ansRow = answer.getRow(0)
+    assert(ansRow.exists( row => {
+      val valOne = row.get(0)
+      val valTwo = row.get(num_cols-1)
+      (valOne, valTwo) match {
+        case (numOne: Option[Int], numTwo: Option[Int]) =>
+          numOne.exists(one => numTwo.isDefined && numTwo.get.equals( one + 1) )
+        case _ => false
       }
-      assert(correct_row.productElement(i).equals(other))}
-    }
+    }))
+  }
+
+  def checkAnswerNonRandom(answer: Array[ColumnBatch]): Unit = {
+    val cols = TColumn.fromBatches(answer)
+    assert(cols.length == num_cols)
+
+    val colOne = cols(0)
+    val colTwo = cols(num_cols - 1)
+    assert(0 until size forall { index =>
+      val valOne = colOne.get(index)
+      val valTwo = colTwo.get(index)
+      (valOne, valTwo) match {
+        case (numOne: Option[Int], numTwo: Option[Int]) =>
+          numOne.exists(one => numTwo.isDefined && numTwo.get.equals( one + 1) )
+        case _ => false
+      }
+    })
   }
 
   def checkAnswer(answer: Array[ColumnBatch]): Unit = {
@@ -123,34 +145,58 @@ class LazyReaderSmallTest extends AnyFunSuite {
     }
   }
 
-  test("Performing the ColumnarSort on a simple Dataset using Lazy Reading") {
-    // Generate Dataset
-    generateParquets()
+  test("Lazy read first row of simple Dataset with ascending numbers through the RDD") {
+    generateParquets(random = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
-    val spark = SparkSession.builder().appName("LazyReaderSmallTest")
-      .config("spark.memory.offHeap.enabled", "true")
-      .config("spark.memory.offHeap.size", "3048576")
-      .master("local")
-      .withExtensions(SpArrowExtensionWrapper.injectArrowFileSourceStrategy).getOrCreate()
-    spark.sparkContext.setLogLevel("ERROR")
+    val spark = generateSpark()
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+    df.explain("formatted")
+    checkFirstNonRandom(df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow])
 
-//    val temp_list = new util.ArrayList[StructField](2)
-//    temp_list.add(StructField("numA", IntegerType, nullable = true))
-//    temp_list.add(StructField("numB", IntegerType, nullable = true))
-//    val temp = RowEncoder(StructType(temp_list))
+    directory.deleteRecursively()
+  }
+
+  test("Lazy read first row of simple Dataset with ascending numbers through ColumnDataFrame") {
+    generateParquets(random = false)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+    df.explain("formatted")
+    checkFirstNonRandom(df.first())
+
+    directory.deleteRecursively()
+  }
+
+  test("Lazy read simple Dataset with ascending numbers through ColumnDataFrame") {
+    generateParquets(random = false)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+    df.explain("formatted")
+    checkAnswerNonRandom(df.collect())
+
+    directory.deleteRecursively()
+  }
+
+
+  test("Performing ColumnarSort on a simple, random, Dataset using Lazy Reading") {
+    // Generate Dataset
+    generateParquets(random = true)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
 
     // Construct DataFrame
     // TODO: make a dataset (ArrowColumnEncoder) specifically for ArrowColumns
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
-    df.explain("formatted")
-    val plan = df.queryExecution.executedPlan.execute()
 
-    val firstOfPlan = plan.first()
-    checkFirst(firstOfPlan.asInstanceOf[ArrowColumnarBatchRow])
-    checkFirst(df.first())
-    checkAnswer(df.collect())
     // Perform ColumnarSort
     df.sort("numA", "numB")
     df.explain("formatted")
