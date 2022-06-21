@@ -59,7 +59,7 @@ trait TColumn extends Serializable {
    * Verifies type is equal to colType, or returns None */
   def get(i: Int): Option[Any] = {
     getInternal(i).flatMap{ value =>
-      if (ClassTag(value.getClass) != ClassTag(colType)) None else Some(value)
+      if (ClassTag(value.getClass) != ClassTag(colType)) None else Option(value)
     }
   }
 

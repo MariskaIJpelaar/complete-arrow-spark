@@ -57,7 +57,7 @@ class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
     val buf = new ArrayBuffer[ArrowColumnarBatchRow]
     val totalParts = this.partitions.length
     var partsScanned = 0
-    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res, numRows = Some(num)) }
+    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res, numRows = Option(num)) }
 
     while (buf.size < num && partsScanned < totalParts) {
       // The number of partitions to try in this iteration. It is ok for this number to be
@@ -83,7 +83,7 @@ class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
       }, p)
 
       res.foreach(result => {
-        val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Some(num))
+        val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))
         buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
       })
 
@@ -162,14 +162,14 @@ class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
           return false
         }
         val nextFile = files.next()
-        currentFile = Some(nextFile)
+        currentFile = Option(nextFile)
         logInfo(s"Reading File $nextFile")
         // Sets InputFileBlockHolder for the file block's information
         InputFileBlockHolder.set(nextFile.filePath, nextFile.start, nextFile.length)
 
         resetCurrentIterator()
         if (ignoreMissingFiles || ignoreCorruptFiles) {
-          currentIterator = Some(new NextIterator[Object] {
+          currentIterator = Option(new NextIterator[Object] {
             // The readFunction may read some bytes before consuming the iterator, e.g.,
             // vectorized Parquet reader. Here we use a lazily initialized variable to delay the
             // creation of iterator so that we will throw exception in `getNext`.
@@ -207,7 +207,7 @@ class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
             }
           })
         } else {
-          currentIterator = Some(readCurrentFile())
+          currentIterator = Option(readCurrentFile())
         }
 
         try {

@@ -67,7 +67,12 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
   def checkFirst(answer: ArrowColumnarBatchRow): Unit = {
     val correct_row = table.get(0)
-    0 until num_cols foreach { i => assert(correct_row.productElement(i).equals(answer.getArray(i).array(0))) }
+    0 until num_cols foreach { i => {
+      // TODO: temporary
+      if (!correct_row.productElement(i).equals(answer.getArray(i).array(0)))
+        println("AAAAA")
+      assert(correct_row.productElement(i).equals(answer.getArray(i).array(0)))
+    }}
   }
 
   def checkFirst(answer: ColumnBatch): Unit = {

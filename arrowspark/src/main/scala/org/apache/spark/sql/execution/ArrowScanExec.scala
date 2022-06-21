@@ -103,13 +103,17 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
 
     // Filter files with bucket pruning if possible
     val bucketingEnabled = fsRelation.sparkSession.sessionState.conf.bucketingEnabled
-    val shouldProcess: Path => Boolean = fs.optionalBucketSet match {
-      case Some(bucketSet) if bucketingEnabled =>
-        // Do not prune the file if bucket file name is invalid
-        filePath => BucketingUtils.getBucketId(filePath.getName).forall(bucketSet.get)
-      case _ =>
-        _ => true
-    }
+    val shouldProcess: Path => Boolean = filePath =>
+      fs.optionalBucketSet.forall { bucketSet => bucketingEnabled || BucketingUtils.getBucketId(filePath.getName).forall(bucketSet.get) }
+
+    // above one-liner used to be this:
+//    val shouldProcess: Path => Boolean = fs.optionalBucketSet match {
+//      case Some(bucketSet) if bucketingEnabled =>
+//        // Do not prune the file if bucket file name is invalid
+//        filePath => BucketingUtils.getBucketId(filePath.getName).forall(bucketSet.get)
+//      case _ =>
+//        _ => true
+//    }
 
     val splitFiles = selectedPartitions.flatMap { partition =>
       partition.files.flatMap { file =>

@@ -18,6 +18,7 @@ import java.io._
 import java.nio.channels.Channels
 import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
+import scala.collection.immutable.NumericRange
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   /** Option 1: batch is each column concatenated to make a big 1D Array */
@@ -127,7 +128,7 @@ object ArrowColumnarBatchRow {
   private case class IndexPair(rowIndex: Int, colIndex: Int)
 
   /** Note: inspiration from org.apache.arrow.vector.BitVectorHelper::setBit */
-  private def validityRangeSetter(validityBuffer: ArrowBuf, bytes: Range): Unit = {
+  private def validityRangeSetter(validityBuffer: ArrowBuf, bytes: NumericRange[Long]): Unit = {
     if (bytes.isEmpty)
       return
 
@@ -138,8 +139,11 @@ object ArrowColumnarBatchRow {
     val num_bytes = last_byte - start_byte + 1
     val largest_bit = 8
 
-    val old: Array[Byte] = new Array[Byte](num_bytes)
-    validityBuffer.getBytes(start_byte, old, 0, num_bytes)
+    if (num_bytes > Integer.MAX_VALUE)
+      throw new RuntimeException("[ArrowColumnarBatchRow::validityRangeSetter] too many bytes to set")
+
+    val old: Array[Byte] = new Array[Byte](num_bytes.toInt)
+    validityBuffer.getBytes(start_byte, old, 0, num_bytes.toInt)
 
     old.zipWithIndex foreach { case (byte, index) =>
       val msb = if (index == 0) last_bit+1 else largest_bit
@@ -170,45 +174,52 @@ object ArrowColumnarBatchRow {
     if (numCols.isEmpty && first.numRows > Integer.MAX_VALUE)
       throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
 
-    val N = numCols.getOrElse(first.numFields)
-    val array = Array.tabulate[ArrowColumnVector](N) { i =>
-      val column = first.columns(i)
-      val vector = column.getValueVector
-      val allocator = vector.getAllocator
-
-      val tp = vector.getTransferPair(allocator)
-
-      if (numRows.isDefined)
-        tp.splitAndTransfer(0, numRows.get)
-      else
-        tp.transfer()
-
-      val old_vec = tp.getTo
-
-      vector.clear()
-      if (numRows.isDefined) vector.setInitialCapacity(numRows.get)
-      vector.allocateNew()
-      while (old_vec.getDataBuffer.readableBytes() > vector.getValueCapacity) vector.reAlloc()
-      validityRangeSetter(vector.getValidityBuffer, 0 until old_vec.getDataBuffer.readableBytes().toInt)
-      vector.getDataBuffer.setBytes(0, old_vec.getDataBuffer)
-
-//      vector.copyFromSafe(0, 0, old_vec)
-      new ArrowColumnVector(vector)
-    }
-
+    // number of bytes written
+    var num_bytes: Long = 0L
     // Note: until we get any problems, we are going to assume the batches are in-order :)
     var size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
 
-    batches.foreach { batch =>
-      val columns = if (numCols.isDefined) batch.columns.slice(0, numCols.get) else batch.columns
-      val current_size = batch.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
+    // The first batch should be separate, so we can determine the vector-types
+    val array = Array.tabulate[ArrowColumnVector](numCols.getOrElse(first.numFields)) { i =>
+      val vector = first.columns(i).getValueVector
+      val tp = vector.getTransferPair(vector.getAllocator)
+      numRows.fold( tp.transfer() )( num => tp.splitAndTransfer(0, num))
+      // we 'copy' the content of the first batch ...
+      val old_vec = tp.getTo
+
+      // ... and re-use the ValueVector so we do not have to determine vector types :)
+      vector.clear()
+      numRows.foreach( nums => vector.setInitialCapacity(nums))
+      vector.allocateNew()
+      num_bytes = old_vec.getDataBuffer.readableBytes()
+      // make sure we have enough space
+      while (vector.getBufferSizeFor(vector.getValueCapacity) < num_bytes) vector.reAlloc()
+      // copy contents
+      validityRangeSetter(vector.getValidityBuffer, 0L until size)
+      vector.getDataBuffer.setBytes(0, old_vec.getDataBuffer)
+
+      new ArrowColumnVector(vector)
+    }
+
+    batches.takeWhile( _ => numRows.forall( num => size < num)).foreach { batch =>
+      // the columns we want
+      val columns = numCols.fold(batch.columns)( nums => batch.columns.slice(0, nums) )
+      // the rows that are left to read
+      val current_size = batch.numRows.min( numRows.getOrElse(Integer.MAX_VALUE) - size )
+
+      var readableBytes = 0L
       (array, columns).zipped foreach { case (output, input) =>
-        // TODO: set validityBuffer
         if (size + current_size > Integer.MAX_VALUE)
           throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
-//        output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
+        val vector = input.getValueVector
+        readableBytes = vector.getDataBuffer.readableBytes().max(readableBytes)
+        // make sure we have enough space
+        while (vector.getBufferSizeFor(vector.getValueCapacity) < num_bytes+readableBytes) vector.reAlloc()
+        // copy contents
+        validityRangeSetter(output.getValueVector.getValidityBuffer, size until size+current_size)
         output.getValueVector.getDataBuffer.setBytes(size.toInt, input.getValueVector.getDataBuffer)
       }
+      num_bytes += readableBytes
       size += current_size
     }
 
@@ -263,7 +274,7 @@ object ArrowColumnarBatchRow {
     // write first batch
     writer.writeBatch()
     oos.writeLong(first_length)
-    if (left.isDefined) left = Some((left.get - first_length).toInt)
+    if (left.isDefined) left = Option((left.get - first_length).toInt)
 
 
     // while we still have some reading to do
@@ -272,10 +283,10 @@ object ArrowColumnarBatchRow {
       val batch_length = batch.numRows.min(left.getOrElse(Int.MaxValue).toLong)
       if (batch_length > Integer.MAX_VALUE)
         throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-      new VectorLoader(root).load(batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Some(batch_length.toInt)))
+      new VectorLoader(root).load(batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Option(batch_length.toInt)))
       writer.writeBatch()
       oos.writeLong(batch_length)
-      if (left.isDefined) left = Some((left.get-batch_length).toInt)
+      if (left.isDefined) left = Option((left.get-batch_length).toInt)
     }
 
     // clean up and return the singleton-iterator

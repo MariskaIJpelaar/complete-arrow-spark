@@ -23,10 +23,7 @@ case class ArrowFileSourceStrategy(spark: SparkSession) extends SparkStrategy wi
   /** copied and edited from FileSourceStrategy */
   // should prune buckets iff num buckets is greater than 1 and there is only one bucket column
   private def shouldPruneBuckets(bucketSpec: Option[BucketSpec]): Boolean = {
-    bucketSpec match {
-      case Some(spec) => spec.bucketColumnNames.length == 1 && spec.numBuckets > 1
-      case None => false
-    }
+    bucketSpec.exists( spec => spec.bucketColumnNames.length == 1 && spec.numBuckets > 1 )
   }
 
   private def getExpressionBuckets(
@@ -106,7 +103,7 @@ case class ArrowFileSourceStrategy(spark: SparkSession) extends SparkStrategy wi
     if (numBucketsSelected == numBuckets) {
       None
     } else {
-      Some(matchedBuckets)
+      Option(matchedBuckets)
     }
   }
 
@@ -156,7 +153,7 @@ case class ArrowFileSourceStrategy(spark: SparkSession) extends SparkStrategy wi
         if (f.references.intersect(partitionSet).nonEmpty) {
           extractPredicatesWithinOutputSet(f, AttributeSet(dataColumnsWithoutPartitionCols))
         } else {
-          Some(f)
+          Option(f)
         }
       }
       val supportNestedPredicatePushdown =

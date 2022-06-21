@@ -47,10 +47,10 @@ private[sql] object ColumnDataSourceV2Utils extends Logging {
         val version = hasCatalog.extractTimeTravelVersion(dsOptions)
         val timestamp = hasCatalog.extractTimeTravelTimestamp(dsOptions)
 
-        val timeTravelVersion = if (version.isPresent) Some(version.get) else None
-        val timeTravelTimestamp = if (timestamp.isPresent) Some(Literal(timestamp.get)) else None
+        val timeTravelVersion = if (version.isPresent) Option(version.get) else None
+        val timeTravelTimestamp = if (timestamp.isPresent) Option(Literal(timestamp.get)) else None
         val timeTravel = TimeTravelSpec.create(timeTravelTimestamp, timeTravelVersion, conf)
-        (CatalogV2Util.loadTable(catalog, ident, timeTravel).get, Some(catalog), Some(ident))
+        (CatalogV2Util.loadTable(catalog, ident, timeTravel).get, Option(catalog), Option(ident))
       case _ =>
         // TODO: Non-catalog paths for DSV2 are currently not well defined.
         val tbl = DataSourceV2Utils.getTableFromProvider(provider, dsOptions, userSpecifiedSchema)

@@ -32,7 +32,7 @@ class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
   /** Returns the value at position i. If the value is null, None is returned */
   override protected def getInternal(i: Int): Option[Any] = {
     if (i < 0 || i >= length) return None
-    Some(values(i))
+    Option(values(i))
   }
 
   /** Concats this TColumn with an other TColumn and returns the result */
@@ -59,7 +59,7 @@ class GenericColumnBatch(protected[sql] val columns: Array[TColumn]) extends Col
   /** Returns the i-th column. If the value is null, None is returned */
   override protected def getInternal(i: Int): Option[TColumn] = {
     if (i < 0 || i >= length) return None
-    Some(columns(i))
+    Option(columns(i))
   }
 
   /** Make a copy of the current object */
@@ -69,6 +69,6 @@ class GenericColumnBatch(protected[sql] val columns: Array[TColumn]) extends Col
   override def getRow(i: Int): Option[Row] = {
     val values = new Array[Any](length)
     columns.zipWithIndex foreach { case (column, index) => values(index) = column.get(i) }
-    Some(new GenericRow(values))
+    Option(new GenericRow(values))
   }
 }
