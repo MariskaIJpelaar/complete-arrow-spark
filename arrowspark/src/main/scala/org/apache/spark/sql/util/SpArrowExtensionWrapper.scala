@@ -8,9 +8,11 @@ object SpArrowExtensionWrapper {
 
   val injectArrowFileSourceStrategy: ExtensionBuilder = { e => {
     e.injectPlannerStrategy(ArrowFileSourceStrategy)
-//    e.injectPlannerStrategy(ColumnarTransitionBlockerStrategy)
-//    e.injectPlannerStrategy(SpArrowSpecialLimits)
   } }
+
+  val injectAll: ExtensionBuilder = { e => {
+    e.injectPlannerStrategy(ArrowFileSourceStrategy)
+  }}
 }
 
 

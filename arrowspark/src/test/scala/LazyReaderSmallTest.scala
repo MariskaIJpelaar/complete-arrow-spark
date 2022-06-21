@@ -1,14 +1,13 @@
-import org.apache.arrow.vector.{IntVector, ValueVector}
 import org.apache.avro.SchemaBuilder
 import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, ColumnBatch, ColumnDataFrame, ColumnDataFrameReader, TColumn}
+import org.apache.spark.sql.column._
 import org.apache.spark.sql.util.SpArrowExtensionWrapper
 import org.scalatest.funsuite.AnyFunSuite
-import utils.{MultiIterator, ParquetWriter}
+import utils.ParquetWriter
 
 import java.io.File
 import java.util
@@ -32,14 +31,14 @@ class LazyReaderSmallTest extends AnyFunSuite {
   case class Row(var colA: Int, var colB: Int)
   private val table : util.List[Row] = new util.ArrayList[Row]()
 
-  def generateParquets(random: Boolean): Unit = {
+  def generateParquets(key: Int => Int, randomValue: Boolean): Unit = {
     val directory = new Directory(new File(directory_name))
     assert(!directory.exists || directory.deleteRecursively())
 
     val records: util.List[GenericData.Record] = new util.ArrayList[GenericData.Record]()
     0 until size foreach { i =>
-      val numA: Int = if (random) generateRandomNumber() else i*2
-      val numB: Int = if (random) generateRandomNumber() else i*2 + 1
+      val numA: Int = key(i)
+      val numB: Int = if (randomValue) generateRandomNumber() else i*2 + 1
       table.add(Row(numA, numB))
       records.add(new GenericRecordBuilder(schema).set("numA", numA).set("numB", numB).build())
     }
@@ -60,7 +59,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
       .config("spark.memory.offHeap.enabled", "true")
       .config("spark.memory.offHeap.size", "3048576")
       .master("local")
-      .withExtensions(SpArrowExtensionWrapper.injectArrowFileSourceStrategy).getOrCreate()
+      .withExtensions(SpArrowExtensionWrapper.injectAll).getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
     spark
   }
@@ -117,36 +116,45 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val cols = TColumn.fromBatches(answer)
     assert(cols.length == num_cols)
 
-    cols.zipWithIndex foreach { case (column, columnIndex) =>
-      assert(column.length == table.size())
-      0 until column.length foreach { rowIndex =>
-        val other = column.get(rowIndex)
-        assert(other.isDefined)
-        assert(table.get(rowIndex).productElement(columnIndex).equals(other.get))
+    val colOne = cols(0)
+    val colTwo = cols(num_cols -1)
+    assert(colOne.length == size)
+    assert(colTwo.length == size)
+
+    0 until size foreach { index =>
+      val valOne = colOne.get(index)
+      val valTwo = colTwo.get(index)
+      (valOne, valTwo) match {
+        case (numOne: Option[Int], numTwo: Option[Int]) =>
+          assert(numOne.isDefined)
+          val rowIndex = numOne.get
+          assert( rowIndex >= 0 && rowIndex < size )
+          val rowValue = table.get(rowIndex).colB
+          numTwo.exists( num => num.equals(rowValue) )
+        case _ => false
       }
-
     }
   }
 
-  def checkAnswer(answer: Array[ValueVector]) : Unit = {
-    assert(answer.length == num_cols)
+  def checkSorted(answer: Array[ColumnBatch]): Unit = {
+    val cols = TColumn.fromBatches(answer)
 
-    val iterators: util.List[util.Iterator[Object]] = new util.ArrayList[util.Iterator[Object]]()
-    iterators.add(table.iterator().asInstanceOf[util.Iterator[Object]])
-    answer.foreach( vec => iterators.add(vec.asInstanceOf[IntVector].iterator().asInstanceOf[util.Iterator[Object]]))
-
-    val zipper: MultiIterator = new MultiIterator(iterators)
-    while (zipper.hasNext) {
-      val next = zipper.next()
-      assert(next.size() == num_cols+1)
-      val row: Row = next.get(0).asInstanceOf[Row]
-      val cols = next.subList(1, next.size())
-      0 until num_cols foreach { i => assert(row.productElement(i).equals(cols.get(i)))}
+    0 until num_cols foreach { colIndex =>
+      val col = cols(colIndex)
+      assert(col.length == size)
+      0 until size foreach { rowIndex =>
+        val value = col.get(rowIndex)
+        value match {
+          case numValue: Option[Int] =>
+            assert(numValue.exists( num => num.equals(table.get(rowIndex).productElement(colIndex))))
+        }
+      }
     }
   }
+
 
   test("Lazy read first row of simple Dataset with ascending numbers through the RDD") {
-    generateParquets(random = false)
+    generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -159,7 +167,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
   }
 
   test("Lazy read first row of simple Dataset with ascending numbers through ColumnDataFrame") {
-    generateParquets(random = false)
+    generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -172,7 +180,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
   }
 
   test("Lazy read simple Dataset with ascending numbers through ColumnDataFrame") {
-    generateParquets(random = false)
+    generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -184,10 +192,22 @@ class LazyReaderSmallTest extends AnyFunSuite {
     directory.deleteRecursively()
   }
 
+  test("Lazy read simple Dataset with ascending key-column and random value-column through ColumnDataFrame") {
+    generateParquets(key = i => i, randomValue = true)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+    df.explain("formatted")
+    checkAnswer(df.collect())
+
+    directory.deleteRecursively()
+  }
 
   test("Performing ColumnarSort on a simple, random, Dataset using Lazy Reading") {
     // Generate Dataset
-    generateParquets(random = true)
+    generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -198,14 +218,14 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
 
     // Perform ColumnarSort
-    df.sort("numA", "numB")
-    df.explain("formatted")
+    val new_df = df.sort("numA", "numB")
+    new_df.explain("formatted")
 
     // Compute answer
     computeAnswer()
 
     // Check if result is equal to our computed table
-    checkAnswer(df.collect())
+    checkSorted(new_df.collect())
 
     directory.deleteRecursively()
   }
