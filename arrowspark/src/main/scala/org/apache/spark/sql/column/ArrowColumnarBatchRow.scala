@@ -125,8 +125,6 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 }
 
 object ArrowColumnarBatchRow {
-  private case class IndexPair(rowIndex: Int, colIndex: Int)
-
   /** Note: inspiration from org.apache.arrow.vector.BitVectorHelper::setBit */
   private def validityRangeSetter(validityBuffer: ArrowBuf, bytes: NumericRange[Long]): Unit = {
     if (bytes.isEmpty)
@@ -218,7 +216,7 @@ object ArrowColumnarBatchRow {
         while (ovector.getBufferSizeFor(ovector.getValueCapacity) < num_bytes+readableBytes) ovector.reAlloc()
         // copy contents
         validityRangeSetter(ovector.getValidityBuffer, size until size+current_size)
-        output.getValueVector.getDataBuffer.setBytes(size.toInt, ivector.getDataBuffer)
+        output.getValueVector.getDataBuffer.setBytes(num_bytes, ivector.getDataBuffer)
       }
       num_bytes += readableBytes
       size += current_size
