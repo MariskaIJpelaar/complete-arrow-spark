@@ -36,6 +36,19 @@ class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
 
+  override def collect(): Array[ArrowColumnarBatchRow] = {
+    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res) }
+    val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
+      if (!it.hasNext) Array.emptyByteArray else it.next()
+    })
+    val buf = new ArrayBuffer[ArrowColumnarBatchRow]
+    res.foreach(result => {
+      val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result))
+      buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
+    })
+    buf.toArray
+  }
+
   /** Note: copied and adapted from RDD.scala */
   override def take(num: Int): Array[ArrowColumnarBatchRow] = {
     if (num == 0) new Array[ArrowColumnarBatchRow](0)

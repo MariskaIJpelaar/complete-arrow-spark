@@ -1,8 +1,10 @@
 package org.apache.spark.sql.column
 
-import org.apache.arrow.memory.RootAllocator
+import org.apache.arrow.memory.{ArrowBuf, RootAllocator}
+import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
+import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
-import org.apache.arrow.vector.{FieldVector, VectorSchemaRoot, ZeroVector}
+import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorLoader, VectorSchemaRoot, ZeroVector}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
@@ -14,6 +16,7 @@ import org.apache.spark.util.NextIterator
 
 import java.io._
 import java.nio.channels.Channels
+import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
@@ -77,19 +80,45 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
   override def update(i: Int, value: Any): Unit = throw new UnsupportedOperationException()
   override def setNullAt(i: Int): Unit = update(i, null)
 
-  def copyNToRoot(root: VectorSchemaRoot, numCols: Option[Int] = None, numRows: Option[Int] = None): Unit = {
-    val fieldVecs = if (numCols.isDefined) root.getFieldVectors.slice(0, numCols.get) else root.getFieldVectors.slice(0, root.getFieldVectors.size())
-    val cols = if (numCols.isDefined) columns.slice(0, numCols.get) else columns
-    for ( (vec, col) <- fieldVecs zip cols) {
-      vec.reset()
+  /** Note: copied from org.apache.arrow.vector.VectorUnloader */
+  def loadToRoot(root: VectorSchemaRoot, numRows: Option[Int] = None): Unit = {
+    val nodes = new util.ArrayList[ArrowFieldNode];
+    val buffers = new util.ArrayList[ArrowBuf];
+    val codec = NoCompressionCodec.INSTANCE
 
-      val tp = col.getValueVector.getTransferPair(col.getValueVector.getAllocator)
-      if (numRows.isDefined)
-        tp.splitAndTransfer(0, numRows.get)
-      else
-        tp.transfer()
-      vec.copyFrom(0, 0, tp.getTo)
+    val rowCount = if (numRows.isEmpty) this.numRows else numRows.get
+    if (rowCount > Integer.MAX_VALUE)
+      throw new RuntimeException("[ArrowColumnarBatchRow::copyNToRoot] too many rows")
+
+    /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
+    def appendNodes(vector: FieldVector, nodes: util.List[ArrowFieldNode], buffers: util.List[ArrowBuf]): Unit = {
+      nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
+      val fieldBuffers = vector.getFieldBuffers
+      val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
+      if (fieldBuffers.size != expectedBufferCount)
+        throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
+      for (buf <- fieldBuffers)
+        buffers.add(codec.compress(vector.getAllocator, buf))
+      for (child <- vector.getChildrenFromFields)
+        appendNodes(child, nodes, buffers)
     }
+
+    columns.slice(0, root.getFieldVectors.size()) foreach( column => appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
+    new VectorLoader(root).load(new ArrowRecordBatch(rowCount.toInt, nodes, buffers, CompressionUtil.createBodyCompression(codec), true))
+
+//    val fieldVecs = if (numCols.isDefined) root.getFieldVectors.slice(0, numCols.get) else root.getFieldVectors.slice(0, root.getFieldVectors.size())
+//    val cols = if (numCols.isDefined) columns.slice(0, numCols.get) else columns
+//    for ( (vec, col) <- fieldVecs zip cols) {
+//      vec.reset()
+//
+//      val tp = col.getValueVector.getTransferPair(col.getValueVector.getAllocator)
+//      if (numRows.isDefined)
+//        tp.splitAndTransfer(0, numRows.get)
+//      else
+//        tp.transfer()
+//      vec.getDataBuffer.setBytes(0, tp.getTo.getDataBuffer, 0, numRows.get)
+//      vec
+//    }
   }
 
   /** Note: uses slicing instead of complete copy,
@@ -143,16 +172,17 @@ object ArrowColumnarBatchRow {
     }
 
     // Note: until we get any problems, we are going to assume the batches are in-order :)
-    var size = first.numRows
+    var size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
 
     batches.foreach { batch =>
       val columns = if (numCols.isDefined) batch.columns.slice(0, numCols.get) else batch.columns
       (array, columns).zipped foreach { case (output, input) =>
         // TODO: it could be that the valuevector is not updated...
-        if (size + batch.numRows > Integer.MAX_VALUE)
+        val current_size = batch.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
+        if (size + current_size > Integer.MAX_VALUE)
           throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
         output.getValueVector.copyFromSafe(0, size.toInt, input.getValueVector)
-        size += batch.numRows
+        size += current_size
       }
     }
 
@@ -212,7 +242,7 @@ object ArrowColumnarBatchRow {
       val batch_length = batch.numRows.min(left.getOrElse(Int.MaxValue).toLong)
       if (batch_length > Integer.MAX_VALUE)
         throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-      batch.copyNToRoot(root, numCols, numRows = Some(batch_length.toInt))
+      batch.loadToRoot(root, numRows = Some(batch_length.toInt))
       writer.writeBatch()
       oos.writeLong(batch_length)
       if (left.isDefined) left = Some((left.get-batch_length).toInt)

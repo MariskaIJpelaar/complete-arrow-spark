@@ -74,24 +74,30 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val ans_row = answer.getRow(0)
     val correct_row = table.get(0)
     assert(ans_row.isDefined)
-    0 until num_cols foreach { i => assert(correct_row.productElement(i).equals(ans_row.get.get(i)))}
+    0 until num_cols foreach { i => {
+      var other = ans_row.get.get(i)
+      other match {
+        case option: Option[Any] =>
+          assert(option.isDefined)
+          other = option.get
+        case _ =>
+      }
+      assert(correct_row.productElement(i).equals(other))}
+    }
   }
 
   def checkAnswer(answer: Array[ColumnBatch]): Unit = {
     val cols = TColumn.fromBatches(answer)
     assert(cols.length == num_cols)
 
-    val iterators: util.List[util.Iterator[Object]] = new util.ArrayList[util.Iterator[Object]]()
-    iterators.add(table.iterator().asInstanceOf[util.Iterator[Object]])
-    cols.foreach( vec => iterators.add(vec.getIterator.asInstanceOf[util.Iterator[Object]]))
+    cols.zipWithIndex foreach { case (column, columnIndex) =>
+      assert(column.length == table.size())
+      0 until column.length foreach { rowIndex =>
+        val other = column.get(rowIndex)
+        assert(other.isDefined)
+        assert(table.get(rowIndex).productElement(columnIndex).equals(other.get))
+      }
 
-    val zipper: MultiIterator = new MultiIterator(iterators)
-    while (zipper.hasNext) {
-      val next = zipper.next()
-      assert(next.size() == num_cols+1)
-      val row: Row = next.get(0).asInstanceOf[Row]
-      val cols = next.subList(1, next.size())
-      0 until num_cols foreach { i => assert(row.productElement(i).equals(cols.get(i)))}
     }
   }
 
@@ -148,7 +154,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     computeAnswer()
 
     // Check if result is equal to our computed table
-    checkAnswer(df.collect().asInstanceOf[Array[ValueVector]])
+    checkAnswer(df.collect())
 
     directory.deleteRecursively()
   }

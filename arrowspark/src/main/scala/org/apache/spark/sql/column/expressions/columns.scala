@@ -67,7 +67,7 @@ class GenericColumnBatch(protected[sql] val columns: Array[TColumn]) extends Col
 
   /** Returns the i-th Row */
   override def getRow(i: Int): Option[Row] = {
-    val values = Array[Any](columns.length)
+    val values = new Array[Any](length)
     columns.zipWithIndex foreach { case (column, index) => values(index) = column.get(i) }
     Some(new GenericRow(values))
   }
