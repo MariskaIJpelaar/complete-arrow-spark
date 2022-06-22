@@ -10,7 +10,7 @@ import org.apache.spark.sql.catalyst.{InternalRow, TableIdentifier}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.sources.{BaseRelation, Filter}
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{ArrayType, StructType}
 
 import scala.collection.mutable
 
@@ -26,6 +26,11 @@ trait ArrowFileFormat extends FileFormat {
                                      hadoopConf: Configuration) : PartitionedFile => Iterator[ArrowColumnarBatchRow]
 
   override def supportBatch(sparkSession: SparkSession, dataSchema: StructType): Boolean = true
+
+  /** Note: children should use this to change their schema to one appropriate for spark */
+  def inferSchema(schema: Option[StructType]): Option[StructType] = {
+    schema.map( s =>  s.copy( fields = s.fields.map(field => field.copy(dataType = ArrayType.apply(field.dataType)))))
+  }
 }
 
 case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with Logging {

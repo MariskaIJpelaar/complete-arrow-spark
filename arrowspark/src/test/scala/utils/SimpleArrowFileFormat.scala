@@ -24,7 +24,7 @@ class SimpleArrowFileFormat extends ArrowFileFormat with DataSourceRegister with
   override def isSplitable(sparkSession: SparkSession, options: Map[String, String], path: Path): Boolean = false
 
   override def inferSchema(sparkSession: SparkSession, options: Map[String, String], files: Seq[FileStatus]): Option[StructType] =
-    ParquetUtils.inferSchema(sparkSession, options, files)
+    super.inferSchema(ParquetUtils.inferSchema(sparkSession, options, files))
 
 
   override def prepareWrite(sparkSession: SparkSession, job: Job, options: Map[String, String], dataSchema: StructType): OutputWriterFactory =

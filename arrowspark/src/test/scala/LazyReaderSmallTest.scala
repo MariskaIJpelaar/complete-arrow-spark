@@ -5,7 +5,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
-import org.apache.spark.sql.util.SpArrowExtensionWrapper
+import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ParquetWriter
 
@@ -59,7 +59,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
       .config("spark.memory.offHeap.enabled", "true")
       .config("spark.memory.offHeap.size", "3048576")
       .master("local")
-      .withExtensions(SpArrowExtensionWrapper.injectAll).getOrCreate()
+      .withExtensions(ArrowSparkExtensionWrapper.injectAll).getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
     spark
   }

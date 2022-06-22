@@ -108,6 +108,22 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
     new ArrowRecordBatch(rowCount.toInt, nodes, buffers, CompressionUtil.createBodyCompression(codec), true)
   }
 
+  /** serializes this batch to an OutputStream */
+  def writeToStream(stream: OutputStream): Unit = {
+    val root = VectorSchemaRoot.of(columns.map( column => column.getValueVector.asInstanceOf[FieldVector]).toSeq: _*)
+    val oos = {
+      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+      new ObjectOutputStream(codec.compressedOutputStream(stream))
+    }
+    val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
+    writer.start()
+    writer.writeBatch()
+    oos.writeLong(numRows)
+
+    writer.close()
+    oos.close()
+  }
+
   /** Note: uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing */
   override def copy(): InternalRow = {
@@ -122,6 +138,8 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
   }
 
   override def close(): Unit = columns foreach(column => column.close())
+
+  def getSizeInBytes: Int = columns.map(column => column.getValueVector.getBufferSize ).sum
 }
 
 object ArrowColumnarBatchRow {
@@ -293,6 +311,29 @@ object ArrowColumnarBatchRow {
     oos.flush()
     oos.close()
     Iterator(bos.toByteArray)
+  }
+
+  def fromStream(stream: InputStream): Iterator[ArrowColumnarBatchRow] = {
+    // TODO: copy/ cut from 'decode'
+    val ois = {
+      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+      new ObjectInputStream(codec.compressedInputStream(stream))
+    }
+    val allocator = new RootAllocator()
+    val reader = new ArrowStreamReader(ois, allocator)
+
+    if (!reader.loadNextBatch())
+      throw new RuntimeException("[ArrowColumnarBatchRow::fromStream] empty stream")
+
+    val columns = reader.getVectorSchemaRoot.getFieldVectors
+    val length = ois.readLong()
+    new ArrowColumnarBatchRow( (columns map { vector =>
+      val allocator = vector.getAllocator
+      val tp = vector.getTransferPair(allocator)
+
+      tp.transfer()
+      new ArrowColumnVector(tp.getTo)
+    }).toArray, length)
   }
 
   /** Note: similar to decodeUnsafeRows */
