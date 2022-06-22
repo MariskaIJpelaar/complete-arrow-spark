@@ -1,10 +1,11 @@
 package org.apache.spark.sql.column
 
+import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter}
 import org.apache.arrow.memory.{ArrowBuf, RootAllocator}
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
-import org.apache.arrow.vector.{BitVectorHelper, FieldVector, TypeLayout, VectorLoader, VectorSchemaRoot, ZeroVector}
+import org.apache.arrow.vector.{BitVectorHelper, FieldVector, IntVector, TypeLayout, VectorLoader, VectorSchemaRoot, ZeroVector}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
@@ -19,6 +20,8 @@ import java.nio.channels.Channels
 import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.immutable.NumericRange
+
+// TODO: at some point, we might have to split up functionalities into more files
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   /** Option 1: batch is each column concatenated to make a big 1D Array */
@@ -363,6 +366,39 @@ object ArrowColumnarBatchRow {
       }
       override protected def close(): Unit = bis.close()
     }
+
+  }
+
+
+  // TODO: implement
+
+  /**
+   * Note: worst case: 0 + 1 + 2 + ... + (n-1) = ((n-1) * n) / 2 = O(n*n) + time to sort (n log n)
+   * @param batch
+   * @param col
+   * @return
+   */
+  def sort(batch: ArrowColumnarBatchRow, col: Int): ArrowColumnarBatchRow = {
+    if (col < 0 || col > batch.numFields)
+      return batch
+
+    val vector = batch.columns(col).getValueVector
+    val indices = new IntVector("indexHolder", vector.getAllocator)
+    (new IndexSorter).sort(vector, indices, DefaultVectorComparators.createDefaultComparator(vector))
+
+    ???
+
+//    (vec zip indices).zipWithIndices foreach { case (elem, index), i) =>
+//      if (i == index)
+//        continue
+//
+//      val realIndex = index
+//      while (realIndex < i) realIndex = indices(realIndex)
+//
+//      vec.swap(i, realIndex)
+//    }
+
+
 
   }
 }
