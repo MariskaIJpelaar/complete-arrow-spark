@@ -1,6 +1,6 @@
 package org.apache.spark.sql.column
 
-import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter}
+import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator}
 import org.apache.arrow.memory.{ArrowBuf, RootAllocator}
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
@@ -9,6 +9,7 @@ import org.apache.arrow.vector.{BitVectorHelper, FieldVector, IntVector, TypeLay
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarArray}
@@ -385,17 +386,18 @@ object ArrowColumnarBatchRow {
   /**
    * @param batch an ArrowColumnarBatchRow to be sorted
    * @param col the column to sort on
+   * @param sortOrder order settings to pass to the comparator
    * @return a fresh ArrowColumnarBatchRows with the sorted columns from batch
    *         Note: if col is out of range, returns the batch
    */
-  def sort(batch: ArrowColumnarBatchRow, col: Int): ArrowColumnarBatchRow = {
+  def sort(batch: ArrowColumnarBatchRow, col: Int, sortOrder: SortOrder): ArrowColumnarBatchRow = {
     if (col < 0 || col > batch.numFields)
       return batch
 
     val vector = batch.columns(col).getValueVector
     val indices = new IntVector("indexHolder", vector.getAllocator)
-    // TODO: use custom SparkComparator
-    (new IndexSorter).sort(vector, indices, DefaultVectorComparators.createDefaultComparator(vector))
+    val comparator = new SparkComparator(sortOrder, DefaultVectorComparators.createDefaultComparator(vector))
+    (new IndexSorter).sort(vector, indices, comparator)
 
     new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
