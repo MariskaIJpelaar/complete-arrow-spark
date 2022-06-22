@@ -369,14 +369,24 @@ object ArrowColumnarBatchRow {
 
   }
 
-
-  // TODO: implement
+  /** Should we ever need to implement an in-place sorting algorithm (with numRows more space), then we can do
+   * the normal sort with:  */
+  //    (vec zip indices).zipWithIndices foreach { case (elem, index), i) =>
+  //      if (i == index)
+  //        continue
+  //
+  //      val realIndex = index
+  //      while (realIndex < i) realIndex = indices(realIndex)
+  //
+  //      vec.swap(i, realIndex)
+  //    }
+  // Note: worst case: 0 + 1 + 2 + ... + (n-1) = ((n-1) * n) / 2 = O(n*n) + time to sort (n log n)
 
   /**
-   * Note: worst case: 0 + 1 + 2 + ... + (n-1) = ((n-1) * n) / 2 = O(n*n) + time to sort (n log n)
-   * @param batch
-   * @param col
-   * @return
+   * @param batch an ArrowColumnarBatchRow to be sorted
+   * @param col the column to sort on
+   * @return a fresh ArrowColumnarBatchRows with the sorted columns from batch
+   *         Note: if col is out of range, returns the batch
    */
   def sort(batch: ArrowColumnarBatchRow, col: Int): ArrowColumnarBatchRow = {
     if (col < 0 || col > batch.numFields)
@@ -384,21 +394,23 @@ object ArrowColumnarBatchRow {
 
     val vector = batch.columns(col).getValueVector
     val indices = new IntVector("indexHolder", vector.getAllocator)
+    // TODO: use custom SparkComparator
     (new IndexSorter).sort(vector, indices, DefaultVectorComparators.createDefaultComparator(vector))
 
-    ???
+    new ArrowColumnarBatchRow( batch.columns map { column =>
+      val vector = column.getValueVector
 
-//    (vec zip indices).zipWithIndices foreach { case (elem, index), i) =>
-//      if (i == index)
-//        continue
-//
-//      val realIndex = index
-//      while (realIndex < i) realIndex = indices(realIndex)
-//
-//      vec.swap(i, realIndex)
-//    }
+      // transfer type
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.transfer()
+      val new_vector = tp.getTo
 
+      new_vector.allocateNew()
+      assert(indices.getValueCount > 0)
+      /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
+      0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
 
-
+      new ArrowColumnVector(new_vector)
+    }, batch.numRows)
   }
 }
