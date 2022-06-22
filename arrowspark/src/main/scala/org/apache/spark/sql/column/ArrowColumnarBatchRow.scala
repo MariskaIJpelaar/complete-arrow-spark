@@ -314,35 +314,10 @@ object ArrowColumnarBatchRow {
   }
 
   def fromStream(stream: InputStream): Iterator[ArrowColumnarBatchRow] = {
-    // TODO: copy/ cut from 'decode'
-    val ois = {
-      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-      new ObjectInputStream(codec.compressedInputStream(stream))
-    }
-    val allocator = new RootAllocator()
-    val reader = new ArrowStreamReader(ois, allocator)
-
-    if (!reader.loadNextBatch())
-      throw new RuntimeException("[ArrowColumnarBatchRow::fromStream] empty stream")
-
-    val columns = reader.getVectorSchemaRoot.getFieldVectors
-    val length = ois.readLong()
-    new ArrowColumnarBatchRow( (columns map { vector =>
-      val allocator = vector.getAllocator
-      val tp = vector.getTransferPair(allocator)
-
-      tp.transfer()
-      new ArrowColumnVector(tp.getTo)
-    }).toArray, length)
-  }
-
-  /** Note: similar to decodeUnsafeRows */
-  def decode(bytes: Array[Byte]): Iterator[ArrowColumnarBatchRow] = {
     new NextIterator[ArrowColumnarBatchRow] {
-      private lazy val bis = new ByteArrayInputStream(bytes)
       private lazy val ois = {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-        new ObjectInputStream(codec.compressedInputStream(bis))
+        new ObjectInputStream(codec.compressedInputStream(stream))
       }
       private lazy val allocator = new RootAllocator()
       private lazy val reader = new ArrowStreamReader(ois, allocator)
@@ -369,8 +344,24 @@ object ArrowColumnarBatchRow {
       override protected def close(): Unit = {
         reader.close()
         ois.close()
-        bis.close()
       }
+    }
+  }
+
+  /** Note: similar to decodeUnsafeRows */
+  def decode(bytes: Array[Byte]): Iterator[ArrowColumnarBatchRow] = {
+    new NextIterator[ArrowColumnarBatchRow] {
+      private lazy val bis = new ByteArrayInputStream(bytes)
+      private lazy val iter = fromStream(bis)
+
+      override protected def getNext(): ArrowColumnarBatchRow = {
+        if (!iter.hasNext) {
+          finished = true
+          return null
+        }
+        iter.next()
+      }
+      override protected def close(): Unit = bis.close()
     }
 
   }

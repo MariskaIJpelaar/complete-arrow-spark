@@ -1,6 +1,6 @@
 package org.apache.spark.sql.execution
 
-import org.apache.spark.serializer.{DeserializationStream, SerializationStream, SerializerInstance}
+import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.SQLMetric
 
@@ -9,8 +9,9 @@ import java.nio.ByteBuffer
 import scala.reflect.ClassTag
 
 /** Note: copied and adapted from org.apache.spark.sql.execution.UnsafeRowSerializer */
-class ArrowColumnarBatchRowSerializer {
-
+class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extends Serializer with Serializable {
+  override def newInstance(): SerializerInstance = new ArrowColumnarBatchRowSerializerInstance(dataSize)
+  override def supportsRelocationOfSerializedObjects: Boolean = true
 }
 
 private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric]) extends SerializerInstance {
@@ -33,8 +34,11 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
   }
 
   override def deserializeStream(s: InputStream): DeserializationStream = new DeserializationStream {
-
-    override def asKeyValueIterator: Iterator[(Int, ArrowColumnarBatchRow)] = ???
+    override def asKeyValueIterator: Iterator[(Int, ArrowColumnarBatchRow)] = new Iterator[(Int, ArrowColumnarBatchRow)] {
+      private val iter = ArrowColumnarBatchRow.fromStream(s)
+      override def hasNext: Boolean = iter.hasNext
+      override def next(): (Int, ArrowColumnarBatchRow) = (0, iter.next())
+    }
 
     /** returning a dummy */
     override def readKey[T]()(implicit evidence$9: ClassTag[T]): T = null.asInstanceOf[T]
