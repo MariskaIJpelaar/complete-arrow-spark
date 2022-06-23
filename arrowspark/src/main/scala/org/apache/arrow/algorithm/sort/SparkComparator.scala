@@ -6,6 +6,12 @@ import org.apache.spark.sql.catalyst.expressions.{NullsFirst, SortOrder}
 import scala.reflect.ClassTag
 
 class SparkComparator[T <: ValueVector : ClassTag](val sortOrder: SortOrder, val baseComparator: VectorValueComparator[T] ) extends VectorValueComparator[T] {
+  override def attachVector(vector: T): Unit = {
+    super.attachVector(vector)
+    baseComparator.attachVector(vector)
+  }
+
+
   override def compare(index1: Int, index2: Int): Int = {
     val isNull1 = vector1.isNull(index1)
     val isNull2 = vector2.isNull(index2)
@@ -27,4 +33,9 @@ class SparkComparator[T <: ValueVector : ClassTag](val sortOrder: SortOrder, val
   }
 
   override def createNew(): VectorValueComparator[T] = { new SparkComparator[T](sortOrder, baseComparator) }
+
+  override def attachVectors(vector1: T, vector2: T): Unit = {
+    super.attachVectors(vector1, vector2)
+    baseComparator.attachVectors(vector1, vector2)
+  }
 }

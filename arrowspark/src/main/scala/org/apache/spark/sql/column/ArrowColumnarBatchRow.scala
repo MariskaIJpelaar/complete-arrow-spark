@@ -396,21 +396,30 @@ object ArrowColumnarBatchRow {
 
     val vector = batch.columns(col).getValueVector
     val indices = new IntVector("indexHolder", vector.getAllocator)
+    assert(vector.getValueCount > 0)
+    indices.allocateNew(vector.getValueCount)
+    indices.setValueCount(vector.getValueCount)
     val comparator = new SparkComparator(sortOrder, DefaultVectorComparators.createDefaultComparator(vector))
     (new IndexSorter).sort(vector, indices, comparator)
+//    indices.setValueCount(vector.getValueCount)
 
     new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
+      assert(vector.getValueCount == indices.getValueCount)
 
       // transfer type
       val tp = vector.getTransferPair(vector.getAllocator)
-      tp.transfer()
+      tp.splitAndTransfer(0, vector.getValueCount)
       val new_vector = tp.getTo
 
+//      new_vector.allocateNew()
+      new_vector.setInitialCapacity(indices.getValueCount)
       new_vector.allocateNew()
       assert(indices.getValueCount > 0)
+      assert(indices.getValueCount.equals(vector.getValueCount))
       /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
       0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
+      new_vector.setValueCount(indices.getValueCount)
 
       new ArrowColumnVector(new_vector)
     }, batch.numRows)

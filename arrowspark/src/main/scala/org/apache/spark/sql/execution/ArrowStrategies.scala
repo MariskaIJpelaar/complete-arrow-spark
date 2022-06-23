@@ -34,7 +34,7 @@ case class ArrowBasicOperators(spark: SparkSession) extends SparkStrategy {
     val distribution = physical.OrderedDistribution(sortPlan.order)
     val numPartitions = distribution.requiredNumPartitions.getOrElse(SQLConf.get.numShufflePartitions)
     val shuffleChild: SparkPlan = ArrowShuffleExchangeExec(distribution.createPartitioning(numPartitions), planLater(sortPlan.child), ENSURE_REQUIREMENTS)
-    SortExec(sortPlan.order, sortPlan.global, shuffleChild) :: Nil
+    ArrowSortExec(sortPlan.order, sortPlan.global, shuffleChild) :: Nil
   }
 
 }
