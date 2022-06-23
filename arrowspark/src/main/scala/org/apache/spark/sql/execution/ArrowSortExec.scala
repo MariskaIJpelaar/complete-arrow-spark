@@ -15,6 +15,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   extends UnaryExecNode with BlockingOperatorWithCodegen {
   override def inputRDDs(): Seq[RDD[InternalRow]] = child.asInstanceOf[CodegenSupport].inputRDDs()
 
+
   /** Needs to be called from codegen */
   def attributeReferenceToCol(order: SortOrder): Int = {
     child.output.indexWhere(relRef => relRef.name.equals(order.child.asInstanceOf[AttributeReference].name))

@@ -2,17 +2,16 @@ package org.apache.spark.sql.execution.datasources
 
 import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
-import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
-import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
+import org.apache.spark.rdd.InputFileBlockHolder
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.execution.QueryExecutionException
+import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.util.NextIterator
 import org.apache.spark.{Partition, SparkUpgradeException, TaskContext}
 
 import java.io.{Closeable, FileNotFoundException, IOException}
-import scala.collection.mutable.ArrayBuffer
 import scala.reflect.runtime.universe._
 
 /**
@@ -28,70 +27,70 @@ import scala.reflect.runtime.universe._
  * @param readFunction function to read in a PartitionedArrowFile and convert it to an Iterator of Array[ValueVector]
  * @param filePartitions the partitions to operate on
  */
-class FileScanArrowRDD (@transient private val sparkSession: SparkSession,
+class FileScanArrowRDD (@transient override protected val sparkSession: SparkSession,
                                      readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow],
                                      @transient val filePartitions: Seq[FilePartition])
-                                     extends RDD[ArrowColumnarBatchRow](sparkSession.sparkContext, Nil) {
+                                     extends ArrowRDD {
 
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
 
-  override def collect(): Array[ArrowColumnarBatchRow] = {
-    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res) }
-    val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
-      if (!it.hasNext) Array.emptyByteArray else it.next()
-    })
-    val buf = new ArrayBuffer[ArrowColumnarBatchRow]
-    res.foreach(result => {
-      val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result))
-      buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
-    })
-    buf.toArray
-  }
-
-  /** Note: copied and adapted from RDD.scala */
-  override def take(num: Int): Array[ArrowColumnarBatchRow] = {
-    if (num == 0) new Array[ArrowColumnarBatchRow](0)
-
-    val scaleUpFactor = Math.max(conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
-    val buf = new ArrayBuffer[ArrowColumnarBatchRow]
-    val totalParts = this.partitions.length
-    var partsScanned = 0
-    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res, numRows = Option(num)) }
-
-    while (buf.size < num && partsScanned < totalParts) {
-      // The number of partitions to try in this iteration. It is ok for this number to be
-      // greater than totalParts because we actually cap it at totalParts in runJob.
-      var numPartsToTry = 1L
-      val left = num - buf.size
-      if (partsScanned > 0) {
-        // If we didn't find any rows after the previous iteration, quadruple and retry.
-        // Otherwise, interpolate the number of partitions we need to try, but overestimate
-        // it by 50%. We also cap the estimation in the end.
-        if (buf.isEmpty) {
-          numPartsToTry = partsScanned * scaleUpFactor
-        } else {
-          // As left > 0, numPartsToTry is always >= 1
-          numPartsToTry = Math.ceil(1.5 * left * partsScanned / buf.size).toInt
-          numPartsToTry = Math.min(numPartsToTry, partsScanned * scaleUpFactor)
-        }
-      }
-
-      val p = partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
-      val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
-        if (!it.hasNext) Array.emptyByteArray else it.next()
-      }, p)
-
-      res.foreach(result => {
-        val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))
-        buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
-      })
-
-      partsScanned += p.size
-    }
-
-    buf.toArray
-  }
+//  override def collect(): Array[ArrowColumnarBatchRow] = {
+//    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res) }
+//    val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
+//      if (!it.hasNext) Array.emptyByteArray else it.next()
+//    })
+//    val buf = new ArrayBuffer[ArrowColumnarBatchRow]
+//    res.foreach(result => {
+//      val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result))
+//      buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
+//    })
+//    buf.toArray
+//  }
+//
+//  /** Note: copied and adapted from RDD.scala */
+//  override def take(num: Int): Array[ArrowColumnarBatchRow] = {
+//    if (num == 0) new Array[ArrowColumnarBatchRow](0)
+//
+//    val scaleUpFactor = Math.max(conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
+//    val buf = new ArrayBuffer[ArrowColumnarBatchRow]
+//    val totalParts = this.partitions.length
+//    var partsScanned = 0
+//    val childRDD = this.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res, numRows = Option(num)) }
+//
+//    while (buf.size < num && partsScanned < totalParts) {
+//      // The number of partitions to try in this iteration. It is ok for this number to be
+//      // greater than totalParts because we actually cap it at totalParts in runJob.
+//      var numPartsToTry = 1L
+//      val left = num - buf.size
+//      if (partsScanned > 0) {
+//        // If we didn't find any rows after the previous iteration, quadruple and retry.
+//        // Otherwise, interpolate the number of partitions we need to try, but overestimate
+//        // it by 50%. We also cap the estimation in the end.
+//        if (buf.isEmpty) {
+//          numPartsToTry = partsScanned * scaleUpFactor
+//        } else {
+//          // As left > 0, numPartsToTry is always >= 1
+//          numPartsToTry = Math.ceil(1.5 * left * partsScanned / buf.size).toInt
+//          numPartsToTry = Math.min(numPartsToTry, partsScanned * scaleUpFactor)
+//        }
+//      }
+//
+//      val p = partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
+//      val res = sparkSession.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
+//        if (!it.hasNext) Array.emptyByteArray else it.next()
+//      }, p)
+//
+//      res.foreach(result => {
+//        val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))
+//        buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
+//      })
+//
+//      partsScanned += p.size
+//    }
+//
+//    buf.toArray
+//  }
 
 //  override def take(num: Int): Array[ArrowColumnarBatchRow] = {
 //    if (num == 0)

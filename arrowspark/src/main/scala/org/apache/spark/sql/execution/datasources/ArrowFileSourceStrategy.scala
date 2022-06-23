@@ -7,7 +7,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Empty
 import org.apache.spark.sql.catalyst.planning.ScanOperation
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.{SparkSession, execution}
-import org.apache.spark.sql.execution.{ArrowScanExec, FileSourceScanExec, SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.{ArrowCollectExec, ArrowScanExec, FileSourceScanExec, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.types.{DoubleType, FloatType}
 import org.apache.spark.util.collection.BitSet
 
@@ -180,7 +180,7 @@ case class ArrowFileSourceStrategy(spark: SparkSession) extends SparkStrategy wi
       val outputAttributes = readDataColumns ++ partitionColumns
 
       val scan =
-        ArrowScanExec(FileSourceScanExec(
+        ArrowCollectExec(ArrowScanExec(FileSourceScanExec(
           fsRelation,
           outputAttributes,
           outputSchema,
@@ -188,7 +188,7 @@ case class ArrowFileSourceStrategy(spark: SparkSession) extends SparkStrategy wi
           bucketSet,
           None,
           dataFilters,
-          table.map(_.identifier)))
+          table.map(_.identifier))))
 
       val afterScanFilter = afterScanFilters.toSeq.reduceOption(expressions.And)
       val withFilter = afterScanFilter.map(execution.FilterExec(_, scan)).getOrElse(scan)

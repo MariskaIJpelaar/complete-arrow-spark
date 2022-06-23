@@ -58,16 +58,16 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
   }
 
-  override def executeCollect(): Array[InternalRow] = {
-    val rdd = execute()
-    rdd.collect()
-  }
-
-  /** Takes the first n columns */
-  override def executeTake(n: Int): Array[InternalRow] = {
-    val rdd = execute()
-    rdd.take(n)
-  }
+//  override def executeCollect(): Array[InternalRow] = {
+//    val rdd = execute()
+//    rdd.collect()
+//  }
+//
+//  /** Takes the first n columns */
+//  override def executeTake(n: Int): Array[InternalRow] = {
+//    val rdd = execute()
+//    rdd.take(n)
+//  }
 
   // copied from org/apache/spark/sql/execution/DataSourceScanExec.scala
   @transient
