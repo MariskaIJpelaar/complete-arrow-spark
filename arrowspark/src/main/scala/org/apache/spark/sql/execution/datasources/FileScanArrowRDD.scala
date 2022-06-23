@@ -2,7 +2,7 @@ package org.apache.spark.sql.execution.datasources
 
 import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
-import org.apache.spark.rdd.InputFileBlockHolder
+import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.errors.QueryExecutionErrors
@@ -27,10 +27,10 @@ import scala.reflect.runtime.universe._
  * @param readFunction function to read in a PartitionedArrowFile and convert it to an Iterator of Array[ValueVector]
  * @param filePartitions the partitions to operate on
  */
-class FileScanArrowRDD (@transient override protected val sparkSession: SparkSession,
+class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
                                      readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow],
                                      @transient val filePartitions: Seq[FilePartition])
-                                     extends ArrowRDD {
+                                     extends RDD[ArrowColumnarBatchRow](sparkSession.sparkContext, Nil) with ArrowRDD {
 
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles

@@ -2,22 +2,19 @@ package org.apache.spark.sql.rdd
 
 import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
-  @transient protected val sparkSession: SparkSession
-
   override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this)
   override def take(num: Int): Array[ArrowColumnarBatchRow] = ArrowRDD.take(num, this)
 }
 
 object ArrowRDD {
-  def collect[T: ClassTag](rdd: RDD[T])(implicit ct: ClassTag[T]): Array[ArrowColumnarBatchRow] = {
-    assert(ct.isInstanceOf[ArrowColumnarBatchRow])
+  def collect[T: ClassTag](rdd: RDD[T])(implicit ct: ClassTag[T]): Array[T] = {
+    assert(ct.isInstanceOf[ClassTag[ArrowColumnarBatchRow]])
 
     val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res.asInstanceOf[Iterator[ArrowColumnarBatchRow]]) }
     val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
@@ -28,12 +25,12 @@ object ArrowRDD {
       val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result))
       buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
     })
-    buf.toArray
+    buf.toArray.asInstanceOf[Array[T]]
   }
 
   /** Note: copied and adapted from RDD.scala */
-  def take[T: ClassTag](num: Int, rdd: RDD[T])(implicit ct: ClassTag[T]): Array[ArrowColumnarBatchRow] = {
-    assert(ct.isInstanceOf[ArrowColumnarBatchRow])
+  def take[T: ClassTag](num: Int, rdd: RDD[T])(implicit ct: ClassTag[T]): Array[T] = {
+    assert(ct.isInstanceOf[ClassTag[ArrowColumnarBatchRow]])
     if (num == 0) new Array[ArrowColumnarBatchRow](0)
 
     val scaleUpFactor = Math.max(rdd.conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
@@ -73,6 +70,6 @@ object ArrowRDD {
       partsScanned += p.size
     }
 
-    buf.toArray
+    buf.toArray.asInstanceOf[Array[T]]
   }
 }

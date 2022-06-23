@@ -13,17 +13,13 @@ case class ArrowCollectExec(child: SparkPlan) extends UnaryExecNode {
 
   override def executeCollect(): Array[InternalRow] = {
     val rdd = execute()
-    rdd match {
-      case arrowRDD: ArrowRDD => arrowRDD.collect().asInstanceOf[Array[InternalRow]]
-      case _ => ArrowRDD.collect(rdd).asInstanceOf[Array[InternalRow]]
-    }
+    if (rdd.isInstanceOf[ArrowRDD]) rdd.collect() else ArrowRDD.collect(rdd)
   }
 
   override def executeTake(n: Int): Array[InternalRow] = {
     val rdd = execute()
-    rdd match {
-      case arrowRDD: ArrowRDD => arrowRDD.take(n).asInstanceOf[Array[InternalRow]]
-      case _ => ArrowRDD.take(n, rdd).asInstanceOf[Array[InternalRow]]
-    }
+    /** Note: no, we cannot replace this by pattern matching */
+    if (rdd.isInstanceOf[ArrowRDD]) return rdd.asInstanceOf[ArrowRDD].take(n).asInstanceOf[Array[InternalRow]]
+    ArrowRDD.take(n, rdd)
   }
 }
