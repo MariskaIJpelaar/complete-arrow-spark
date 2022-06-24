@@ -54,6 +54,8 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 
   override def numFields: Int = columns.length
 
+  def length: Long = numRows
+
   override def isNullAt(ordinal: Int): Boolean = ordinal < 0 || ordinal >= numFields
 
   override def getInt(ordinal: Int): Int = throw new UnsupportedOperationException()
@@ -112,13 +114,14 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
     new ArrowRecordBatch(rowCount.toInt, nodes, buffers, CompressionUtil.createBodyCompression(codec), true)
   }
 
-  /** serializes this batch to an OutputStream */
+  /** serializes this batch to an OutputStream*/
   def writeToStream(stream: OutputStream): Unit = {
     val root = VectorSchemaRoot.of(columns.map( column => column.getValueVector.asInstanceOf[FieldVector]).toSeq: _*)
     val oos = {
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
       new ObjectOutputStream(codec.compressedOutputStream(stream))
     }
+    oos.write(42)
     val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
     writer.start()
     writer.writeBatch()
@@ -289,8 +292,10 @@ object ArrowColumnarBatchRow {
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
       new ObjectOutputStream(codec.compressedOutputStream(bos))
     }
+    oos.write(42)
     val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
     writer.start()
+//    oos.writeInt(0)
 
     // write first batch
     writer.writeBatch()
@@ -305,6 +310,7 @@ object ArrowColumnarBatchRow {
       if (batch_length > Integer.MAX_VALUE)
         throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
       new VectorLoader(root).load(batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Option(batch_length.toInt)))
+//      oos.writeInt(0)
       writer.writeBatch()
       oos.writeLong(batch_length)
       if (left.isDefined) left = Option((left.get-batch_length).toInt)
@@ -324,14 +330,24 @@ object ArrowColumnarBatchRow {
         new ObjectInputStream(codec.compressedInputStream(stream))
       }
       private lazy val allocator = new RootAllocator()
-      private lazy val reader = new ArrowStreamReader(ois, allocator)
+      private var reader = {
+        ois.read()
+        new ArrowStreamReader(ois, allocator)
+      }
 
 
       override protected def getNext(): ArrowColumnarBatchRow = {
-        val hasNext = reader.loadNextBatch()
-        if (!hasNext) {
-          finished = true
-          return null
+        if (!reader.loadNextBatch()) {
+          // TODO: fix:
+          // https://stackoverflow.com/questions/2393179/streamcorruptedexception-invalid-type-code-ac
+          if (ois.read() == -1) {
+            finished = true
+            return null
+          }
+          reader = new ArrowStreamReader(ois, allocator)
+          if (!reader.loadNextBatch()) {
+            throw new RuntimeException("[ArrowColumnarBatchRow::fromStream] Malformed Stream")
+          }
         }
 
         val columns = reader.getVectorSchemaRoot.getFieldVectors
