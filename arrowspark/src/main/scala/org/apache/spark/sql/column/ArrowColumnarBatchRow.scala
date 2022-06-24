@@ -11,6 +11,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow.intermediates
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarArray}
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
@@ -24,6 +25,7 @@ import scala.collection.immutable.NumericRange
 
 // TODO: at some point, we might have to split up functionalities into more files
 
+// TODO: split the code which is called from the serializer and the ones from encoding/ decoding
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   /** Option 1: batch is each column concatenated to make a big 1D Array */
 //override def numFields: Int = sizes.sum
@@ -116,12 +118,13 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 
   /** serializes this batch to an OutputStream*/
   def writeToStream(stream: OutputStream): Unit = {
+    stream.write(intermediates)
+    stream.flush()
     val root = VectorSchemaRoot.of(columns.map( column => column.getValueVector.asInstanceOf[FieldVector]).toSeq: _*)
     val oos = {
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
       new ObjectOutputStream(codec.compressedOutputStream(stream))
     }
-    oos.write(42)
     val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
     writer.start()
     writer.writeBatch()
@@ -150,6 +153,9 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 }
 
 object ArrowColumnarBatchRow {
+  /** Intermediate number to determine when we expect another batch in a stream */
+  private val intermediates = 42
+
   /** Note: inspiration from org.apache.arrow.vector.BitVectorHelper::setBit */
   private def validityRangeSetter(validityBuffer: ArrowBuf, bytes: NumericRange[Long]): Unit = {
     if (bytes.isEmpty)
@@ -288,11 +294,11 @@ object ArrowColumnarBatchRow {
 
     // Setup the streams and writers
     val bos = new ByteArrayOutputStream()
+    bos.write(intermediates)
     val oos = {
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
       new ObjectOutputStream(codec.compressedOutputStream(bos))
     }
-    oos.write(42)
     val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
     writer.start()
 //    oos.writeInt(0)
@@ -325,13 +331,13 @@ object ArrowColumnarBatchRow {
 
   def fromStream(stream: InputStream): Iterator[ArrowColumnarBatchRow] = {
     new NextIterator[ArrowColumnarBatchRow] {
-      private lazy val ois = {
+      stream.read()
+      private var ois = {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         new ObjectInputStream(codec.compressedInputStream(stream))
       }
       private lazy val allocator = new RootAllocator()
       private var reader = {
-        ois.read()
         new ArrowStreamReader(ois, allocator)
       }
 
@@ -340,10 +346,13 @@ object ArrowColumnarBatchRow {
         if (!reader.loadNextBatch()) {
           // TODO: fix:
           // https://stackoverflow.com/questions/2393179/streamcorruptedexception-invalid-type-code-ac
-          if (ois.read() == -1) {
+          ois.close()
+          if (stream.read() == -1) {
             finished = true
             return null
           }
+          val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+          ois = new ObjectInputStream(codec.compressedInputStream(stream))
           reader = new ArrowStreamReader(ois, allocator)
           if (!reader.loadNextBatch()) {
             throw new RuntimeException("[ArrowColumnarBatchRow::fromStream] Malformed Stream")
