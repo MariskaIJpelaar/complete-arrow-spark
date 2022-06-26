@@ -139,17 +139,18 @@ class LazyReaderSmallTest extends AnyFunSuite {
     }
   }
 
-  def checkSorted(table: util.List[Row], answer: Array[ColumnBatch], size: Int = default_size): Unit = {
+  def checkSorted(table: util.List[Row], answer: Array[ColumnBatch], size: Int = default_size, colNrs: Range = 0 until num_cols): Unit = {
     val cols = TColumn.fromBatches(answer)
 
-    0 until num_cols foreach { colIndex =>
+    colNrs foreach { colIndex =>
       val col = cols(colIndex)
       assert(col.length == size)
       0 until size foreach { rowIndex =>
         val value = col.get(rowIndex)
         value match {
           case numValue: Option[Int] =>
-            assert(numValue.exists( num => num.equals(table.get(rowIndex).productElement(colIndex))))
+            assert(numValue.isDefined)
+            assertResult(table.get(rowIndex).productElement(colIndex))(numValue.get)
         }
       }
     }
@@ -251,7 +252,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     computeAnswer(table, onColA = false)
 
     // Check if result is equal to our computed table
-    checkSorted(table, new_df.collect())
+    checkSorted(table, new_df.collect(), colNrs = 1 until num_cols)
 
     directory.deleteRecursively()
   }
