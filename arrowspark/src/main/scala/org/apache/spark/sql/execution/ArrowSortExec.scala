@@ -72,9 +72,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val batchArray = ctx.freshName("batchArray")
     val staticIterator = classOf[Iterator[ArrowColumnarBatchRow]].getName + "$.MODULE$"
 
-//    ${classOf[Iterator[ArrowColumnarBatchRow]].getName} $batchArray = $staticIterator.single($thisSorted);
-    //Byte[] $bytesArray = (Byte[])$staticBatch.encode($batchArray, $noneType, $noneType).next();
-
     val code =
       s"""
        | if ($needToSort) {
@@ -84,11 +81,12 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  int $numRows = ($columns.length > 0) ? $columns[0].getValueVector().getValueCount() : 0;
        |  $batch = new ${classOf[ArrowColumnarBatchRow].getName}($columns, $numRows);
        |
-       |  ${classOf[Iterator[Seq[SortOrder]]].getName} $reversedOrders = ((${classOf[Seq[SortOrder]].getName})$orders).reverseIterator();
-       |  while ($reversedOrders.hasNext()) {
-       |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})$reversedOrders.next();
-       |    int $col = $thisPlan.attributeReferenceToCol((${classOf[SortOrder].getName})$order);
+       |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
+       |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());
+       |    int $col = $thisPlan.attributeReferenceToCol($order);
        |    $batch = $staticBatch.sort($batch, $col, $order);
+       |  } else {
+       |    $batch = $staticBatch.multiColumnSort($batch, $orders);
        |  }
        |  references[$sortedIdx] = $batch;
        |
@@ -120,11 +118,12 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     child.execute().mapPartitionsInternal { iter =>
       val columns = ArrowColumnarBatchRow.take(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
       var batch = new ArrowColumnarBatchRow(columns, if (columns.length > 0) columns(0).getValueVector.getValueCount else 0)
-      /** Note: we apply the reversed SortOrder-sequence, as this assures we only have to consider one column at a time
-       * (if we assume the used sorting algorithm does not do too much work) */
-      sortOrder.reverseIterator foreach { order =>
-        val col = attributeReferenceToCol(order)
-        batch = ArrowColumnarBatchRow.sort(batch, col, order)
+
+      if (sortOrder.length == 1) {
+        val col = attributeReferenceToCol(sortOrder.head)
+        batch = ArrowColumnarBatchRow.sort(batch, col, sortOrder.head)
+      } else {
+        batch = ArrowColumnarBatchRow.multiColumnSort(batch, sortOrder)
       }
 
       Iterator(batch)

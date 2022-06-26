@@ -1,15 +1,18 @@
 package org.apache.spark.sql.column
 
-import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator}
+import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
 import org.apache.arrow.memory.{ArrowBuf, RootAllocator}
+import org.apache.arrow.vector.complex.{StructVector, UnionVector}
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
-import org.apache.arrow.vector.{BitVectorHelper, FieldVector, IntVector, TypeLayout, VectorLoader, VectorSchemaRoot, ZeroVector}
+import org.apache.arrow.vector.types.pojo.ArrowType.Struct
+import org.apache.arrow.vector.types.pojo.FieldType
+import org.apache.arrow.vector.{BitVectorHelper, FieldVector, IntVector, TypeLayout, ValueVector, VectorLoader, VectorSchemaRoot, ZeroVector}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.SortOrder
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarArray}
@@ -24,35 +27,7 @@ import scala.collection.immutable.NumericRange
 
 // TODO: at some point, we might have to split up functionalities into more files
 
-// TODO: split the code which is called from the serializer and the ones from encoding/ decoding
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
-  /** Option 1: batch is each column concatenated to make a big 1D Array */
-//override def numFields: Int = sizes.sum
-//  private lazy val sizes: Array[Int] = columns.map( column => column.getValueVector.getValueCount )
-//
-//  // TODO: make test?
-//  private def mapOrdinalToIndexPair(ordinal: Int): ArrowColumnarBatchRow.IndexPair = {
-//    var row = ordinal
-//    var col = 0
-//    var sum = 0
-//    sizes.iterator.takeWhile( size => sum + size <= ordinal ).foreach { size => col += 1; sum += size; row -= size; }
-//    ArrowColumnarBatchRow.IndexPair(row, col)
-//  }
-//  override def isNullAt(ordinal: Int): Boolean = {
-//    if (ordinal < 0 || ordinal >= columns.length)
-//      return true
-//    val mappedPair: ArrowColumnarBatchRow.IndexPair = mapOrdinalToIndexPair(ordinal)
-//    columns(mappedPair.colIndex).isNullAt(mappedPair.rowIndex)
-//  }
-//
-//  override def getInt(ordinal: Int): Int = {
-//    val mappedPair: ArrowColumnarBatchRow.IndexPair = mapOrdinalToIndexPair(ordinal)
-//    columns(mappedPair.colIndex).getInt(mappedPair.rowIndex)
-//  }
-//override def getArray(ordinal: Int): ArrayData = throw new UnsupportedOperationException()
-
-  /** Option 2: batch is a row that contains Array-typed elements (= columns) */
-
   override def numFields: Int = columns.length
 
   def length: Long = numRows
@@ -68,11 +43,9 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 
 
   // unsupported getters
-//  override def isNullAt(ordinal: Int): Boolean = throw new UnsupportedOperationException()
   override def get(ordinal: Int, dataType: DataType): AnyRef = throw new UnsupportedOperationException()
   override def getByte(ordinal: Int): Byte = throw new UnsupportedOperationException()
   override def getShort(ordinal: Int): Short = throw new UnsupportedOperationException()
-//  override def getInt(ordinal: Int): Int = throw new UnsupportedOperationException()
   override def getBoolean(ordinal: Int): Boolean = throw new UnsupportedOperationException()
   override def getLong(ordinal: Int): Long = throw new UnsupportedOperationException()
   override def getFloat(ordinal: Int): Float = throw new UnsupportedOperationException()
@@ -356,6 +329,65 @@ object ArrowColumnarBatchRow {
   //      vec.swap(i, realIndex)
   //    }
   // Note: worst case: 0 + 1 + 2 + ... + (n-1) = ((n-1) * n) / 2 = O(n*n) + time to sort (n log n)
+
+  /**
+   * Performs a multi-columns sort on a batch
+   * @param batch batch to sort
+   * @param sortOrders orders to sort on
+   * @return a new, sorted, batch
+   */
+  def multiColumnSort(batch: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): ArrowColumnarBatchRow = {
+    if (batch.numFields < 1)
+      return batch
+
+    // prepare comparator and UnionVector
+    val union = new UnionVector("Combiner", batch.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
+    sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
+      val name = sortOrder.child.asInstanceOf[AttributeReference].name
+      batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
+        val valueVector = vector.getValueVector
+        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        tp.splitAndTransfer(0, batch.numRows.toInt)
+        union.addVector(tp.getTo.asInstanceOf[FieldVector])
+        comparators(index) = (
+          name,
+          new SparkComparator[ValueVector](sortOrder, DefaultVectorComparators.createDefaultComparator(valueVector))
+        )
+      })
+    }
+    val comparator = new SparkUnionComparator(comparators)
+    union.setValueCount(batch.numRows.toInt)
+
+    // compute the index-vector
+    val first_vector = batch.columns(0).getValueVector
+    val indices = new IntVector("indexHolder", first_vector.getAllocator)
+    assert(first_vector.getValueCount > 0)
+    indices.allocateNew(first_vector.getValueCount)
+    indices.setValueCount(first_vector.getValueCount)
+    (new IndexSorter).sort(union, indices, comparator)
+
+    // sort all columns
+    new ArrowColumnarBatchRow( batch.columns map { column =>
+      val vector = column.getValueVector
+      assert(vector.getValueCount == indices.getValueCount)
+
+      // transfer type
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.splitAndTransfer(0, vector.getValueCount)
+      val new_vector = tp.getTo
+
+      new_vector.setInitialCapacity(indices.getValueCount)
+      new_vector.allocateNew()
+      assert(indices.getValueCount > 0)
+      assert(indices.getValueCount.equals(vector.getValueCount))
+      /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
+      0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
+      new_vector.setValueCount(indices.getValueCount)
+
+      new ArrowColumnVector(new_vector)
+    }, batch.numRows)
+  }
 
   /**
    * @param batch an ArrowColumnarBatchRow to be sorted

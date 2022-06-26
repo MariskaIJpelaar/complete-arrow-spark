@@ -32,7 +32,7 @@ class SparkComparator[T <: ValueVector : ClassTag](val sortOrder: SortOrder, val
       -baseComparator.compareNotNull(index1, index2)
   }
 
-  override def createNew(): VectorValueComparator[T] = { new SparkComparator[T](sortOrder, baseComparator) }
+  override def createNew(): VectorValueComparator[T] = new SparkComparator[T](sortOrder, baseComparator)
 
   override def attachVectors(vector1: T, vector2: T): Unit = {
     super.attachVectors(vector1, vector2)
