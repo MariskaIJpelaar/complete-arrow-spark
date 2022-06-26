@@ -29,12 +29,12 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
   private val num_cols = 2
   case class Row(var colA: Int, var colB: Int)
-  private val table : util.List[Row] = new util.ArrayList[Row]()
 
-  def generateParquets(key: Int => Int, randomValue: Boolean, size: Int = default_size): Unit = {
+  def generateParquets(key: Int => Int, randomValue: Boolean, size: Int = default_size): util.List[Row] = {
     val directory = new Directory(new File(directory_name))
     assert(!directory.exists || directory.deleteRecursively())
 
+    val table: util.List[Row] = new util.ArrayList[Row]()
     val records: util.List[GenericData.Record] = new util.ArrayList[GenericData.Record]()
     0 until size foreach { i =>
       val numA: Int = key(i)
@@ -52,6 +52,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     ))}
 
     ParquetWriter.write_batch(schema, writeables, true)
+    table
   }
 
   def generateSpark(): SparkSession = {
@@ -64,7 +65,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     spark
   }
 
-  def computeAnswer(onColA: Boolean = true) : Unit = {
+  def computeAnswer(table: util.List[Row], onColA: Boolean = true): Unit = {
     // from: https://stackoverflow.com/questions/4805606/how-to-sort-by-two-fields-in-java
     Collections.sort(table, new Comparator[Row]() {
       override def compare(t: Row, t1: Row): Int = {
@@ -114,7 +115,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     })
   }
 
-  def checkAnswer(answer: Array[ColumnBatch], size: Int = default_size): Unit = {
+  def checkAnswer(table: util.List[Row], answer: Array[ColumnBatch], size: Int = default_size): Unit = {
     val cols = TColumn.fromBatches(answer)
     assert(cols.length == num_cols)
 
@@ -138,7 +139,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     }
   }
 
-  def checkSorted(answer: Array[ColumnBatch], size: Int = default_size): Unit = {
+  def checkSorted(table: util.List[Row], answer: Array[ColumnBatch], size: Int = default_size): Unit = {
     val cols = TColumn.fromBatches(answer)
 
     0 until num_cols foreach { colIndex =>
@@ -166,7 +167,6 @@ class LazyReaderSmallTest extends AnyFunSuite {
     checkFirstNonRandom(df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow])
 
     directory.deleteRecursively()
-    table.clear()
   }
 
   test("Lazy read first row of simple Dataset with ascending numbers through ColumnDataFrame") {
@@ -180,7 +180,6 @@ class LazyReaderSmallTest extends AnyFunSuite {
     checkFirstNonRandom(df.first())
 
     directory.deleteRecursively()
-    table.clear()
   }
 
   test("Lazy read simple Dataset with ascending numbers through ColumnDataFrame") {
@@ -194,26 +193,24 @@ class LazyReaderSmallTest extends AnyFunSuite {
     checkAnswerNonRandom(df.collect())
 
     directory.deleteRecursively()
-    table.clear()
   }
 
   test("Lazy read simple Dataset with ascending key-column and random value-column through ColumnDataFrame") {
-    generateParquets(key = i => i, randomValue = true)
+    val table = generateParquets(key = i => i, randomValue = true)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
     val spark = generateSpark()
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain("formatted")
-    checkAnswer(df.collect())
+    checkAnswer(table, df.collect())
 
     directory.deleteRecursively()
-    table.clear()
   }
 
   test("Performing ColumnarSort on a simple, very small, non-random, Dataset using lazy Reading") {
     val size = 10
-    generateParquets(key = i => i*2, randomValue = false, size = size)
+    val table = generateParquets(key = i => i*2, randomValue = false, size = size)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -227,18 +224,17 @@ class LazyReaderSmallTest extends AnyFunSuite {
     new_df.explain("formatted")
 
     // Compute answer
-    computeAnswer()
+    computeAnswer(table)
 
     // Check if result is equal to our computed table
-    checkSorted(new_df.collect(), size = size)
+    checkSorted(table, new_df.collect(), size = size)
 
     directory.deleteRecursively()
-    table.clear()
   }
 
   test("Performing single-column ColumnarSort on a simple, random, Dataset using Lazy Reading") {
     // Generate Dataset
-    generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true)
+    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -252,18 +248,17 @@ class LazyReaderSmallTest extends AnyFunSuite {
     new_df.explain("formatted")
 
     // Compute answer
-    computeAnswer(onColA = false)
+    computeAnswer(table, onColA = false)
 
     // Check if result is equal to our computed table
-    checkSorted(new_df.collect())
+    checkSorted(table, new_df.collect())
 
     directory.deleteRecursively()
-    table.clear()
   }
 
   test("Performing ColumnarSort on a simple, semi-random, Dataset using Lazy Reading") {
     // Generate Dataset
-    generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = false)
+    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -277,18 +272,17 @@ class LazyReaderSmallTest extends AnyFunSuite {
     new_df.explain("formatted")
 
     // Compute answer
-    computeAnswer()
+    computeAnswer(table)
 
     // Check if result is equal to our computed table
-    checkSorted(new_df.collect())
+    checkSorted(table, new_df.collect())
 
     directory.deleteRecursively()
-    table.clear()
   }
 
   test("Performing ColumnarSort on a simple, random, Dataset using Lazy Reading") {
     // Generate Dataset
-    generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true)
+    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -303,13 +297,12 @@ class LazyReaderSmallTest extends AnyFunSuite {
     new_df.explain("formatted")
 
     // Compute answer
-    computeAnswer()
+    computeAnswer(table)
 
     // Check if result is equal to our computed table
-    checkSorted(new_df.collect())
+    checkSorted(table, new_df.collect())
 
     directory.deleteRecursively()
-    table.clear()
   }
 
 
