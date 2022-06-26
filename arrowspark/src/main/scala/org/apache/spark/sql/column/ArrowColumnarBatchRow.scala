@@ -156,9 +156,9 @@ object ArrowColumnarBatchRow {
     validityBuffer.getBytes(start_byte, old, 0, num_bytes.toInt)
 
     old.zipWithIndex foreach { case (byte, index) =>
-      val msb = if (index == 0) last_bit+1 else largest_bit
+      val msb = if (index == old.length) last_bit+1 else largest_bit
       var bitMask = (1 << msb) -1 // everything is valid, from msb-1 to the last bit
-      val lsb = if (index == old.length) start_bit else 0 // everything is valid from msb-1 to lsb
+      val lsb = if (index == 0) start_bit else 0 // everything is valid from msb-1 to lsb
       bitMask = (bitMask >> lsb) << lsb
 
       old(index) = (byte | bitMask).toByte

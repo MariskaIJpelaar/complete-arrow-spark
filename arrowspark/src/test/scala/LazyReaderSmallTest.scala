@@ -205,7 +205,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     directory.deleteRecursively()
   }
 
-  test("Performing ColumnarSort on a simple, very small, random, Dataset using lazy Reading") {
+  test("Performing ColumnarSort on a simple, very small, non-random, Dataset using lazy Reading") {
     val size = 10
     generateParquets(key = i => i*2, randomValue = false, size = size)
     val directory = new Directory(new File(directory_name))
