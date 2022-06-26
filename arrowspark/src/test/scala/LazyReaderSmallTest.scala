@@ -16,7 +16,7 @@ import scala.language.postfixOps
 import scala.reflect.io.Directory
 
 class LazyReaderSmallTest extends AnyFunSuite {
-  private val size = 100 * 1000 // 100k
+  private val default_size = 100 * 1000 // 100k
   private val num_files = 10
   private val directory_name = "data/numbers"
   private val schema = SchemaBuilder.builder("simple_double_column")
@@ -31,7 +31,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
   case class Row(var colA: Int, var colB: Int)
   private val table : util.List[Row] = new util.ArrayList[Row]()
 
-  def generateParquets(key: Int => Int, randomValue: Boolean): Unit = {
+  def generateParquets(key: Int => Int, randomValue: Boolean, size: Int = default_size): Unit = {
     val directory = new Directory(new File(directory_name))
     assert(!directory.exists || directory.deleteRecursively())
 
@@ -95,7 +95,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     }))
   }
 
-  def checkAnswerNonRandom(answer: Array[ColumnBatch]): Unit = {
+  def checkAnswerNonRandom(answer: Array[ColumnBatch], size: Int = default_size): Unit = {
     val cols = TColumn.fromBatches(answer)
     assert(cols.length == num_cols)
 
@@ -112,7 +112,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     })
   }
 
-  def checkAnswer(answer: Array[ColumnBatch]): Unit = {
+  def checkAnswer(answer: Array[ColumnBatch], size: Int = default_size): Unit = {
     val cols = TColumn.fromBatches(answer)
     assert(cols.length == num_cols)
 
@@ -136,7 +136,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     }
   }
 
-  def checkSorted(answer: Array[ColumnBatch]): Unit = {
+  def checkSorted(answer: Array[ColumnBatch], size: Int = default_size): Unit = {
     val cols = TColumn.fromBatches(answer)
 
     0 until num_cols foreach { colIndex =>
@@ -201,6 +201,30 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain("formatted")
     checkAnswer(df.collect())
+
+    directory.deleteRecursively()
+  }
+
+  test("Performing ColumnarSort on a simple, very small, random, Dataset using lazy Reading") {
+    val size = 10
+    generateParquets(key = i => i*2, randomValue = false, size = size)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+
+    // Construct DataFrame
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+
+    // Perform ColumnarSort
+    val new_df = df.sort("numA", "numB")
+    new_df.explain("formatted")
+
+    // Compute answer
+    computeAnswer()
+
+    // Check if result is equal to our computed table
+    checkSorted(new_df.collect(), size = size)
 
     directory.deleteRecursively()
   }

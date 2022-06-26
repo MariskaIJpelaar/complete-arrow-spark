@@ -1,8 +1,8 @@
 package org.apache.spark.sql.execution
 
 import org.apache.arrow.memory.RootAllocator
-import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
+import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
@@ -11,7 +11,7 @@ import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
 
-import java.io.{ByteArrayInputStream, InputStream, ObjectInputStream, ObjectOutputStream, OutputStream}
+import java.io._
 import java.nio.ByteBuffer
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
@@ -25,7 +25,7 @@ class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extend
 }
 
 private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric]) extends SerializerInstance {
-  private val intermediate = 42
+  private val intermediate = 'B'
 
   override def serializeStream(s: OutputStream): SerializationStream = new SerializationStream {
     private var root: Option[VectorSchemaRoot] = None
@@ -40,22 +40,23 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private def getOos: ObjectOutputStream = {
       if (oos.isDefined) return oos.get
 
-      s.write(intermediate)
-      s.flush()
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-      oos = Option(new ObjectOutputStream(codec.compressedOutputStream(s)))
+      val cos = codec.compressedOutputStream(s)
+      cos.write(intermediate.toByte)
+      oos = Option(new ObjectOutputStream(cos))
+//      oos.get.writeChar(intermediate)
       oos.get
     }
 
     private def getWriter(batch: ArrowColumnarBatchRow): ArrowStreamWriter = {
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
-        new VectorLoader(root.get).load(batch.toArrowRecordBatch(root.get.getFieldVectors.size()))
+        new VectorLoader(root.get).load(batch.toArrowRecordBatch(batch.numFields))
         writer.get.start()
         return writer.get
       }
 
-      new VectorLoader(root.get).load(batch.toArrowRecordBatch(root.get.getFieldVectors.size()))
+      new VectorLoader(root.get).load(batch.toArrowRecordBatch(batch.numFields))
       writer.get
     }
 
@@ -87,7 +88,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     /** Currently, we read in everything.
      * FIXME: read in batches :) */
     private val all = new ArrayBuffer[Byte]()
-    private val batchSizes = 65536 // 65k
+    private val batchSizes = 65536 // 64k
     private val batch = new Array[Byte](batchSizes)
     private var readin = s.read(batch)
     while (readin != -1) {
@@ -101,18 +102,19 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       private val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
       private var ois: Option[ObjectInputStream] = None
       private def initOis(): Unit = {
+        val cis = codec.compressedInputStream(bis)
         val check = new Array[Byte](1)
-        if (bis.read(check) == -1) {
+        if (cis.read(check) == -1) {
           ois = None
           return
         }
-        while (check(0) != intermediate) {
-          if (bis.read(check) == -1) {
+        while (check(0).toChar != intermediate) {
+          if (cis.read(check) == -1) {
             ois = None
             return
           }
         }
-        ois = Option(new ObjectInputStream(codec.compressedInputStream(bis)))
+        ois = Option(new ObjectInputStream(cis))
       }
       private lazy val allocator = new RootAllocator()
       private var reader: Option[ArrowStreamReader] = None
@@ -130,11 +132,14 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
 
         if (!reader.get.loadNextBatch()) {
+          reader.get.close(false)
           initReader()
           if (reader.isEmpty) {
             finished = true
             return null
           }
+          if (!reader.get.loadNextBatch())
+            throw new RuntimeException("[ArrowColumnarBatchRowSerializer] Corrupted Stream")
         }
 
         val columns = reader.get.getVectorSchemaRoot.getFieldVectors
