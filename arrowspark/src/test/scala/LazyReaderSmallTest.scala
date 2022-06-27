@@ -59,7 +59,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val spark = SparkSession.builder().appName("LazyReaderSmallTest")
       .config("spark.memory.offHeap.enabled", "true")
       .config("spark.memory.offHeap.size", "3048576")
-      .master("local")
+      .master("local[4]")
       .withExtensions(ArrowSparkExtensionWrapper.injectAll).getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
     spark
@@ -294,6 +294,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
 
     // Perform ColumnarSort
+    // TODO: check: link: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/content/spark-sql-SparkPlan-ShuffleExchangeExec.html
     val new_df = df.sort("numA", "numB")
     new_df.explain("formatted")
 
