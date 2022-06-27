@@ -294,7 +294,6 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
 
     // Perform ColumnarSort
-    // TODO: check: link: https://jaceklaskowski.gitbooks.io/mastering-spark-sql/content/spark-sql-SparkPlan-ShuffleExchangeExec.html
     val new_df = df.sort("numA", "numB")
     new_df.explain("formatted")
 
@@ -303,6 +302,31 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect())
+
+    directory.deleteRecursively()
+  }
+
+  test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading") {
+    // Generate Dataset
+    val size = default_size * 15
+    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true, size = size)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+
+    // Construct DataFrame
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+
+    // Perform ColumnarSort
+    val new_df = df.sort("numA", "numB")
+    new_df.explain("formatted")
+
+    // Compute answer
+    computeAnswer(table)
+
+    // Check if result is equal to our computed table
+    checkSorted(table, new_df.collect(), size = size)
 
     directory.deleteRecursively()
   }
