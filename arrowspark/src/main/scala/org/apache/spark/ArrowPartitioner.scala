@@ -5,6 +5,7 @@ import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -56,7 +57,7 @@ class ArrowRangePartitioner[V](
     }
     if (allocator.isEmpty) new ArrowColumnarBatchRow(Array.empty, 0)
 
-    // we start by sorting the batches
+    // we start by sorting the batches, and making the rows unique
     // we keep the weights by adding them as an extra column to the batch
     var totalRows = 0
     val batches = candidates map { case (batch, weight) =>
@@ -64,18 +65,38 @@ class ArrowRangePartitioner[V](
       weights.setValueCount(batch.numRows.toInt)
       0 until batch.numRows.toInt foreach { index => weights.set(index, weight) }
       totalRows += batch.numRows.toInt
-      batch.appendColumns( Array(weights) )
+      batch.appendColumns( Array(new ArrowColumnVector(weights)) )
     }
     val grouped = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator), totalRows)
     val sorted = ArrowColumnarBatchRow.multiColumnSort(grouped, orders)
+    val (unique, weighted) = ArrowColumnarBatchRow.unique(sorted, orders).splitColumns(grouped.numFields-1)
 
+    // now we gather our bounds
+    assert(weighted.numFields == 1)
+    val weights = weighted.getArray(0)
+    val step = (0 until weights.numElements() map weights.getFloat).sum / partitions
+    var cumWeight = 0.0
+    var target = step
+    var bounds = new ArrowColumnarBatchRow(Array.empty, 0)
+    0 until unique.numRows.toInt takeWhile { index =>
+      cumWeight += weights.getFloat(index)
+      if (cumWeight >= target) {
+        bounds = new ArrowColumnarBatchRow(
+          ArrowColumnarBatchRow.take(Iterator(bounds, unique.take( index until index+1 ) )),
+          bounds.numRows + 1)
+        target += step
+      }
 
-    ???
+      bounds.numRows < partitions -1
+    }
+
+    assert(bounds.numRows < Integer.MAX_VALUE)
+    bounds
   }
 
   // an array of upper bounds for the first (partitions-1) partitions
   // inspired by: org.apache.spark.RangePartitioner::rangeBounds
-  private val rangeBounds: Array[ArrowColumnarBatchRow] = {
+  private val rangeBounds: ArrowColumnarBatchRow = {
     if (partitions <= 1) Array.empty
 
     // This is the sample size we need to have roughly balanced output partitions, capped at 1M.
@@ -109,10 +130,10 @@ class ArrowRangePartitioner[V](
     }
 
     // determine bounds
-    ???
+    determineBounds(candidates, math.min(partitions, candidates.size))
   }
 
-  override def numPartitions: Int = rangeBounds.length + 1
+  override def numPartitions: Int = rangeBounds.length.toInt + 1
 
 //  private var binarySearch: ((Array[ArrowColumnarBatchRow], ArrowColumnarBatchRow) => Int) = CollectionsUtils.makeBinarySearch[ArrowColumnarBatchRow]
 
@@ -120,7 +141,7 @@ class ArrowRangePartitioner[V](
    * org.apache.spark.Partitioner */
   override def equals(other: Any): Boolean = other match {
     case r: ArrowRangePartitioner[_] =>
-      r.rangeBounds.sameElements(rangeBounds) && r.ascending == ascending
+      r.rangeBounds.equals(rangeBounds) && r.ascending == ascending
     case _ =>
       false
   }
@@ -128,11 +149,7 @@ class ArrowRangePartitioner[V](
   override def hashCode(): Int = {
     val prime = 31
     var result = 1
-    var i = 0
-    while (i < rangeBounds.length) {
-      result = prime * result + rangeBounds(i).hashCode
-      i += 1
-    }
+    result = prime * result + rangeBounds.hashCode()
     result = prime * result + ascending.hashCode
     result
   }

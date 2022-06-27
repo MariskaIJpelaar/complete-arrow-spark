@@ -1,5 +1,6 @@
 package org.apache.spark.sql.column
 
+import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
 import org.apache.arrow.memory.{ArrowBuf, BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.complex.UnionVector
@@ -28,6 +29,8 @@ import scala.collection.immutable.NumericRange
 import scala.util.Random
 
 // TODO: at some point, we might have to split up functionalities into more files
+// TODO: memory management
+// TODO: change numRows to Int?
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   override def numFields: Int = columns.length
@@ -160,9 +163,51 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
   def appendColumns(cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow =
     new ArrowColumnarBatchRow(columns ++ cols, numRows)
 
+  /**
+   * Splits the current batch on its columns into two batches
+   * @param col column index to split on
+   * @return a pair of the two batches containing the split columns from this batch
+   */
+  def splitColumns(col: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) =
+    (new ArrowColumnarBatchRow(columns.slice(0, col), numRows),
+      new ArrowColumnarBatchRow(columns.slice(col, numFields), numRows))
+
   override def close(): Unit = columns foreach(column => column.close())
 
   def getSizeInBytes: Int = columns.map(column => column.getValueVector.getBufferSize ).sum
+
+  override def hashCode(): Int = {
+    val prime = 67
+    var result = 1
+    columns foreach { c =>
+      val column = c.getValueVector
+      0 until column.getValueCount foreach { index =>result = prime * result + column.hashCode(index) }
+    }
+    result = prime * result + numRows.hashCode()
+    result
+  }
+
+  override def equals(o: Any): Boolean = o match {
+    case other: ArrowColumnarBatchRow =>
+      if (other.numRows != numRows) return false
+      if (other.numFields != numFields) return false
+
+      other.columns zip columns foreach { case (a, b) =>
+        val ours = a.getValueVector
+        val theirs = b.getValueVector
+        if (ours.getField != theirs.getField)
+          return false
+        if (ours.getValueCount != theirs.getValueCount)
+          return false
+
+        0 until numRows.toInt foreach { index =>
+          if (ours.hashCode(index) != theirs.hashCode(index))
+            return false
+        }
+      }
+      true
+    case _ => false
+  }
 }
 
 object ArrowColumnarBatchRow {
@@ -485,6 +530,41 @@ object ArrowColumnarBatchRow {
 
       new ArrowColumnVector(new_vector)
     }, batch.numRows)
+  }
+
+
+  def unique(batch: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): ArrowColumnarBatchRow = {
+    if (batch.numFields < 1)
+      return batch
+
+    // prepare comparator and UnionVector
+    val union = new UnionVector("Combiner", batch.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
+    sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
+      val name = sortOrder.child.asInstanceOf[AttributeReference].name
+      batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
+        val valueVector = vector.getValueVector
+        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        tp.splitAndTransfer(0, batch.numRows.toInt)
+        union.addVector(tp.getTo.asInstanceOf[FieldVector])
+        comparators(index) = (
+          name,
+          new SparkComparator[ValueVector](sortOrder, DefaultVectorComparators.createDefaultComparator(valueVector))
+        )
+      })
+    }
+    val comparator = new SparkUnionComparator(comparators)
+    union.setValueCount(batch.numRows.toInt)
+
+    // compute the index-vector
+    val first_vector = batch.columns(0).getValueVector
+    val indices = new IntVector("indexHolder", first_vector.getAllocator)
+    assert(first_vector.getValueCount > 0)
+    indices.allocateNew(first_vector.getValueCount)
+    indices.setValueCount(first_vector.getValueCount)
+    val unique = new VectorDeduplicator(comparator, union).unique()
+    new ArrowColumnarBatchRow(unique.getChildrenFromFields.toArray.map( field =>
+      new ArrowColumnVector(field.asInstanceOf[ValueVector])), unique.getValueCount)
   }
 
   /**
