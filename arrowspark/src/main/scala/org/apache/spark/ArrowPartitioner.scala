@@ -1,0 +1,106 @@
+package org.apache.spark
+
+import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
+
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+import scala.util.hashing.byteswap32
+
+abstract class ArrowPartitioner extends Partitioner {
+  override def getPartition(key: Any): Int = throw new UnsupportedOperationException()
+  def getPartitions(key: ArrowColumnarBatchRow): Array[Int]
+}
+
+class ArrowRangePartitioner[V](
+     partitions: Int,
+     rdd: RDD[_ <: Product2[ArrowColumnarBatchRow, V]],
+     private var ascending: Boolean = true,
+     val samplePointsPerPartitionHint: Int = 20) extends ArrowPartitioner {
+
+  // We allow partitions = 0, which happens when sorting an empty RDD under the default settings.
+  require(partitions >= 0, s"Number of partitions cannot be negative but found $partitions.")
+  require(samplePointsPerPartitionHint > 0,
+    s"Sample points per partition must be greater than 0 but found $samplePointsPerPartitionHint")
+
+//  private var ordering = implicitly[Ordering[ArrowColumnarBatchRow]]
+
+  /** Note: inspiration from: org.apache.spark.Partitioner::sketch */
+  private def sketch(rdd: RDD[ArrowColumnarBatchRow], sampleSizePerPartition: Int):
+  (Long, Array[(Int, Long, ArrowColumnarBatchRow)]) = {
+    val shift = rdd.id
+    val sketched = rdd.mapPartitionsWithIndex { (idx, iter) =>
+      val seed = byteswap32(idx ^ (shift << 16))
+      val (sample, n) = ArrowColumnarBatchRow.sampleAndCount(iter, sampleSizePerPartition, seed)
+      Iterator((idx, n, sample))
+    }.collect()
+    val numItems = sketched.map(_._2).sum
+    (numItems, sketched)
+  }
+
+  // an array of upper bounds for the first (partitions-1) partitions
+  private val rangeBounds: Array[ArrowColumnarBatchRow] = {
+    if (partitions <= 1) Array.empty
+
+    // This is the sample size we need to have roughly balanced output partitions, capped at 1M.
+    // Cast to double to avoid overflowing ints or longs
+    val sampleSize = math.min(samplePointsPerPartitionHint.toDouble * partitions, 1e6)
+    // Assume the input partitions are roughly balanced and over-sample a little bit.
+    val sampleSizePerPartition = math.ceil(3.0 * sampleSize / rdd.partitions.length).toInt
+
+    // 'sketch' the distribution from a sample
+    val (numItems, sketched) = sketch(rdd.map(_._1), sampleSizePerPartition)
+    if (numItems == 0L) Array.empty
+
+    // If the partitions are imbalanced, we re-sample from it
+    val fraction = math.min(sampleSize / math.max(numItems, 1L), 1.0)
+    val candidates = ArrayBuffer.empty[(ArrowColumnarBatchRow, Float)]
+    val imbalancedPartitions = mutable.Set.empty[Int]
+    sketched foreach { case (idx, n, sample) =>
+      if (fraction * n > sampleSizePerPartition) {
+        imbalancedPartitions += idx
+      } else {
+        val weight = (n.toDouble / sample.length).toFloat
+        candidates += ((sample, weight))
+      }
+    }
+    if (imbalancedPartitions.nonEmpty) {
+      val imbalanced = new PartitionPruningRDD(rdd.map(_._1), imbalancedPartitions.contains)
+      val seed = byteswap32(-rdd.id -1)
+      val reSampled = imbalanced.mapPartitionsInternal( iter => ??? /* ArrowColumnBatchRow.sample(fraction, seed) */ )
+      val weight = (1.0 / fraction).toFloat
+//      candidates ++= reSampled.map( x => (x, weight))
+      ???
+    }
+
+    // determine bounds
+    ???
+  }
+
+  override def numPartitions: Int = rangeBounds.length + 1
+
+//  private var binarySearch: ((Array[ArrowColumnarBatchRow], ArrowColumnarBatchRow) => Int) = CollectionsUtils.makeBinarySearch[ArrowColumnarBatchRow]
+
+  /** Note: below two functions are directly copied from
+   * org.apache.spark.Partitioner */
+  override def equals(other: Any): Boolean = other match {
+    case r: ArrowRangePartitioner[_] =>
+      r.rangeBounds.sameElements(rangeBounds) && r.ascending == ascending
+    case _ =>
+      false
+  }
+
+  override def hashCode(): Int = {
+    val prime = 31
+    var result = 1
+    var i = 0
+    while (i < rangeBounds.length) {
+      result = prime * result + rangeBounds(i).hashCode
+      i += 1
+    }
+    result = prime * result + ascending.hashCode
+    result
+  }
+
+  override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = ???
+}

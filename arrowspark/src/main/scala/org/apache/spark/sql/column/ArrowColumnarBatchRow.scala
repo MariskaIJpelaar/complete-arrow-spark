@@ -2,7 +2,7 @@ package org.apache.spark.sql.column
 
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
 import org.apache.arrow.memory.{ArrowBuf, RootAllocator}
-import org.apache.arrow.vector.complex.{StructVector, UnionVector}
+import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
@@ -18,12 +18,14 @@ import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarArray}
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
 import org.apache.spark.util.NextIterator
+import org.apache.spark.util.random.XORShiftRandom
 
 import java.io._
 import java.nio.channels.Channels
 import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.immutable.NumericRange
+import scala.util.Random
 
 // TODO: at some point, we might have to split up functionalities into more files
 
@@ -102,6 +104,48 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
     }, numRows)
+  }
+
+  /**
+   * Performs a projection on the batch given some expressions
+   * @param indices the sequence of indices which define the projection
+   * @return a fresh batch projected from the current batch
+   */
+  def projection(indices: Seq[Int]): ArrowColumnarBatchRow = {
+    new ArrowColumnarBatchRow( indices.toArray map ( index => {
+      val vector = columns(index).getValueVector
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.transfer()
+      new ArrowColumnVector(tp.getTo)
+    }), numRows)
+  }
+
+  /**
+   * Takes a range of rows from the batch
+   * @param range the range to take
+   * @return the split batch
+   * NOTE: assumes 0 <= range < numRows
+   */
+  def take(range: Range): ArrowColumnarBatchRow = {
+    new ArrowColumnarBatchRow( columns map ( column => {
+      val vector = column.getValueVector
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.splitAndTransfer(range.head, range.length)
+      new ArrowColumnVector(tp.getTo)
+    }), range.length)
+  }
+
+  /**
+   * Copy the values at the row at index thatIndex from the given batch to the row of this batch
+   * at index thisIndex
+   * @param from batch to copy from
+   * @param thisIndex index to copy to
+   * @param thatIndex index to copy from
+   */
+  def copyAtIndex(from: ArrowColumnarBatchRow, thisIndex: Int, thatIndex: Int): Unit = {
+    if (thisIndex > numRows-1) return
+    if (thatIndex > from.numRows -1) return
+    columns zip from.columns foreach { case (ours, theirs) => ours.getValueVector.copyFrom(thatIndex, thisIndex, theirs.getValueVector)}
   }
 
   override def close(): Unit = columns foreach(column => column.close())
@@ -429,5 +473,92 @@ object ArrowColumnarBatchRow {
 
       new ArrowColumnVector(new_vector)
     }, batch.numRows)
+  }
+
+  def sample(input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
+    if (!input.hasNext) new ArrowColumnarBatchRow(Array.empty, 0)
+
+    // The first batch should be separate, so we can determine the vector-types
+    val first = input.next()
+
+
+    // TODO: we have an array of 'empty vectors. Next step: populate it with random sampling
+    val array = Array.tabulate[ArrowColumnVector](first.numFields) { i =>
+      val vector = first.columns(i).getValueVector
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.splitAndTransfer(0, first.numRows.toInt)
+      // we 'copy' the content of the first batch ...
+      val old_vec = tp.getTo
+      // ... and re-use the ValueVector so we do not have to determine vector types :)
+      vector.clear()
+      vector.allocateNew()
+//      // make sure we have enough space
+//      while (vector.getBufferSizeFor(vector.getValueCapacity) < num_bytes) vector.reAlloc()
+      new ArrowColumnVector(vector)
+    }
+
+    ???
+
+  }
+
+  /**
+   * Reservoir sampling implementation that also returns the input size
+   * Note: inspiration from org.apache.spark.util.random.RandomUtils::reservoirSampleAndCount
+   * @param input input batches
+   * @param k reservoir size
+   * @param seed random seed
+   * @return array of sampled batches and size of the input
+   */
+  def sampleAndCount(input: Iterator[ArrowColumnarBatchRow], k: Int, seed: Long = Random.nextLong()):
+      (ArrowColumnarBatchRow, Long) = {
+    if (!input.hasNext || k < 1) (Array.empty[ArrowColumnarBatchRow], 0)
+
+    var batch = input.next()
+    assert(batch.numRows <= Integer.MAX_VALUE)
+    var i: Long = math.min(k, batch.numRows)
+    var reservoir = batch.take(0 until i.toInt)
+    var length = 0L
+    while (i < k) {
+      // we have consumed all elements
+      if (!input.hasNext) return (reservoir, i)
+
+      batch = input.next()
+      assert(batch.numRows <= Integer.MAX_VALUE)
+      length = math.min(k-i, batch.numRows)
+      reservoir = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(Iterator(reservoir, batch)), i)
+      i += length
+    }
+
+    // we now have a reservoir with length k, in which we will replace random elements
+    val rand = new XORShiftRandom(seed)
+    def generateRandomNumber(start: Int = 0, end: Int = Integer.MAX_VALUE-1) : Int = {
+      start + rand.nextInt( (end-start) + 1)
+    }
+
+    // first, we check if there are any elements left in our current batch
+    if (length != batch.numRows) {
+      // take a random range of our remainder
+      val start = generateRandomNumber(length.toInt -1, (batch.numRows-1).toInt)
+      val end = generateRandomNumber(start, batch.numRows.toInt)
+      val sample = batch.take(start until end)
+      0 until sample.numRows.toInt foreach { index =>
+       reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+      }
+      i += sample.numRows
+    }
+
+    // now we keep sampling as long as there is input
+    while (input.hasNext) {
+      batch = input.next()
+      val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
+      val end = generateRandomNumber(start, batch.numRows.toInt)
+      val sample = batch.take(start until end)
+      0 until sample.numRows.toInt foreach { index =>
+        reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+      }
+      i += sample.numRows
+    }
+
+    (reservoir, i)
   }
 }
