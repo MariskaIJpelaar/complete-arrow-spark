@@ -1,6 +1,9 @@
 package org.apache.spark
 
+import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
+import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
 import scala.collection.mutable
@@ -15,6 +18,7 @@ abstract class ArrowPartitioner extends Partitioner {
 class ArrowRangePartitioner[V](
      partitions: Int,
      rdd: RDD[_ <: Product2[ArrowColumnarBatchRow, V]],
+     orders: Seq[SortOrder],
      private var ascending: Boolean = true,
      val samplePointsPerPartitionHint: Int = 20) extends ArrowPartitioner {
 
@@ -25,7 +29,7 @@ class ArrowRangePartitioner[V](
 
 //  private var ordering = implicitly[Ordering[ArrowColumnarBatchRow]]
 
-  /** Note: inspiration from: org.apache.spark.Partitioner::sketch */
+  /** Note: inspiration from: org.apache.spark.RangePartitioner::sketch */
   private def sketch(rdd: RDD[ArrowColumnarBatchRow], sampleSizePerPartition: Int):
   (Long, Array[(Int, Long, ArrowColumnarBatchRow)]) = {
     val shift = rdd.id
@@ -38,7 +42,39 @@ class ArrowRangePartitioner[V](
     (numItems, sketched)
   }
 
+  /** Note: inspiration from: org.apache.spark.RangePartitioner::determineBounds */
+  private def determineBounds(
+     candidates: ArrayBuffer[(ArrowColumnarBatchRow, Float)],
+     partitions: Int): ArrowColumnarBatchRow = {
+    // Checks if we have non-empty batches
+    if (candidates.length < 1) new ArrowColumnarBatchRow(Array.empty, 0)
+    var allocator: Option[BufferAllocator] = None
+    candidates.takeWhile { case (batch, _) =>
+      assert(batch.numRows <= Integer.MAX_VALUE)
+      allocator = batch.getFirstAllocator
+      allocator.isDefined
+    }
+    if (allocator.isEmpty) new ArrowColumnarBatchRow(Array.empty, 0)
+
+    // we start by sorting the batches
+    // we keep the weights by adding them as an extra column to the batch
+    var totalRows = 0
+    val batches = candidates map { case (batch, weight) =>
+      val weights = new Float4Vector("weights", allocator.get)
+      weights.setValueCount(batch.numRows.toInt)
+      0 until batch.numRows.toInt foreach { index => weights.set(index, weight) }
+      totalRows += batch.numRows.toInt
+      batch.appendColumns( Array(weights) )
+    }
+    val grouped = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator), totalRows)
+    val sorted = ArrowColumnarBatchRow.multiColumnSort(grouped, orders)
+
+
+    ???
+  }
+
   // an array of upper bounds for the first (partitions-1) partitions
+  // inspired by: org.apache.spark.RangePartitioner::rangeBounds
   private val rangeBounds: Array[ArrowColumnarBatchRow] = {
     if (partitions <= 1) Array.empty
 
@@ -67,10 +103,9 @@ class ArrowRangePartitioner[V](
     if (imbalancedPartitions.nonEmpty) {
       val imbalanced = new PartitionPruningRDD(rdd.map(_._1), imbalancedPartitions.contains)
       val seed = byteswap32(-rdd.id -1)
-      val reSampled = imbalanced.mapPartitionsInternal( iter => ??? /* ArrowColumnBatchRow.sample(fraction, seed) */ )
+      val reSampled = imbalanced.mapPartitionsInternal( iter => Iterator(ArrowColumnarBatchRow.sample(iter, fraction, seed))).collect()
       val weight = (1.0 / fraction).toFloat
-//      candidates ++= reSampled.map( x => (x, weight))
-      ???
+      candidates ++= reSampled.map( x => (x, weight))
     }
 
     // determine bounds

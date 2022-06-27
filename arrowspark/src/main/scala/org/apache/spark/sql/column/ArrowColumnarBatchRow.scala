@@ -1,7 +1,7 @@
 package org.apache.spark.sql.column
 
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
-import org.apache.arrow.memory.{ArrowBuf, RootAllocator}
+import org.apache.arrow.memory.{ArrowBuf, BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
@@ -62,6 +62,10 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
   // unsupported setters
   override def update(i: Int, value: Any): Unit = throw new UnsupportedOperationException()
   override def setNullAt(i: Int): Unit = update(i, null)
+
+  /** Get first available allocator */
+  def getFirstAllocator: Option[BufferAllocator] =
+    if (numFields > 0) Option(columns(0).getValueVector.getAllocator) else None
 
   /** copied from org.apache.arrow.vector.VectorUnloader */
   def toArrowRecordBatch(numCols: Int, numRows: Option[Int] = None): ArrowRecordBatch = {
@@ -147,6 +151,14 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
     if (thatIndex > from.numRows -1) return
     columns zip from.columns foreach { case (ours, theirs) => ours.getValueVector.copyFrom(thatIndex, thisIndex, theirs.getValueVector)}
   }
+
+  /**
+   * @param cols columns to append
+   * @return a fresh batch with appended columns
+   * Note: we assume the columns have as many rows as the batch
+   */
+  def appendColumns(cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow =
+    new ArrowColumnarBatchRow(columns ++ cols, numRows)
 
   override def close(): Unit = columns foreach(column => column.close())
 
@@ -475,30 +487,45 @@ object ArrowColumnarBatchRow {
     }, batch.numRows)
   }
 
+  /**
+   * Sample rows from batches where the sample-size is determined by probability
+   * @param input the batches to sample from
+   * @param fraction the probability of a sample being taken
+   * @param seed a seed for the "random"-generator
+   * @return a fresh batch with the sampled rows
+   */
   def sample(input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
     if (!input.hasNext) new ArrowColumnarBatchRow(Array.empty, 0)
 
     // The first batch should be separate, so we can determine the vector-types
     val first = input.next()
 
-
-    // TODO: we have an array of 'empty vectors. Next step: populate it with random sampling
     val array = Array.tabulate[ArrowColumnVector](first.numFields) { i =>
       val vector = first.columns(i).getValueVector
       val tp = vector.getTransferPair(vector.getAllocator)
-      tp.splitAndTransfer(0, first.numRows.toInt)
       // we 'copy' the content of the first batch ...
-      val old_vec = tp.getTo
+      tp.splitAndTransfer(0, first.numRows.toInt)
       // ... and re-use the ValueVector so we do not have to determine vector types :)
       vector.clear()
       vector.allocateNew()
-//      // make sure we have enough space
-//      while (vector.getBufferSizeFor(vector.getValueCapacity) < num_bytes) vector.reAlloc()
       new ArrowColumnVector(vector)
     }
 
-    ???
-
+    val iter = Iterator(first) ++ input
+    val rand = new XORShiftRandom(seed)
+    var i = 0
+    while (iter.hasNext) {
+      val batch = iter.next()
+      0 until batch.numRows.toInt foreach { index =>
+        // do sample
+        if (rand.nextDouble() <= fraction) {
+          array zip batch.columns foreach { case (ours, theirs) => ours.getValueVector.copyFromSafe(index, i, theirs.getValueVector)}
+          i += 1
+        }
+      }
+    }
+    array foreach ( column => column.getValueVector.setValueCount(i) )
+    new ArrowColumnarBatchRow(array, i)
   }
 
   /**
