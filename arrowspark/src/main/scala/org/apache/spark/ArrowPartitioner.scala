@@ -2,12 +2,14 @@ package org.apache.spark
 
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.Float4Vector
+import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.hashing.byteswap32
@@ -40,14 +42,53 @@ class ArrowRangePartitioner[V](
       val (sample, n) = ArrowColumnarBatchRow.sampleAndCount(iter, sampleSizePerPartition, seed)
       Iterator((idx, n, sample))
     }
-    val extraEncoder = (idx: Int, n: Long, sample: ArrowColumnarBatchRow) => ???
+
+    val extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = item => {
+      val (idx: Int, n: Long, sample: ArrowColumnarBatchRow) = item
+      val bos = new ByteArrayOutputStream()
+      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+      val oos = new ObjectOutputStream(codec.compressedOutputStream(bos))
+
+      oos.writeInt(idx)
+      oos.writeLong(n)
+      oos.flush()
+      oos.close()
+      (bos.toByteArray, sample)
+    }
+
+    val extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (array: Array[Byte], batch: ArrowColumnarBatchRow) => {
+      val bis = new ByteArrayInputStream(array)
+      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+      val ois = new ObjectInputStream(codec.compressedInputStream(bis))
+
+      val idx = ois.readInt()
+      val n = ois.readLong()
+      ois.close()
+      bis.close()
+
+      (idx, n, batch)
+    }
+
+    val extraTaker: Any => (Any, ArrowColumnarBatchRow) = item => {
+      val (idx: Int, n: Long, sample: ArrowColumnarBatchRow) = item
+      ((idx, n), sample)
+    }
+
+    val extraCollector: (Any, Option[Any]) => Any = (item, collection) => {
+      val (idx: Int, n: Long) = item
+      val prev = collection.asInstanceOf[Option[(Int, Long)]]
+      prev.fold( (idx, n) ) { case (jdx, m) =>
+        assert (idx == jdx)
+        (idx, n + m)
+      }
+    }
 
     val sketched = ArrowRDD.collect(
       sketchedRDD,
-      extraEncoder = ???,
-      extraDecoder = ???,
-      extraTaker = ???,
-      extraCollector = ???
+      extraEncoder = extraEncoder,
+      extraDecoder = extraDecoder,
+      extraTaker = extraTaker,
+      extraCollector = extraCollector
     ).map { case (extra: (Int, Long), batch: ArrowColumnarBatchRow) => (extra._1, extra._2, batch) }
     val numItems = sketched.map(_._2).sum
     (numItems, sketched)

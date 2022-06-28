@@ -4,7 +4,6 @@ import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
-import java.io.ObjectInputStream
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
@@ -19,7 +18,7 @@ object ArrowRDD {
    * if the rdd has more complex data than only ArrowColumnarBatchRows
    * @param rdd rdd with the batches
    * @param extraEncoder (optional) split item into encoded custom-data and a batch
-   * @param extraDecoder (optional) decode a stream to custom-data and a batch to a single instance
+   * @param extraDecoder (optional) decode an array of bytes to custom-data and a batch to a single instance
    * @param extraTaker (optional) split the item from the iterator into (customData, batch)
    * @param extraCollector (optional) collect a new item from custom-data, first parameter is new item, second parameter
    *                       is the result from previous calls, None if there were no previous calls. Result of this
@@ -28,8 +27,8 @@ object ArrowRDD {
    */
   def collect[T: ClassTag](rdd: RDD[T],
                            extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
-                           extraDecoder: (ObjectInputStream, ArrowColumnarBatchRow) => Any = (_, batch) => batch,
-                           extraTaker: (Any) => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
+                           extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch,
+                           extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
                            extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None)(implicit ct: ClassTag[T]): Array[(Any, ArrowColumnarBatchRow)] = {
     val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res, extraEncoder = extraEncoder)}
     val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {

@@ -377,6 +377,7 @@ object ArrowColumnarBatchRow {
     // write first batch
     writer.writeBatch()
     oos.writeLong(first_length)
+    oos.writeInt(extra.length)
     oos.write(extra)
     if (left.isDefined) left = Option((left.get - first_length).toInt)
 
@@ -390,6 +391,7 @@ object ArrowColumnarBatchRow {
       new VectorLoader(root).load(batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Option(batch_length.toInt)))
       writer.writeBatch()
       oos.writeLong(batch_length)
+      oos.writeInt(extra.length)
       oos.write(extra)
       if (left.isDefined) left = Option((left.get-batch_length).toInt)
     }
@@ -405,7 +407,7 @@ object ArrowColumnarBatchRow {
    *
    * Users may add additional decoding by providing the 'extraDecoder' function*/
   def decode(bytes: Array[Byte],
-             extraDecoder: (ObjectInputStream, ArrowColumnarBatchRow) => Any = (_, batch) => batch): Iterator[Any] = {
+             extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch): Iterator[Any] = {
     new NextIterator[Any] {
       private lazy val bis = new ByteArrayInputStream(bytes)
       private lazy val ois = {
@@ -423,7 +425,11 @@ object ArrowColumnarBatchRow {
 
         val columns = reader.getVectorSchemaRoot.getFieldVectors
         val length = ois.readLong()
-        extraDecoder(ois, new ArrowColumnarBatchRow((columns map { vector =>
+        val arr_length = ois.readInt()
+        val array = new Array[Byte](arr_length)
+        ois.read(array)
+
+        extraDecoder(array, new ArrowColumnarBatchRow((columns map { vector =>
           val allocator = vector.getAllocator
           val tp = vector.getTransferPair(allocator)
 
