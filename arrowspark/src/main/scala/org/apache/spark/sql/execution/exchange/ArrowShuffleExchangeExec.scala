@@ -86,14 +86,14 @@ object ArrowShuffleExchangeExec {
     // Extract only the columns that matter for sorting
     val rddForSampling = rdd.mapPartitionsInternal { iter =>
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
-      val mutablePair = new MutablePair[ArrowColumnarBatchRow, Null]()
-      iter.map(row => mutablePair.update(projection(row).copy().asInstanceOf[ArrowColumnarBatchRow], null))
+      val mutablePair = new MutablePair[Array[Byte], Null]()
+      iter.map(row => mutablePair.update(ArrowColumnarBatchRow.encode(Iterator(projection(row).copy())).toArray.apply(0), null))
     }
     // Construct ordering on extracted sort key
     val orderingAttributes = sortingExpressions.zipWithIndex.map { case (ord, i) =>
       ord.copy(child = BoundReference(i, ord.dataType, ord.nullable))
     }
-    val part = new ArrowRangePartitioner(numPartitions, rddForSampling, orderingAttributes, ascending = true)
+    val part = new ArrowRangePartitioner(numPartitions, rddForSampling, sortingExpressions, ascending = true)
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)

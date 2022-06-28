@@ -21,7 +21,7 @@ abstract class ArrowPartitioner extends Partitioner {
 
 class ArrowRangePartitioner[V](
      partitions: Int,
-     rdd: RDD[_ <: Product2[ArrowColumnarBatchRow, V]],
+     rdd: RDD[_ <: Product2[Array[Byte], V]],
      orders: Seq[SortOrder],
      private var ascending: Boolean = true,
      val samplePointsPerPartitionHint: Int = 20) extends ArrowPartitioner {
@@ -128,26 +128,29 @@ class ArrowRangePartitioner[V](
     val step = (0 until weights.numElements() map weights.getFloat).sum / partitions
     var cumWeight = 0.0
     var target = step
-    var bounds = new ArrowColumnarBatchRow(Array.empty, 0)
+    var bounds: Option[ArrowColumnarBatchRow] = None
     0 until unique.numRows.toInt takeWhile { index =>
       cumWeight += weights.getFloat(index)
       if (cumWeight >= target) {
-        bounds = new ArrowColumnarBatchRow(
-          ArrowColumnarBatchRow.take(Iterator(bounds, unique.take( index until index+1 ) ))._2,
-          bounds.numRows + 1)
+        bounds = Option(bounds.fold(unique.take( index until index+1 )) ( batch =>
+          new ArrowColumnarBatchRow(
+            ArrowColumnarBatchRow.take(Iterator(batch, unique.take( index until index+1 ) ))._2,
+            batch.numRows + 1)
+        ))
         target += step
       }
 
-      bounds.numRows < partitions -1
+      bounds.forall( _.numRows < partitions -1)
     }
 
-    assert(bounds.numRows < Integer.MAX_VALUE)
-    bounds
+    assert(bounds.forall(_.numRows < Integer.MAX_VALUE))
+    bounds.getOrElse(new ArrowColumnarBatchRow(Array.empty, 0))
   }
 
   // an array of upper bounds for the first (partitions-1) partitions
   // inspired by: org.apache.spark.RangePartitioner::rangeBounds
-  private val rangeBounds: ArrowColumnarBatchRow = {
+  // encoded ArrowBatchColumnarRow that represents the rangeBounds
+  private lazy val rangeBounds: Array[Byte] = {
     if (partitions <= 1) Array.empty
 
     // This is the sample size we need to have roughly balanced output partitions, capped at 1M.
@@ -157,7 +160,10 @@ class ArrowRangePartitioner[V](
     val sampleSizePerPartition = math.ceil(3.0 * sampleSize / rdd.partitions.length).toInt
 
     // 'sketch' the distribution from a sample
-    val (numItems, sketched) = sketch(rdd.map(_._1), sampleSizePerPartition)
+    val decoded = rdd.map { iter =>
+      ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(iter._1))._2)
+    }
+    val (numItems, sketched) = sketch(decoded, sampleSizePerPartition)
     if (numItems == 0L) Array.empty
 
     // If the partitions are imbalanced, we re-sample from it
@@ -175,24 +181,33 @@ class ArrowRangePartitioner[V](
     if (imbalancedPartitions.nonEmpty) {
       val imbalanced = new PartitionPruningRDD(rdd.map(_._1), imbalancedPartitions.contains)
       val seed = byteswap32(-rdd.id -1)
-      val reSampledRDD = imbalanced.mapPartitionsInternal( iter => Iterator(ArrowColumnarBatchRow.sample(iter, fraction, seed)))
+      val reSampledRDD = imbalanced.mapPartitionsInternal{ iter =>
+        val batches = iter.map {
+          array => ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(array))._2)
+        }
+        val sample = ArrowColumnarBatchRow.sample(batches, fraction, seed)
+        Iterator(sample)}
       val reSampled = ArrowRDD.collect(reSampledRDD)
       val weight = (1.0 / fraction).toFloat
       candidates ++= reSampled.map( x => (x._2, weight))
     }
 
-    // determine bounds
-    determineBounds(candidates, math.min(partitions, candidates.size))
+    // determine bounds and encode them
+    // since we only provide a single Iterator, we can be sure to return the 'first' item from the generated iterator
+    val bounds = determineBounds(candidates, math.min(partitions, candidates.size))
+    rangeBoundsLength = Option(bounds.length.toInt)
+    ArrowColumnarBatchRow.encode(Iterator(bounds)).toArray.apply(0)
   }
 
-  override def numPartitions: Int = rangeBounds.length.toInt + 1
+  private var rangeBoundsLength: Option[Int] = None
+  override def numPartitions: Int = rangeBoundsLength.getOrElse(0) + 1
 
 
   /** Note: below two functions are directly copied from
    * org.apache.spark.Partitioner */
   override def equals(other: Any): Boolean = other match {
     case r: ArrowRangePartitioner[_] =>
-      r.rangeBounds.equals(rangeBounds) && r.ascending == ascending
+      r.rangeBounds.sameElements(rangeBounds) && r.ascending == ascending
     case _ =>
       false
   }
@@ -205,5 +220,9 @@ class ArrowRangePartitioner[V](
     result
   }
 
-  override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = ArrowColumnarBatchRow.bucketDistributor(key, rangeBounds, orders)
+  override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] =
+    ArrowColumnarBatchRow.bucketDistributor(
+      key,
+      ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(rangeBounds))._2),
+      orders)
 }

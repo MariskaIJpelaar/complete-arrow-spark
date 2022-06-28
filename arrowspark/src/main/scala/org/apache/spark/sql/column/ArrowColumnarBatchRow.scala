@@ -214,6 +214,14 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 }
 
 object ArrowColumnarBatchRow {
+  // TODO: apply to all places where this is required! Perhaps make more wrappers...
+
+  /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors */
+  def create(cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
+    val length = if (cols.length > 0) cols(0).getValueVector.getValueCount else 0
+    new ArrowColumnarBatchRow(cols, length)
+  }
+
   /** Note: inspiration from org.apache.arrow.vector.BitVectorHelper::setBit */
   private def validityRangeSetter(validityBuffer: ArrowBuf, bytes: NumericRange[Long]): Unit = {
     if (bytes.isEmpty)
@@ -586,14 +594,25 @@ object ArrowColumnarBatchRow {
     union.setValueCount(batch.numRows.toInt)
 
     // compute the index-vector
-    val first_vector = batch.columns(0).getValueVector
-    val indices = new IntVector("indexHolder", first_vector.getAllocator)
-    assert(first_vector.getValueCount > 0)
-    indices.allocateNew(first_vector.getValueCount)
-    indices.setValueCount(first_vector.getValueCount)
-    val unique = new VectorDeduplicator(comparator, union).unique()
-    new ArrowColumnarBatchRow(unique.getChildrenFromFields.toArray.map( field =>
-      new ArrowColumnVector(field.asInstanceOf[ValueVector])), unique.getValueCount)
+    val indices = new VectorDeduplicator(comparator, union).uniqueIndices()
+
+
+    new ArrowColumnarBatchRow( batch.columns map { column =>
+      val vector = column.getValueVector
+      assert(indices.getValueCount > 0)
+
+      // transfer type
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.splitAndTransfer(0, indices.getValueCount)
+      val new_vector = tp.getTo
+
+      new_vector.setInitialCapacity(indices.getValueCount)
+      new_vector.allocateNew()
+      0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
+      new_vector.setValueCount(indices.getValueCount)
+
+      new ArrowColumnVector(new_vector)
+    }, indices.getValueCount)
   }
 
   /**
