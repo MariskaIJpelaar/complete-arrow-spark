@@ -2,6 +2,7 @@ package org.apache.spark.sql.catalyst.expressions.codegen
 
 import org.apache.spark.sql.catalyst.expressions.BindReferences.bindReferences
 import org.apache.spark.sql.catalyst.expressions.{ArrowBoundAttribute, Attribute, Expression, Projection}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
 object GenerateArrowColumnarBatchRowProjection extends CodeGenerator[Seq[Expression], Projection] {
 
@@ -10,6 +11,7 @@ object GenerateArrowColumnarBatchRowProjection extends CodeGenerator[Seq[Express
     val eval = ArrowBoundAttribute(in).genCode(ctx)
 
     val specificClass = "SpecificArrowColumnarBatchRowProjection"
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
 
     val codeBody =
       s"""
@@ -32,10 +34,10 @@ object GenerateArrowColumnarBatchRowProjection extends CodeGenerator[Seq[Express
          |
          |  // Scala.Function1 needs this
          |  public java.lang.Object apply(java.lang.Object row) {
-         |    return apply((ArrowColumnarBatchRow) row);
+         |    return apply(($batchClass) row);
          |  }
          |
-         |  public ArrowColumnarBatchRow apply(ArrowColumnarBatchRow ${ctx.INPUT_ROW}) {
+         |  public $batchClass apply($batchClass ${ctx.INPUT_ROW}) {
          |    ${eval.code}
          |    return ${eval.value};
          |  }

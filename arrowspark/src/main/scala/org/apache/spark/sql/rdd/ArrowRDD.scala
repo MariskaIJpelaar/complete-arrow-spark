@@ -4,33 +4,48 @@ import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
+import java.io.ObjectInputStream
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
-  override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this)
+  override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this).map(_._2)
   override def take(num: Int): Array[ArrowColumnarBatchRow] = ArrowRDD.take(num, this)
 }
 
 object ArrowRDD {
-  def collect[T: ClassTag](rdd: RDD[T])(implicit ct: ClassTag[T]): Array[T] = {
-    assert(ct.isInstanceOf[ClassTag[ArrowColumnarBatchRow]])
-
-    val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res.asInstanceOf[Iterator[ArrowColumnarBatchRow]]) }
+  /**
+   * Collect utility for rdds that contain ArrowColumnarBatchRows. Users can pass optional functions to process data
+   * if the rdd has more complex data than only ArrowColumnarBatchRows
+   * @param rdd rdd with the batches
+   * @param extraEncoder (optional) split item into encoded custom-data and a batch
+   * @param extraDecoder (optional) decode a stream to custom-data and a batch to a single instance
+   * @param extraTaker (optional) split the item from the iterator into (customData, batch)
+   * @param extraCollector (optional) collect a new item from custom-data, first parameter is new item, second parameter
+   *                       is the result from previous calls, None if there were no previous calls. Result of this
+   *                       function is passed to other calls of extraCollector.
+   * @return array of custom-data and batches
+   */
+  def collect[T: ClassTag](rdd: RDD[T],
+                           extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
+                           extraDecoder: (ObjectInputStream, ArrowColumnarBatchRow) => Any = (_, batch) => batch,
+                           extraTaker: (Any) => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
+                           extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None)(implicit ct: ClassTag[T]): Array[(Any, ArrowColumnarBatchRow)] = {
+    val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res, extraEncoder = extraEncoder)}
     val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
       if (!it.hasNext) Array.emptyByteArray else it.next()
     })
-    val buf = new ArrayBuffer[ArrowColumnarBatchRow]
+    val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
     res.foreach(result => {
-      val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result))
-      buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
+      val decoded = ArrowColumnarBatchRow.decode(result, extraDecoder = extraDecoder)
+      val (extra, cols) = ArrowColumnarBatchRow.take(decoded, extraTaker = extraTaker, extraCollector = extraCollector)
+      buf += Tuple2(extra, new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0))
     })
-    buf.toArray.asInstanceOf[Array[T]]
+    buf.toArray
   }
 
   /** Note: copied and adapted from RDD.scala */
   def take[T: ClassTag](num: Int, rdd: RDD[T])(implicit ct: ClassTag[T]): Array[T] = {
-    assert(ct.isInstanceOf[ClassTag[ArrowColumnarBatchRow]])
     if (num == 0) new Array[ArrowColumnarBatchRow](0)
 
     val scaleUpFactor = Math.max(rdd.conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
@@ -63,7 +78,7 @@ object ArrowRDD {
       }, p)
 
       res.foreach(result => {
-        val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))
+        val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))._2
         buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
       })
 

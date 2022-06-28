@@ -3,15 +3,15 @@ package org.apache.spark.sql.execution.exchange
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, BoundReference}
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBatchRowProjection
+import org.apache.spark.sql.catalyst.expressions.{Attribute, BoundReference}
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
-import org.apache.spark.sql.execution.{ArrowColumnarBatchRowSerializer, PartitionIdPassthrough, SQLExecution, ShufflePartitionSpec, ShuffledRowRDD, SparkPlan}
+import org.apache.spark.sql.execution._
 import org.apache.spark.util.MutablePair
-import org.apache.spark.{ArrowRangePartitioner, MapOutputStatistics, Partitioner, ShuffleDependency}
+import org.apache.spark.{ArrowRangePartitioner, MapOutputStatistics, ShuffleDependency}
 
 import scala.concurrent.Future
 
@@ -57,7 +57,7 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
   }
 
   override def getShuffleRDD(partitionSpecs: Array[ShufflePartitionSpec]): RDD[_] = {
-    new ShuffledRowRDD(shuffleDependency, readMetrics, partitionSpecs)
+    new ShuffledArrowColumnarBatchRowRDD(shuffleDependency, readMetrics, partitionSpecs)
   }
 
   override def runtimeStatistics: Statistics = {
@@ -66,8 +66,8 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
     Statistics(dataSize, Some(rowCount))
   }
 
-  private lazy val cachedShuffleRDD: ShuffledRowRDD = new ShuffledRowRDD(shuffleDependency, readMetrics)
-  override protected def doExecute(): RDD[InternalRow] = cachedShuffleRDD
+  private lazy val cachedShuffleRDD: ShuffledArrowColumnarBatchRowRDD = new ShuffledArrowColumnarBatchRowRDD(shuffleDependency, readMetrics)
+  override protected def doExecute(): RDD[InternalRow] = cachedShuffleRDD.asInstanceOf[RDD[InternalRow]]
 
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowShuffleExchangeExec = copy(child = newChild)
 
@@ -80,8 +80,7 @@ object ArrowShuffleExchangeExec {
       newPartitioning: Partitioning,
       serializer: Serializer,
       writeMetrics: Map[String, SQLMetric]) : ShuffleDependency[Array[Int], InternalRow, InternalRow] = {
-    if (!newPartitioning.isInstanceOf[RangePartitioning])
-      return ShuffleExchangeExec.prepareShuffleDependency(rdd, outputAttributes, newPartitioning, serializer, writeMetrics)
+    assert(newPartitioning.isInstanceOf[RangePartitioning])
 
     val RangePartitioning(sortingExpressions, numPartitions) = newPartitioning.asInstanceOf[RangePartitioning]
     // Extract only the columns that matter for sorting

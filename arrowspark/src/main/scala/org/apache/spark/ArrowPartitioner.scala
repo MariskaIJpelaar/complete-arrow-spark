@@ -5,6 +5,7 @@ import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import scala.collection.mutable
@@ -34,11 +35,18 @@ class ArrowRangePartitioner[V](
   private def sketch(rdd: RDD[ArrowColumnarBatchRow], sampleSizePerPartition: Int):
   (Long, Array[(Int, Long, ArrowColumnarBatchRow)]) = {
     val shift = rdd.id
-    val sketched = rdd.mapPartitionsWithIndex { (idx, iter) =>
+    val sketchedRDD = rdd.mapPartitionsWithIndex { (idx, iter) =>
       val seed = byteswap32(idx ^ (shift << 16))
       val (sample, n) = ArrowColumnarBatchRow.sampleAndCount(iter, sampleSizePerPartition, seed)
       Iterator((idx, n, sample))
-    }.collect()
+    }
+    val sketched = ArrowRDD.collect(
+      sketchedRDD,
+      extraEncoder = ???,
+      extraDecoder = ???,
+      extraTaker = ???,
+      extraCollector = ???
+    ).map( (extra: (Int, Long), batch: ArrowColumnarBatchRow) => (extra._1, extra._2, batch))
     val numItems = sketched.map(_._2).sum
     (numItems, sketched)
   }
@@ -124,7 +132,8 @@ class ArrowRangePartitioner[V](
     if (imbalancedPartitions.nonEmpty) {
       val imbalanced = new PartitionPruningRDD(rdd.map(_._1), imbalancedPartitions.contains)
       val seed = byteswap32(-rdd.id -1)
-      val reSampled = imbalanced.mapPartitionsInternal( iter => Iterator(ArrowColumnarBatchRow.sample(iter, fraction, seed))).collect()
+      val reSampledRDD = imbalanced.mapPartitionsInternal( iter => Iterator(ArrowColumnarBatchRow.sample(iter, fraction, seed)))
+      val reSampled = ArrowRDD.collect(reSampledRDD)
       val weight = (1.0 / fraction).toFloat
       candidates ++= reSampled.map( x => (x, weight))
     }

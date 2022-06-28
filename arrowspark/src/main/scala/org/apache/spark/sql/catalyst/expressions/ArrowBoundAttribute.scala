@@ -33,7 +33,7 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
         assert(ctx.INPUT_ROW != null)
         val projections = ctx.addReferenceObj(objName = "projections", obj = references.map(_.ordinal))
         val code = code"""
-                         | ${ev.value} = ((${classOf[ArrowColumnarBatchRow].getName}) ${ctx.INPUT_ROW}).projection($projections)
+                         | ${classOf[ArrowColumnarBatchRow].getName} ${ev.value} = ((${classOf[ArrowColumnarBatchRow].getName}) ${ctx.INPUT_ROW}).projection($projections);
                          |""".stripMargin
         ev.copy(code = code)
       case _ =>
