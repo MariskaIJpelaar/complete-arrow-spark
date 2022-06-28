@@ -113,7 +113,7 @@ class ArrowRangePartitioner[V](
     val fraction = math.min(sampleSize / math.max(numItems, 1L), 1.0)
     val candidates = ArrayBuffer.empty[(ArrowColumnarBatchRow, Float)]
     val imbalancedPartitions = mutable.Set.empty[Int]
-    sketched foreach { case (idx, n, sample) =>
+    sketched foreach[Unit] { case (idx, n, sample) =>
       if (fraction * n > sampleSizePerPartition) {
         imbalancedPartitions += idx
       } else {
@@ -135,7 +135,6 @@ class ArrowRangePartitioner[V](
 
   override def numPartitions: Int = rangeBounds.length.toInt + 1
 
-//  private var binarySearch: ((Array[ArrowColumnarBatchRow], ArrowColumnarBatchRow) => Int) = CollectionsUtils.makeBinarySearch[ArrowColumnarBatchRow]
 
   /** Note: below two functions are directly copied from
    * org.apache.spark.Partitioner */
@@ -154,5 +153,5 @@ class ArrowRangePartitioner[V](
     result
   }
 
-  override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = ???
+  override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = ArrowColumnarBatchRow.bucketDistributor(key, rangeBounds, orders)
 }

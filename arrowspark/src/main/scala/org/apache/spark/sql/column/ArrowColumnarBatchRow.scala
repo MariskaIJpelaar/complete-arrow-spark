@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column
 
 import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
+import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
 import org.apache.arrow.memory.{ArrowBuf, BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.complex.UnionVector
@@ -667,5 +668,39 @@ object ArrowColumnarBatchRow {
     }
 
     (reservoir, i)
+  }
+
+  def bucketDistributor(key: ArrowColumnarBatchRow, rangeBounds: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): Array[Int] = {
+    // prepare comparator and UnionVectors
+    val keyUnion = new UnionVector("KeyCombiner", key.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val rangeUnion = new UnionVector("rangeCombiner", rangeBounds.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
+    sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
+      val name = sortOrder.child.asInstanceOf[AttributeReference].name
+      // prepare keyUnion and comparator
+      key.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
+        val valueVector = vector.getValueVector
+        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        tp.splitAndTransfer(0, key.numRows.toInt)
+        keyUnion.addVector(tp.getTo.asInstanceOf[FieldVector])
+        comparators(index) = (
+          name,
+          new SparkComparator[ValueVector](sortOrder, DefaultVectorComparators.createDefaultComparator(valueVector))
+        )
+      })
+      // prepare rangeUnion
+      rangeBounds.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
+        val valueVector = vector.getValueVector
+        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        tp.splitAndTransfer(0, key.numRows.toInt)
+        rangeUnion.addVector(tp.getTo.asInstanceOf[FieldVector])
+      })
+    }
+    val comparator = new SparkUnionComparator(comparators)
+    keyUnion.setValueCount(key.numRows.toInt)
+    rangeUnion.setValueCount(rangeBounds.numRows.toInt)
+
+    // find partition-ids
+    new BucketSearcher(keyUnion, rangeUnion, comparator).distribute()
   }
 }
