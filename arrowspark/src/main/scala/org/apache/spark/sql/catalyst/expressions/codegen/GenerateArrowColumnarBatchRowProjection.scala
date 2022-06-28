@@ -57,4 +57,8 @@ object GenerateArrowColumnarBatchRowProjection extends CodeGenerator[Seq[Express
 
   override protected def bind(in: Seq[Expression], inputSchema: Seq[Attribute]): Seq[Expression] =
     bindReferences(in, inputSchema)
+
+  def create(exprs: Seq[Expression], inputSchema: Seq[Attribute]): Projection = {
+    create(bindReferences(exprs, inputSchema))
+  }
 }

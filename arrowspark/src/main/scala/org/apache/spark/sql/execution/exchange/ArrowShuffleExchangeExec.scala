@@ -3,11 +3,15 @@ package org.apache.spark.sql.execution.exchange
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{Attribute, BoundReference}
+import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBatchRowProjection
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
-import org.apache.spark.sql.catalyst.plans.physical.Partitioning
+import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
-import org.apache.spark.sql.execution.{ArrowColumnarBatchRowSerializer, SQLExecution, ShufflePartitionSpec, ShuffledRowRDD, SparkPlan}
-import org.apache.spark.{MapOutputStatistics, ShuffleDependency}
+import org.apache.spark.sql.execution.{ArrowColumnarBatchRowSerializer, PartitionIdPassthrough, SQLExecution, ShufflePartitionSpec, ShuffledRowRDD, SparkPlan}
+import org.apache.spark.util.MutablePair
+import org.apache.spark.{ArrowRangePartitioner, MapOutputStatistics, Partitioner, ShuffleDependency}
 
 import scala.concurrent.Future
 
@@ -27,8 +31,8 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
   @transient lazy val inputRDD: RDD[InternalRow] = child.execute()
 
   @transient
-  lazy val shuffleDependency: ShuffleDependency[Int, InternalRow, InternalRow] = {
-    val dep = ShuffleExchangeExec.prepareShuffleDependency(
+  lazy val shuffleDependency: ShuffleDependency[Array[Int], InternalRow, InternalRow] = {
+    val dep = ArrowShuffleExchangeExec.prepareShuffleDependency(
       inputRDD,
       child.output,
       outputPartitioning,
@@ -67,4 +71,42 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
 
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowShuffleExchangeExec = copy(child = newChild)
 
+}
+
+object ArrowShuffleExchangeExec {
+  def prepareShuffleDependency(
+      rdd: RDD[InternalRow],
+      outputAttributes: Seq[Attribute],
+      newPartitioning: Partitioning,
+      serializer: Serializer,
+      writeMetrics: Map[String, SQLMetric]) : ShuffleDependency[Array[Int], InternalRow, InternalRow] = {
+    if (!newPartitioning.isInstanceOf[RangePartitioning])
+      return ShuffleExchangeExec.prepareShuffleDependency(rdd, outputAttributes, newPartitioning, serializer, writeMetrics)
+
+    val RangePartitioning(sortingExpressions, numPartitions) = newPartitioning.asInstanceOf[RangePartitioning]
+    // Extract only the columns that matter for sorting
+    val rddForSampling = rdd.mapPartitionsInternal { iter =>
+      val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
+      val mutablePair = new MutablePair[ArrowColumnarBatchRow, Null]()
+      iter.map(row => mutablePair.update(projection(row).copy().asInstanceOf[ArrowColumnarBatchRow], null))
+    }
+    // Construct ordering on extracted sort key
+    val orderingAttributes = sortingExpressions.zipWithIndex.map { case (ord, i) =>
+      ord.copy(child = BoundReference(i, ord.dataType, ord.nullable))
+    }
+    val part = new ArrowRangePartitioner(numPartitions, rddForSampling, orderingAttributes, ascending = true)
+    val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
+      val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
+      val getPartitionKey: InternalRow => InternalRow = row => projection(row)
+      iter.map { row => (part.getPartitions(getPartitionKey(row).asInstanceOf[ArrowColumnarBatchRow]), row)}
+    }, isOrderSensitive = false)
+
+    val dependency = new ShuffleDependency[Array[Int], InternalRow, InternalRow](
+      rddWithPartitionIds,
+      new PartitionIdPassthrough(part.numPartitions),
+      serializer,
+      shuffleWriterProcessor = ShuffleExchangeExec.createShuffleWriteProcessor(writeMetrics))
+
+    dependency
+  }
 }
