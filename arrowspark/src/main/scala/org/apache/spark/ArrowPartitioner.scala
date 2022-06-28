@@ -40,13 +40,15 @@ class ArrowRangePartitioner[V](
       val (sample, n) = ArrowColumnarBatchRow.sampleAndCount(iter, sampleSizePerPartition, seed)
       Iterator((idx, n, sample))
     }
+    val extraEncoder = (idx: Int, n: Long, sample: ArrowColumnarBatchRow) => ???
+
     val sketched = ArrowRDD.collect(
       sketchedRDD,
       extraEncoder = ???,
       extraDecoder = ???,
       extraTaker = ???,
       extraCollector = ???
-    ).map( (extra: (Int, Long), batch: ArrowColumnarBatchRow) => (extra._1, extra._2, batch))
+    ).map { case (extra: (Int, Long), batch: ArrowColumnarBatchRow) => (extra._1, extra._2, batch) }
     val numItems = sketched.map(_._2).sum
     (numItems, sketched)
   }
@@ -75,7 +77,7 @@ class ArrowRangePartitioner[V](
       totalRows += batch.numRows.toInt
       batch.appendColumns( Array(new ArrowColumnVector(weights)) )
     }
-    val grouped = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator), totalRows)
+    val grouped = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator)._2, totalRows)
     val sorted = ArrowColumnarBatchRow.multiColumnSort(grouped, orders)
     val (unique, weighted) = ArrowColumnarBatchRow.unique(sorted, orders).splitColumns(grouped.numFields-1)
 
@@ -90,7 +92,7 @@ class ArrowRangePartitioner[V](
       cumWeight += weights.getFloat(index)
       if (cumWeight >= target) {
         bounds = new ArrowColumnarBatchRow(
-          ArrowColumnarBatchRow.take(Iterator(bounds, unique.take( index until index+1 ) )),
+          ArrowColumnarBatchRow.take(Iterator(bounds, unique.take( index until index+1 ) ))._2,
           bounds.numRows + 1)
         target += step
       }
@@ -135,7 +137,7 @@ class ArrowRangePartitioner[V](
       val reSampledRDD = imbalanced.mapPartitionsInternal( iter => Iterator(ArrowColumnarBatchRow.sample(iter, fraction, seed)))
       val reSampled = ArrowRDD.collect(reSampledRDD)
       val weight = (1.0 / fraction).toFloat
-      candidates ++= reSampled.map( x => (x, weight))
+      candidates ++= reSampled.map( x => (x._2, weight))
     }
 
     // determine bounds
