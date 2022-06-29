@@ -183,7 +183,7 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
 
     stopping = true
     if (success)
-      mapStatus.orElse { throw new IllegalStateException("Cannot call stop(true) without having called write()") }
+      return mapStatus.orElse { throw new IllegalStateException("Cannot call stop(true) without having called write()") }
 
     partitionWriters.foreach { writers =>
       try {

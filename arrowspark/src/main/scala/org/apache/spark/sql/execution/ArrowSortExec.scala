@@ -77,9 +77,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        | if ($needToSort) {
        |  $addToSorterFuncName();
        |
-       |  $columns = $staticBatch.take($thisPartitions.toIterator(), $noneType, $noneType);
-       |  int $numRows = ($columns.length > 0) ? $columns[0].getValueVector().getValueCount() : 0;
-       |  $batch = new ${classOf[ArrowColumnarBatchRow].getName}($columns, $numRows);
+       |  $batch = $staticBatch.create($thisPartitions.toIterator());
        |
        |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
        |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());

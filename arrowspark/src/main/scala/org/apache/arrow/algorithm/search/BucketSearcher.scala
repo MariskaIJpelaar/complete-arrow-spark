@@ -12,7 +12,7 @@ class BucketSearcher[V <: ValueVector](
     assert(keyVector.getValueCount > 0)
     assert(bucketVector.getValueCount > 0)
 
-    val indices = Array[Int](keyVector.getValueCount)
+    val indices = new Array[Int](keyVector.getValueCount)
     comparator.attachVectors(keyVector, bucketVector)
 
     0 until keyVector.getValueCount foreach { i => indices(i) = binary_search(i) }

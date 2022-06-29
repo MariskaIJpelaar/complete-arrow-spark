@@ -329,7 +329,7 @@ object ArrowColumnarBatchRow {
         readableBytes = ivector.getDataBuffer.readableBytes().max(readableBytes)
         val ovector = output.getValueVector
         // make sure we have enough space
-        while (ovector.getBufferSizeFor(ovector.getValueCapacity) < num_bytes+readableBytes) ovector.reAlloc()
+        while (ovector.getValueCapacity < size + current_size) ovector.reAlloc()
         // copy contents
         validityRangeSetter(ovector.getValidityBuffer, size until size+current_size)
         output.getValueVector.getDataBuffer.setBytes(num_bytes, ivector.getDataBuffer)
@@ -747,7 +747,7 @@ object ArrowColumnarBatchRow {
       rangeBounds.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
         val valueVector = vector.getValueVector
         val tp = valueVector.getTransferPair(valueVector.getAllocator)
-        tp.splitAndTransfer(0, key.numRows.toInt)
+        tp.splitAndTransfer(0, rangeBounds.numRows.toInt)
         rangeUnion.addVector(tp.getTo.asInstanceOf[FieldVector])
       })
     }
