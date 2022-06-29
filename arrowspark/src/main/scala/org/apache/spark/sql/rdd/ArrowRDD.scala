@@ -78,7 +78,7 @@ object ArrowRDD {
 
       res.foreach(result => {
         val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))._2
-        buf += new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
+        buf += ArrowColumnarBatchRow.create(cols)
       })
 
       partsScanned += p.size

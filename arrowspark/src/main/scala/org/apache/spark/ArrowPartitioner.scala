@@ -97,7 +97,7 @@ class ArrowRangePartitioner[V](
   /** Note: inspiration from: org.apache.spark.RangePartitioner::determineBounds */
   private def determineBounds(
      candidates: ArrayBuffer[(ArrowColumnarBatchRow, Float)],
-     partitions: Int): ArrowColumnarBatchRow = {
+     partitions: Int): Array[ArrowColumnarBatchRow] = {
     assert(partitions - 1 < Integer.MAX_VALUE)
 
     // Checks if we have non-empty batches
@@ -143,7 +143,8 @@ class ArrowRangePartitioner[V](
       cumSize < partitions -1
     }
 
-    ArrowColumnarBatchRow.create(bounds.toIterator)
+    rangeBoundsLength = Option(cumSize)
+    bounds
   }
 
   private var rangeBoundsLength: Option[Int] = None
@@ -196,8 +197,7 @@ class ArrowRangePartitioner[V](
     // determine bounds and encode them
     // since we only provide a single Iterator, we can be sure to return the 'first' item from the generated iterator
     val bounds = determineBounds(candidates, math.min(partitions, candidates.size))
-    rangeBoundsLength = Option(bounds.length.toInt)
-    ArrowColumnarBatchRow.encode(Iterator(bounds)).toArray.apply(0)
+    ArrowColumnarBatchRow.encode(bounds.toIterator).toArray.apply(0)
   }
 
   override def numPartitions: Int = rangeBoundsLength.getOrElse(0) + 1

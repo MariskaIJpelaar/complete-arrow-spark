@@ -114,8 +114,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitionsInternal { iter =>
-      val columns = ArrowColumnarBatchRow.take(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])._2
-      var batch = new ArrowColumnarBatchRow(columns, if (columns.length > 0) columns(0).getValueVector.getValueCount else 0)
+      var batch = ArrowColumnarBatchRow.create(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
 
       if (sortOrder.length == 1) {
         val col = attributeReferenceToCol(sortOrder.head)

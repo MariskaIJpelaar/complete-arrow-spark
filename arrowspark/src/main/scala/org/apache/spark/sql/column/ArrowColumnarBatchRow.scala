@@ -35,6 +35,7 @@ import scala.util.Random
 // TODO: at some point, we might have to split up functionalities into more files
 // TODO: memory management
 // TODO: change numRows to Int?
+// TODO: create sorts by Iterators?
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   assert(columns != null)
@@ -705,6 +706,8 @@ object ArrowColumnarBatchRow {
     var batch = input.next()
     assert(batch.numRows <= Integer.MAX_VALUE)
     var i: Long = math.min(k, batch.numRows)
+    // TODO: refactor to more efficient style
+    val reservoir = new ArrayBuffer[ArrowColumnarBatchRow](k)
     var reservoir = batch.take(0 until i.toInt)
     var length = 0L
     while (i < k) {
