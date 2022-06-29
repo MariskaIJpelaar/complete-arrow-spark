@@ -37,6 +37,7 @@ object ArrowRDD {
     val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
     res.foreach(result => {
       val decoded = ArrowColumnarBatchRow.decode(result, extraDecoder = extraDecoder)
+      // TODO: Do we want to not do take, but simply add decoded to buf?
       val (extra, cols) = ArrowColumnarBatchRow.take(decoded, extraTaker = extraTaker, extraCollector = extraCollector)
       buf += Tuple2(extra, new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0))
     })
@@ -77,6 +78,7 @@ object ArrowRDD {
       }, p)
 
       res.foreach(result => {
+        // TODO: do we want to omit take and simply add to buf?
         val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))._2
         buf += ArrowColumnarBatchRow.create(cols)
       })

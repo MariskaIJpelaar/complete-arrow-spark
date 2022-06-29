@@ -35,7 +35,7 @@ import scala.util.Random
 // TODO: at some point, we might have to split up functionalities into more files
 // TODO: memory management
 // TODO: change numRows to Int?
-// TODO: create sorts by Iterators?
+// TODO: create sorts by Iterators?, Create sample by iterators?
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   assert(columns != null)
@@ -292,7 +292,9 @@ object ArrowColumnarBatchRow {
     var num_bytes: Long = 0L
 
     // get first batch
-    Resources.autoCloseTry(extraTaker(batches.next())) { case (extra, first) =>
+    // TODO: get to compile
+    Resources.autoCloseTry(extraTaker(batches.next())) { item =>
+      val (extra: Any, first: ArrowColumnarBatchRow) = item
       extraCollected = extraCollector(extra, None)
       if (numCols.isEmpty && first.numRows > Integer.MAX_VALUE)
         throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
@@ -698,28 +700,39 @@ object ArrowColumnarBatchRow {
    * @param k reservoir size
    * @param seed random seed
    * @return array of sampled batches and size of the input
+   * Note: closes the batches in the iterator
    */
   def sampleAndCount(input: Iterator[ArrowColumnarBatchRow], k: Int, seed: Long = Random.nextLong()):
       (ArrowColumnarBatchRow, Long) = {
-    if (!input.hasNext || k < 1) (Array.empty[ArrowColumnarBatchRow], 0)
+    if (k < 1) (Array.empty[ArrowColumnarBatchRow], 0)
 
-    var batch = input.next()
-    assert(batch.numRows <= Integer.MAX_VALUE)
-    var i: Long = math.min(k, batch.numRows)
-    // TODO: refactor to more efficient style
-    val reservoir = new ArrayBuffer[ArrowColumnarBatchRow](k)
-    var reservoir = batch.take(0 until i.toInt)
+    // First, we fill the reservoir with k elements
+    var inputSize = 0
+    var nrBatches = 0
     var length = 0L
-    while (i < k) {
-      // we have consumed all elements
-      if (!input.hasNext) return (reservoir, i)
+    var remainderBatch: Option[ArrowColumnarBatchRow] = None
+    val reservoirBuf = new ArrayBuffer[ArrowColumnarBatchRow](k)
+    while (inputSize < k) {
+      if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
+      val batch = input.next()
+      assert(batch.numRows < Integer.MAX_VALUE)
+      length = math.min(k-inputSize, batch.numRows)
+      reservoirBuf(nrBatches) = batch
+      inputSize += length
+      nrBatches += 1
 
-      batch = input.next()
-      assert(batch.numRows <= Integer.MAX_VALUE)
-      length = math.min(k-i, batch.numRows)
-      reservoir = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(Iterator(reservoir, batch))._2, i)
-      i += length
+      // do we have elements remaining?
+      if (length < batch.numRows)
+        remainderBatch = Option(batch)
     }
+
+    var iter: Iterator[ArrowColumnarBatchRow] = input
+    // add our remainder to the iterator, if there is any
+    remainderBatch.foreach { batch =>
+      iter = Iterator(batch.take( (length.toInt) until batch.numRows.toInt )) ++ iter
+    }
+
+    val reservoir = ArrowColumnarBatchRow.create(reservoirBuf.toIterator)
 
     // we now have a reservoir with length k, in which we will replace random elements
     val rand = new XORShiftRandom(seed)
@@ -727,31 +740,19 @@ object ArrowColumnarBatchRow {
       start + rand.nextInt( (end-start) + 1)
     }
 
-    // first, we check if there are any elements left in our current batch
-    if (length != batch.numRows) {
-      // take a random range of our remainder
-      val start = generateRandomNumber(length.toInt -1, (batch.numRows-1).toInt)
-      val end = generateRandomNumber(start, batch.numRows.toInt)
-      val sample = batch.take(start until end)
-      0 until sample.numRows.toInt foreach { index =>
-       reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
-      }
-      i += sample.numRows
-    }
-
-    // now we keep sampling as long as there is input
     while (input.hasNext) {
-      batch = input.next()
-      val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
-      val end = generateRandomNumber(start, batch.numRows.toInt)
-      val sample = batch.take(start until end)
-      0 until sample.numRows.toInt foreach { index =>
-        reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+      Resources.autoCloseTry(input.next()) { batch =>
+        val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
+        val end = generateRandomNumber(start, batch.numRows.toInt)
+        val sample = batch.take(start until end)
+        0 until sample.numRows.toInt foreach { index =>
+          reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+        }
+        inputSize += sample.numRows
       }
-      i += sample.numRows
     }
 
-    (reservoir, i)
+    (reservoir, inputSize)
   }
 
   def bucketDistributor(key: ArrowColumnarBatchRow, rangeBounds: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): Array[Int] = {

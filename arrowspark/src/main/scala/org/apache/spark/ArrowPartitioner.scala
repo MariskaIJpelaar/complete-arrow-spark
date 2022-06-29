@@ -120,6 +120,7 @@ class ArrowRangePartitioner[V](
       totalRows += batch.numRows.toInt
       batch.appendColumns( Array(new ArrowColumnVector(weights)) )
     }
+    // TODO: try with resources for grouped and sorted? How long do we want 'unique' and 'weighted' to live?
     val grouped = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator)._2, totalRows)
     val sorted = ArrowColumnarBatchRow.multiColumnSort(grouped, orders)
     val (unique, weighted) = ArrowColumnarBatchRow.unique(sorted, orders).splitColumns(grouped.numFields-1)
