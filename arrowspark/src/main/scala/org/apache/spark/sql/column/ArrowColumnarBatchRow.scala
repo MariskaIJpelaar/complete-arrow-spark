@@ -1,5 +1,6 @@
 package org.apache.spark.sql.column
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
 import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
@@ -28,6 +29,7 @@ import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.immutable.NumericRange
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 // TODO: at some point, we might have to split up functionalities into more files
@@ -217,7 +219,8 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 object ArrowColumnarBatchRow {
   // TODO: apply to all places where this is required! Perhaps make more wrappers...
 
-  /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows */
+  /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows
+   * WARNING: uses 'take', a very expensive operation. Use with care! */
   def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
     ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(iter)._2)
   }
@@ -263,6 +266,8 @@ object ArrowColumnarBatchRow {
    * @param numCols the number of columns to take
    * @param batches batches to create array from
    * @return array of merged columns
+   * Closes the batches from the iterator
+   * WARNING: this is an expensive operation, because it copies all data. Use with care!
    *
    * Users can define their own functions to process custom data:
    * @param extraTaker split the item from the iterator into (customData, batch)
@@ -279,60 +284,70 @@ object ArrowColumnarBatchRow {
       return (None, new Array[ArrowColumnVector](0))
     }
 
-    val (extra, first) = extraTaker(batches.next())
-    var extraCollected = extraCollector(extra, None)
-    if (numCols.isEmpty && first.numRows > Integer.MAX_VALUE)
-      throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
-
+    var extraCollected: Any = None
+    var size = 0L
+    var array: Array[ArrowColumnVector] = Array.empty
     // number of bytes written
     var num_bytes: Long = 0L
-    // Note: until we get any problems, we are going to assume the batches are in-order :)
-    var size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
 
-    // The first batch should be separate, so we can determine the vector-types
-    val array = Array.tabulate[ArrowColumnVector](numCols.getOrElse(first.numFields)) { i =>
-      val vector = first.columns(i).getValueVector
-      val tp = vector.getTransferPair(vector.getAllocator)
-      numRows.fold( tp.splitAndTransfer(0, first.numRows.toInt) )( num =>
-        tp.splitAndTransfer(0, num)
-      )
-      // we 'copy' the content of the first batch ...
-      val old_vec = tp.getTo
+    // get first batch
+    Resources.autoCloseTry(extraTaker(batches.next())) { case (extra, first) =>
+      extraCollected = extraCollector(extra, None)
+      if (numCols.isEmpty && first.numRows > Integer.MAX_VALUE)
+        throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
 
-      // ... and re-use the ValueVector so we do not have to determine vector types :)
-      vector.clear()
-      numRows.foreach( nums => vector.setInitialCapacity(nums))
-      vector.allocateNew()
-      num_bytes = old_vec.getDataBuffer.readableBytes()
-      // make sure we have enough space
-      while (vector.getBufferSizeFor(vector.getValueCapacity) < num_bytes) vector.reAlloc()
-      // copy contents
-      validityRangeSetter(vector.getValidityBuffer, 0L until size)
-      vector.getDataBuffer.setBytes(0, old_vec.getDataBuffer)
+      // Note: until we get any problems, we are going to assume the batches are in-order :)
+      size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
 
-      new ArrowColumnVector(vector)
+      // The first batch should be separate, so we can determine the vector-types
+      array = Array.tabulate[ArrowColumnVector](numCols.getOrElse(first.numFields)) { i =>
+        val vector = first.columns(i).getValueVector
+        val tp = vector.getTransferPair(vector.getAllocator)
+        numRows.fold( tp.splitAndTransfer(0, first.numRows.toInt) )( num =>
+          tp.splitAndTransfer(0, num)
+        )
+        // we 'copy' the content of the first batch ...
+        val old_vec = tp.getTo
+
+        // ... and re-use the ValueVector so we do not have to determine vector types :)
+        vector.clear()
+        numRows.foreach( nums => vector.setInitialCapacity(nums))
+        vector.allocateNew()
+        num_bytes = old_vec.getDataBuffer.readableBytes()
+        // make sure we have enough space
+        while (vector.getBufferSizeFor(vector.getValueCapacity) < num_bytes) vector.reAlloc()
+        // copy contents
+        validityRangeSetter(vector.getValidityBuffer, 0L until size)
+        vector.getDataBuffer.setBytes(0, old_vec.getDataBuffer)
+
+        new ArrowColumnVector(vector)
+      }
     }
 
-    batches.takeWhile( _ => numRows.forall( num => size < num)).foreach { item =>
-      val (extra, batch) = extraTaker(item)
-      extraCollected = extraCollector(extra, Option(extraCollected))
-      // the columns we want
-      val columns = numCols.fold(batch.columns)( nums => batch.columns.slice(0, nums) )
-      // the rows that are left to read
-      val current_size = batch.numRows.min( numRows.getOrElse(Integer.MAX_VALUE) - size )
 
+    batches.takeWhile( _ => numRows.forall( num => size < num)).foreach { item =>
       var readableBytes = 0L
-      (array, columns).zipped foreach { case (output, input) =>
-        if (size + current_size > Integer.MAX_VALUE)
-          throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
-        val ivector = input.getValueVector
-        readableBytes = ivector.getDataBuffer.readableBytes().max(readableBytes)
-        val ovector = output.getValueVector
-        // make sure we have enough space
-        while (ovector.getValueCapacity < size + current_size) ovector.reAlloc()
-        // copy contents
-        validityRangeSetter(ovector.getValidityBuffer, size until size+current_size)
-        output.getValueVector.getDataBuffer.setBytes(num_bytes, ivector.getDataBuffer)
+      var current_size = 0L
+      Resources.autoCloseTry(extraTaker(item)) { case (extra, batch) =>
+        extraCollected = extraCollector(extra, Option(extraCollected))
+        // the columns we want
+        val columns = numCols.fold(batch.columns)( nums => batch.columns.slice(0, nums) )
+        // the rows that are left to read
+        current_size = batch.numRows.min( numRows.getOrElse(Integer.MAX_VALUE) - size )
+
+        (array, columns).zipped foreach { case (output, input) =>
+          if (size + current_size > Integer.MAX_VALUE)
+            throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
+          val ivector = input.getValueVector
+          readableBytes = ivector.getDataBuffer.readableBytes().max(readableBytes)
+          val ovector = output.getValueVector
+          // make sure we have enough space
+          while (ovector.getValueCapacity < size + current_size) ovector.reAlloc()
+          // copy contents
+          validityRangeSetter(ovector.getValidityBuffer, size until size+current_size)
+          output.getValueVector.getDataBuffer.setBytes(num_bytes, ivector.getDataBuffer)
+        }
+
       }
       num_bytes += readableBytes
       size += current_size
@@ -354,7 +369,9 @@ object ArrowColumnarBatchRow {
    * in a stream of batches rather than creating a new VectorSchemaRoot instance each time"
    * source: https://arrow.apache.org/docs/6.0/java/vector_schema_root.html
    *
-   * Users may add additional encoding by providing the 'extraEncoder' function */
+   * Users may add additional encoding by providing the 'extraEncoder' function
+   *
+   * Closes the batches found in the iterator */
   def encode(iter: Iterator[Any],
              numCols: Option[Int] = None,
              numRows: Option[Int] = None,
@@ -365,37 +382,46 @@ object ArrowColumnarBatchRow {
 
     // how many rows are left to read?
     var left = numRows
-
-    // Prepare first batch
-    // This needs to be done separately as we need the schema for the VectorSchemaRoot
-    val (extra, first) = extraEncoder(iter.next())
-    val first_length = first.numRows.min(left.getOrElse(Int.MaxValue).toLong)
-    if (first_length > Integer.MAX_VALUE)
-      throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-    val columns = if (numCols.isDefined) first.columns.slice(0, numCols.get) else first.columns
-    val root = VectorSchemaRoot.of(columns.map(column => {
-      if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
-      val vector = column.getValueVector
-      val tp = vector.getTransferPair(vector.getAllocator)
-      tp.splitAndTransfer(0, first_length.toInt)
-      tp.getTo.asInstanceOf[FieldVector]
-    }).toSeq: _*)
-
+    var root: Option[VectorSchemaRoot] = None
+    var writer: Option[ArrowStreamWriter] = None
     // Setup the streams and writers
     val bos = new ByteArrayOutputStream()
     val oos = {
       val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
       new ObjectOutputStream(codec.compressedOutputStream(bos))
     }
-    val writer: ArrowStreamWriter = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
-    writer.start()
 
-    // write first batch
-    writer.writeBatch()
-    oos.writeLong(first_length)
-    oos.writeInt(extra.length)
-    oos.write(extra)
-    if (left.isDefined) left = Option((left.get - first_length).toInt)
+    // Prepare first batch
+    // This needs to be done separately as we need the schema for the VectorSchemaRoot
+    Resources.autoCloseTry( extraEncoder(iter.next()) ) { case (extra, first) =>
+      val first_length = first.numRows.min(left.getOrElse(Int.MaxValue).toLong)
+      if (first_length > Integer.MAX_VALUE)
+        throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
+      val columns = if (numCols.isDefined) first.columns.slice(0, numCols.get) else first.columns
+      root = Option(VectorSchemaRoot.of(columns.map(column => {
+        if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
+        val vector = column.getValueVector
+        val tp = vector.getTransferPair(vector.getAllocator)
+        tp.splitAndTransfer(0, first_length.toInt)
+        tp.getTo.asInstanceOf[FieldVector]
+      }).toSeq: _*))
+      assert(root.isDefined)
+
+      writer = Option(new ArrowStreamWriter(root.get, null, Channels.newChannel(oos)))
+      writer.foreach( w => {
+        // write first batch
+        w.start()
+        w.writeBatch()
+      })
+
+      oos.writeLong(first_length)
+      oos.writeInt(extra.length)
+      oos.write(extra)
+      if (left.isDefined) left = Option((left.get - first_length).toInt)
+    }
+
+    if (root.isEmpty || writer.isEmpty)
+      return Iterator(Array.emptyByteArray)
 
 
     // while we still have some reading to do
@@ -404,8 +430,8 @@ object ArrowColumnarBatchRow {
       val batch_length = batch.numRows.min(left.getOrElse(Int.MaxValue).toLong)
       if (batch_length > Integer.MAX_VALUE)
         throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-      new VectorLoader(root).load(batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Option(batch_length.toInt)))
-      writer.writeBatch()
+      new VectorLoader(root.get).load(batch.toArrowRecordBatch(root.get.getFieldVectors.size(), numRows = Option(batch_length.toInt)))
+      writer.get.writeBatch()
       oos.writeLong(batch_length)
       oos.writeInt(extra.length)
       oos.write(extra)
@@ -413,7 +439,7 @@ object ArrowColumnarBatchRow {
     }
 
     // clean up and return the singleton-iterator
-    writer.close()
+    writer.get.close()
     oos.flush()
     oos.close()
     Iterator(bos.toByteArray)
@@ -759,17 +785,17 @@ object ArrowColumnarBatchRow {
     new BucketSearcher(keyUnion, rangeUnion, comparator).distribute()
   }
 
-  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
-    val distributed = mutable.Map[Int, ArrowColumnarBatchRow]()
+  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, Array[ArrowColumnarBatchRow]] = {
+    val distributed = mutable.Map[Int, ArrayBuffer[ArrowColumnarBatchRow]]()
 
     partitionIds.zipWithIndex foreach { case (partitionId, index) =>
       val newRow = key.take(index until index+1)
-      val item = distributed.get(partitionId)
-      item.fold (distributed(partitionId) = newRow) { batch =>
-        distributed(partitionId) = ArrowColumnarBatchRow.create(Iterator(batch, newRow))
-      }
+      if (distributed.contains(partitionId))
+        distributed(partitionId) += newRow
+      else
+        distributed(partitionId) = ArrayBuffer(newRow)
     }
 
-    distributed.toMap
+    distributed.map ( items => (items._1, items._2.toArray) ).toMap
   }
 }

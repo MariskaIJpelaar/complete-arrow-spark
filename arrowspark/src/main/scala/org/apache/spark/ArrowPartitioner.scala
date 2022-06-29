@@ -98,6 +98,8 @@ class ArrowRangePartitioner[V](
   private def determineBounds(
      candidates: ArrayBuffer[(ArrowColumnarBatchRow, Float)],
      partitions: Int): ArrowColumnarBatchRow = {
+    assert(partitions - 1 < Integer.MAX_VALUE)
+
     // Checks if we have non-empty batches
     if (candidates.length < 1) new ArrowColumnarBatchRow(Array.empty, 0)
     var allocator: Option[BufferAllocator] = None
@@ -127,24 +129,21 @@ class ArrowRangePartitioner[V](
     val weights = weighted.getArray(0)
     val step = (0 until weights.numElements() map weights.getFloat).sum / partitions
     var cumWeight = 0.0
+    var cumSize = 0
     var target = step
-    var bounds: Option[ArrowColumnarBatchRow] = None
+    val bounds =  new Array[ArrowColumnarBatchRow](partitions -1)
     0 until unique.numRows.toInt takeWhile { index =>
       cumWeight += weights.getFloat(index)
       if (cumWeight >= target) {
-        bounds = Option(bounds.fold(unique.take( index until index+1 )) ( batch =>
-          new ArrowColumnarBatchRow(
-            ArrowColumnarBatchRow.take(Iterator(batch, unique.take( index until index+1 ) ))._2,
-            batch.numRows + 1)
-        ))
+        bounds(cumSize) = unique.take(index until index +1)
+        cumSize += 1
         target += step
       }
 
-      bounds.forall( _.numRows < partitions -1)
+      cumSize < partitions -1
     }
 
-    assert(bounds.forall(_.numRows < Integer.MAX_VALUE))
-    bounds.getOrElse(new ArrowColumnarBatchRow(Array.empty, 0))
+    ArrowColumnarBatchRow.create(bounds.toIterator)
   }
 
   private var rangeBoundsLength: Option[Int] = None
