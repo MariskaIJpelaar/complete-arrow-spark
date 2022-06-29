@@ -2,16 +2,17 @@ package org.apache.spark.sql.execution.exchange
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
+import org.apache.spark.shuffle.{ArrowShuffleWriteProcessor, ShuffleWriteMetricsReporter}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBatchRowProjection
 import org.apache.spark.sql.catalyst.expressions.{Attribute, BoundReference}
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
 import org.apache.spark.sql.execution._
+import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
 import org.apache.spark.util.MutablePair
-import org.apache.spark.{ArrowRangePartitioner, MapOutputStatistics, ShuffleDependency}
+import org.apache.spark.{ArrowRangePartitioner, MapOutputStatistics, ShuffleDependency, TaskContext}
 
 import scala.concurrent.Future
 
@@ -104,8 +105,21 @@ object ArrowShuffleExchangeExec {
       rddWithPartitionIds,
       new PartitionIdPassthrough(part.numPartitions),
       serializer,
-      shuffleWriterProcessor = ShuffleExchangeExec.createShuffleWriteProcessor(writeMetrics))
+      shuffleWriterProcessor = ArrowShuffleExchangeExec.createShuffleWriteProcessor(writeMetrics))
 
     dependency
+  }
+
+  /**
+   * Create a customized [[ArrowShuffleWriteProcessor]] for SQL which wrap the default metrics reporter
+   * with [[SQLShuffleWriteMetricsReporter]] as new reporter for [[ArrowShuffleWriteProcessor]].
+   */
+  def createShuffleWriteProcessor(metrics: Map[String, SQLMetric]): ArrowShuffleWriteProcessor = {
+    new ArrowShuffleWriteProcessor {
+      override protected def createMetricsReporter(
+                                                    context: TaskContext): ShuffleWriteMetricsReporter = {
+        new SQLShuffleWriteMetricsReporter(context.taskMetrics().shuffleWriteMetrics, metrics)
+      }
+    }
   }
 }

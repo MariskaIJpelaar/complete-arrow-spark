@@ -147,6 +147,8 @@ class ArrowRangePartitioner[V](
     bounds.getOrElse(new ArrowColumnarBatchRow(Array.empty, 0))
   }
 
+  private var rangeBoundsLength: Option[Int] = None
+
   // an array of upper bounds for the first (partitions-1) partitions
   // inspired by: org.apache.spark.RangePartitioner::rangeBounds
   // encoded ArrowBatchColumnarRow that represents the rangeBounds
@@ -199,7 +201,6 @@ class ArrowRangePartitioner[V](
     ArrowColumnarBatchRow.encode(Iterator(bounds)).toArray.apply(0)
   }
 
-  private var rangeBoundsLength: Option[Int] = None
   override def numPartitions: Int = rangeBoundsLength.getOrElse(0) + 1
 
 

@@ -27,6 +27,7 @@ import java.nio.channels.Channels
 import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.immutable.NumericRange
+import scala.collection.mutable
 import scala.util.Random
 
 // TODO: at some point, we might have to split up functionalities into more files
@@ -111,7 +112,7 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
       val allocator = vector.getAllocator
       val tp = vector.getTransferPair(allocator)
 
-      tp.transfer()
+      tp.splitAndTransfer(0, numRows.toInt)
       new ArrowColumnVector(tp.getTo)
     }, numRows)
   }
@@ -125,7 +126,7 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
     new ArrowColumnarBatchRow( indices.toArray map ( index => {
       val vector = columns(index).getValueVector
       val tp = vector.getTransferPair(vector.getAllocator)
-      tp.transfer()
+      tp.splitAndTransfer(0, numRows.toInt)
       new ArrowColumnVector(tp.getTo)
     }), numRows)
   }
@@ -216,6 +217,11 @@ class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnV
 object ArrowColumnarBatchRow {
   // TODO: apply to all places where this is required! Perhaps make more wrappers...
 
+  /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows */
+  def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
+    ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(iter)._2)
+  }
+
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors */
   def create(cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
     val length = if (cols.length > 0) cols(0).getValueVector.getValueCount else 0
@@ -287,7 +293,9 @@ object ArrowColumnarBatchRow {
     val array = Array.tabulate[ArrowColumnVector](numCols.getOrElse(first.numFields)) { i =>
       val vector = first.columns(i).getValueVector
       val tp = vector.getTransferPair(vector.getAllocator)
-      numRows.fold( tp.transfer() )( num => tp.splitAndTransfer(0, num))
+      numRows.fold( tp.splitAndTransfer(0, first.numRows.toInt) )( num =>
+        tp.splitAndTransfer(0, num)
+      )
       // we 'copy' the content of the first batch ...
       val old_vec = tp.getTo
 
@@ -749,5 +757,19 @@ object ArrowColumnarBatchRow {
 
     // find partition-ids
     new BucketSearcher(keyUnion, rangeUnion, comparator).distribute()
+  }
+
+  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
+    val distributed = mutable.Map[Int, ArrowColumnarBatchRow]()
+
+    partitionIds.zipWithIndex foreach { case (partitionId, index) =>
+      val newRow = key.take(index until index+1)
+      val item = distributed.get(partitionId)
+      item.fold (distributed(partitionId) = newRow) { batch =>
+        distributed(partitionId) = ArrowColumnarBatchRow.create(Iterator(batch, newRow))
+      }
+    }
+
+    distributed.toMap
   }
 }

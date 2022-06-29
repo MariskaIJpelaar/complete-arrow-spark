@@ -2,13 +2,14 @@ package org.apache.spark.shuffle.sort
 
 import com.google.common.io.Closeables
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.spark.{ArrowPartitioner, SparkConf}
+import org.apache.spark.SparkConf
 import org.apache.spark.internal.config.SHUFFLE_FILE_BUFFER_SIZE
 import org.apache.spark.network.shuffle.checksum.ShuffleChecksumHelper
 import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.shuffle.api.{ShuffleExecutorComponents, ShuffleMapOutputWriter, ShufflePartitionWriter, WritableByteChannelWrapper}
 import org.apache.spark.shuffle.checksum.ShuffleChecksumSupport
 import org.apache.spark.shuffle.{ShuffleWriteMetricsReporter, ShuffleWriter}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.storage.{BlockManager, DiskBlockObjectWriter, FileSegment}
 import org.apache.spark.util.Utils
 import org.slf4j.LoggerFactory
@@ -54,18 +55,17 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
     var copyThrewException = true
     try {
       val in = new FileInputStream(file)
-      try {
-        val inputChannel = in.getChannel
-        try {
-          Utils.copyFileStreamNIO(inputChannel, outputChannel.channel, 0L, inputChannel.size)
-          copyThrewException = false
-        } finally {
-          Closeables.close(in, copyThrewException)
-          if (inputChannel != null) inputChannel.close()
-        }
+      Resources.autoCloseTry(in.getChannel) { inputChannel =>
+       try {
+         Utils.copyFileStreamNIO(inputChannel, outputChannel.channel(), 0L, inputChannel.size())
+         copyThrewException = false
+       } finally {
+         Closeables.close(in, copyThrewException)
+       }
       }
-    } finally Closeables.close(outputChannel, copyThrewException)
-
+    } finally {
+      Closeables.close(outputChannel, copyThrewException)
+    }
   }
   /** copied and modified from BypassMergeSortShuffleWriter.writePartitionedDataWithStream */
   private def writePartitionedDataWithStream(file: File, writer: ShufflePartitionWriter): Unit = {
@@ -128,9 +128,9 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
 
       val serInstance = serializer.newInstance()
       val openStartTime = System.nanoTime()
-      partitionWriters = Option( Array[DiskBlockObjectWriter](numPartitions) )
+      partitionWriters = Option( new Array[DiskBlockObjectWriter](numPartitions) )
       assert(partitionWriters.isDefined)
-      partitionWriterSegments = Option( Array[FileSegment](numPartitions) )
+      partitionWriterSegments = Option( new Array[FileSegment](numPartitions) )
       assert(partitionWriterSegments.isDefined)
 
       0 until numPartitions foreach { i =>
@@ -146,9 +146,13 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
 
       while (records.hasNext) {
         val (key, value) = records.next()
-        partitioner match {
-          case arrow: ArrowPartitioner => ???
-          case _ => ???
+        // In case of ArrowPartition: key = FilePartition, value = ArrowColumnarBatchRow
+        (key, value) match {
+          case (partitionIds: Array[Int], partition: ArrowColumnarBatchRow) =>
+            ArrowColumnarBatchRow.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
+              partitionWriters.get(partitionId).write(partitionId, batch)
+            }
+          case _ => partitionWriters.get(partitioner.getPartition(key)).write(key, value)
         }
       }
 
