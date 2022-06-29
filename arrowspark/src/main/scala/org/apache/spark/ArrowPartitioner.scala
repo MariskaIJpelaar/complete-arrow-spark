@@ -150,7 +150,7 @@ class ArrowRangePartitioner[V](
   // an array of upper bounds for the first (partitions-1) partitions
   // inspired by: org.apache.spark.RangePartitioner::rangeBounds
   // encoded ArrowBatchColumnarRow that represents the rangeBounds
-  private lazy val rangeBounds: Array[Byte] = {
+  private val rangeBounds: Array[Byte] = {
     if (partitions <= 1) Array.empty
 
     // This is the sample size we need to have roughly balanced output partitions, capped at 1M.
