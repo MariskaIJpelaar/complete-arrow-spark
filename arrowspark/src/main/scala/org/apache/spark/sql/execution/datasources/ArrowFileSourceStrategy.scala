@@ -7,7 +7,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Empty
 import org.apache.spark.sql.catalyst.planning.ScanOperation
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.{SparkSession, execution}
-import org.apache.spark.sql.execution.{ArrowCollectExec, ArrowScanExec, FileSourceScanExec, SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.{ArrowCollectExec, ArrowFileFormat, ArrowScanExec, FileSourceScanExec, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.types.{DoubleType, FloatType}
 import org.apache.spark.util.collection.BitSet
 
@@ -179,16 +179,19 @@ case class ArrowFileSourceStrategy(spark: SparkSession) extends SparkStrategy wi
 
       val outputAttributes = readDataColumns ++ partitionColumns
 
+      val scanExec = FileSourceScanExec(
+        fsRelation,
+        outputAttributes,
+        outputSchema,
+        partitionKeyFilters.toSeq,
+        bucketSet,
+        None,
+        dataFilters,
+        table.map(_.identifier))
       val scan =
-        ArrowCollectExec(ArrowScanExec(FileSourceScanExec(
-          fsRelation,
-          outputAttributes,
-          outputSchema,
-          partitionKeyFilters.toSeq,
-          bucketSet,
-          None,
-          dataFilters,
-          table.map(_.identifier))))
+        if (fsRelation.fileFormat.isInstanceOf[ArrowFileFormat])
+          ArrowCollectExec(ArrowScanExec(scanExec))
+        else scanExec
 
       val afterScanFilter = afterScanFilters.toSeq.reduceOption(expressions.And)
       val withFilter = afterScanFilter.map(execution.FilterExec(_, scan)).getOrElse(scan)

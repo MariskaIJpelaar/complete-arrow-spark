@@ -4,6 +4,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.IntegerLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Limit, LogicalPlan, ReturnAnswer, Sort}
 import org.apache.spark.sql.catalyst.plans.physical
+import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRelation}
 import org.apache.spark.sql.execution.exchange.{ArrowShuffleExchangeExec, ENSURE_REQUIREMENTS}
 import org.apache.spark.sql.internal.SQLConf
 
@@ -30,13 +31,19 @@ case class ArrowBasicOperators(spark: SparkSession) extends SparkStrategy {
     if (!plan.isInstanceOf[Sort])
       return Nil
 
-    val sortPlan = plan.asInstanceOf[Sort]
-    val distribution = physical.OrderedDistribution(sortPlan.order)
-    val numPartitions = distribution.requiredNumPartitions.getOrElse(SQLConf.get.numShufflePartitions)
-    val shuffleChild: SparkPlan = ArrowShuffleExchangeExec(distribution.createPartitioning(numPartitions), planLater(sortPlan.child), ENSURE_REQUIREMENTS)
-    ArrowCollectExec(ArrowSortExec(sortPlan.order, sortPlan.global, shuffleChild)) :: Nil
-  }
+    val Sort(order, global, child) = plan.asInstanceOf[Sort]
+    if (!child.isInstanceOf[LogicalRelation])
+      return Nil
 
+    child.asInstanceOf[LogicalRelation].relation match {
+      case hadoop: HadoopFsRelation if hadoop.fileFormat.isInstanceOf[ArrowFileFormat] =>
+        val distribution = physical.OrderedDistribution(order)
+        val numPartitions = distribution.requiredNumPartitions.getOrElse(SQLConf.get.numShufflePartitions)
+        val shuffleChild: SparkPlan = ArrowShuffleExchangeExec(distribution.createPartitioning(numPartitions), planLater(child), ENSURE_REQUIREMENTS)
+        ArrowCollectExec(ArrowSortExec(order, global, shuffleChild)) :: Nil
+      case _ => Nil
+    }
+  }
 }
 
 // TODO: prob. can be removed

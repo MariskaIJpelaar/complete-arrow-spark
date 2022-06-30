@@ -39,8 +39,8 @@ class Main extends Callable[Unit] {
   private var log_dir: Path = Paths.get("", "output")
   @picocli.CommandLine.Option(names = Array("--log-file"))
   private var log_file: String = "exp" + ZonedDateTime.now().truncatedTo(ChronoUnit.MINUTES).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + ".log"
-  @picocli.CommandLine.Option(names = Array("--num-part"))
-  private var num_part: Int = 10
+
+  private val num_part: Int = 10
 
   override def call(): Unit = {
     // User input checks
@@ -63,11 +63,13 @@ class Main extends Callable[Unit] {
 
     try {
       val start: Long = System.nanoTime()
-      val spark = SparkSession.builder().appName("LazyReaderSmallTest")
+      val builder = SparkSession.builder().appName("LazyReaderSmallTest")
         .config("spark.memory.offHeap.enabled", "true")
         .config("spark.memory.offHeap.size", "3048576")
-        .master("local[4]")
-        .withExtensions(ArrowSparkExtensionWrapper.injectAll).getOrCreate()
+        .withExtensions(ArrowSparkExtensionWrapper.injectAll)
+      if (local)
+        builder.master("local[4]")
+      val spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("ERROR")
 
       /**

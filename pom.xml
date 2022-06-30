@@ -11,6 +11,7 @@
 
   <modules>
     <module>arrowspark</module>
+    <module>data-generation</module>
   </modules>
 
   <build>
