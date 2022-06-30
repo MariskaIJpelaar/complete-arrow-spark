@@ -150,6 +150,12 @@
       <artifactId>jackson-module-scala_2.12</artifactId>
       <version>${jackson.version}</version>
     </dependency>
+    <!--    For BlackHole -->
+    <dependency>
+      <groupId>org.openjdk.jmh</groupId>
+      <artifactId>jmh-core</artifactId>
+      <version>1.21</version>
+    </dependency>
   </dependencies>
 
   <!--  https://stackoverflow.com/questions/24448582/my-mixed-scala-java-maven-project-doesnt-compile-->

@@ -1,12 +1,14 @@
-import nl.liacs.mijpelaar.evaluation.EvaluationSuite
 import org.apache.avro.SchemaBuilder
 import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.column._
+import org.apache.spark.sql.column.encoders.ColumnEncoder
+import org.apache.spark.sql.expressions.Aggregator
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
+import org.apache.spark.sql.{Encoder, SparkSession}
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ParquetWriter
 
@@ -348,13 +350,35 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val new_df = df.sort("numA", "numB")
     new_df.explain("formatted")
 
-    new_df.toLocalIterator().forEachRemaining( batch => assert(EvaluationSuite.isSorted(batch, 0 to 1)) )
+    val schema = df.schema
+    val encoder = ColumnEncoder(schema)
 
+    class NothingAgg(val f: ColumnBatch => Any) extends Aggregator[ColumnBatch, Long, Long] {
+      override def zero: Long = 0
+      override def reduce(b: Long, a: ColumnBatch): Long = b
+      override def merge(b1: Long, b2: Long): Long = b1 + b2
+      override def finish(reduction: Long): Long = reduction
+      override def bufferEncoder: Encoder[Long] = ExpressionEncoder[Long]()
+      override def outputEncoder: Encoder[Long] = ExpressionEncoder[Long]()
+    }
+    val nothing: ColumnBatch => ColumnBatch = (batch: ColumnBatch) => batch
+    val nothingAgg = new NothingAgg( nothing )
 
-    val array = new_df.queryExecution.executedPlan.execute().map( batch =>
-      EvaluationSuite.isSortedBatch(batch.asInstanceOf[ArrowColumnarBatchRow], 0 to 1) ).collect()
+    val nothingUDAF = org.apache.spark.sql.functions.udaf(nothingAgg, encoder)
+//    val nothingUDF = org.apache.spark.sql.functions.udf(nothing)
+    df.agg(nothingUDAF(df.col("numA")))
 
-    assert(array.forall( a => a) )
+//    new_df.foreach( _: ColumnBatch => Unit )
+
+//    new_df.toLocalIterator().forEachRemaining( batch => assert(EvaluationSuite.isSorted(batch, 0 to 1)) )
+//
+//
+//    val array = new_df.queryExecution.executedPlan.execute().map( batch =>
+//      EvaluationSuite.isSortedBatch(batch.asInstanceOf[ArrowColumnarBatchRow], 0 to 1) ).collect()
+//
+//    assert(array.forall( a => a) )
+
+//    org.openjdk.jmh.infra.Blackhole
 
 
     directory.deleteRecursively()
