@@ -1,3 +1,4 @@
+import nl.liacs.mijpelaar.evaluation.EvaluationSuite
 import org.apache.avro.SchemaBuilder
 import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
@@ -327,6 +328,34 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect(), size = size)
+
+    directory.deleteRecursively()
+  }
+
+  test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading, on-partition check") {
+    // Generate Dataset
+    val size = default_size * 15
+    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true, size = size)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+
+    // Construct DataFrame
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+
+    // Perform ColumnarSort
+    val new_df = df.sort("numA", "numB")
+    new_df.explain("formatted")
+
+    new_df.toLocalIterator().forEachRemaining( batch => assert(EvaluationSuite.isSorted(batch, 0 to 1)) )
+
+
+    val array = new_df.queryExecution.executedPlan.execute().map( batch =>
+      EvaluationSuite.isSortedBatch(batch.asInstanceOf[ArrowColumnarBatchRow], 0 to 1) ).collect()
+
+    assert(array.forall( a => a) )
+
 
     directory.deleteRecursively()
   }
