@@ -257,33 +257,6 @@ class LazyReaderSmallTest extends AnyFunSuite {
     directory.deleteRecursively()
   }
 
-  test("Performing ColumnarSort on a simple, semi-random, Dataset using Lazy Reading, collecting only first batch") {
-    // Generate Dataset
-    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = false)
-    val directory = new Directory(new File(directory_name))
-    assert(directory.exists)
-
-    val spark = generateSpark()
-
-    // Construct DataFrame
-    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
-
-    // Perform ColumnarSort
-    val new_df = df.sort("numA", "numB")
-    new_df.explain("formatted")
-
-    // Compute answer
-    computeAnswer(table)
-
-    val first = new_df.first()
-    val size = TColumn.fromBatches(Array(first)).head.length
-
-    // Check if result is equal to our computed table
-    checkSorted(table.subList(0, size), Array(first))
-
-    directory.deleteRecursively()
-  }
-
   test("Performing ColumnarSort on a simple, semi-random, Dataset using Lazy Reading") {
     // Generate Dataset
     val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = false)

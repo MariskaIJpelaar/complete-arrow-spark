@@ -20,9 +20,6 @@ object ArrowRDD {
    * @param extraEncoder (optional) split item into encoded custom-data and a batch
    * @param extraDecoder (optional) decode an array of bytes to custom-data and a batch to a single instance
    * @param extraTaker (optional) split the item from the iterator into (customData, batch)
-   * @param extraCollector (optional) collect a new item from custom-data, first parameter is new item, second parameter
-   *                       is the result from previous calls, None if there were no previous calls. Result of this
-   *                       function is passed to other calls of extraCollector.
    * @return array of custom-data and batches
    */
   def collect[T: ClassTag](rdd: RDD[T],

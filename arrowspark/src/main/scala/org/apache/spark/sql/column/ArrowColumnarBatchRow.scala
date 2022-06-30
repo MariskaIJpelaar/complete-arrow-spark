@@ -39,8 +39,6 @@ import scala.util.Random
 // TODO: difference between 'take' and 'merge'?
 
 class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
-  assert(columns != null)
-
   override def numFields: Int = columns.length
 
   def length: Long = numRows
