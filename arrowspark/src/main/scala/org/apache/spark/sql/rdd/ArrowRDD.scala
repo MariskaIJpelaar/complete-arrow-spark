@@ -28,8 +28,8 @@ object ArrowRDD {
   def collect[T: ClassTag](rdd: RDD[T],
                            extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
                            extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch,
-                           extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
-                           extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None)(implicit ct: ClassTag[T]): Array[(Any, ArrowColumnarBatchRow)] = {
+                           extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]))
+                          (implicit ct: ClassTag[T]): Array[(Any, ArrowColumnarBatchRow)] = {
     val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res, extraEncoder = extraEncoder)}
     val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
       if (!it.hasNext) Array.emptyByteArray else it.next()
@@ -37,9 +37,7 @@ object ArrowRDD {
     val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
     res.foreach(result => {
       val decoded = ArrowColumnarBatchRow.decode(result, extraDecoder = extraDecoder)
-      // TODO: Do we want to not do take, but simply add decoded to buf?
-      val (extra, cols) = ArrowColumnarBatchRow.take(decoded, extraTaker = extraTaker, extraCollector = extraCollector)
-      buf += Tuple2(extra, new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0))
+      buf ++= decoded.map( item => extraTaker(item) )
     })
     buf.toArray
   }
@@ -78,7 +76,7 @@ object ArrowRDD {
       }, p)
 
       res.foreach(result => {
-        // TODO: do we want to omit take and simply add to buf?
+        // NOTE: we require the 'take', because we do not want more than num numRows
         val cols = ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(result), numRows = Option(num))._2
         buf += ArrowColumnarBatchRow.create(cols)
       })

@@ -74,21 +74,11 @@ class ArrowRangePartitioner[V](
       ((idx, n), sample)
     }
 
-    val extraCollector: (Any, Option[Any]) => Any = (item, collection) => {
-      val (idx: Int, n: Long) = item
-      val prev = collection.asInstanceOf[Option[(Int, Long)]]
-      prev.fold( (idx, n) ) { case (jdx, m) =>
-        assert (idx == jdx)
-        (idx, n + m)
-      }
-    }
-
     val sketched = ArrowRDD.collect(
       sketchedRDD,
       extraEncoder = extraEncoder,
       extraDecoder = extraDecoder,
-      extraTaker = extraTaker,
-      extraCollector = extraCollector
+      extraTaker = extraTaker
     ).map { case (extra: (Int, Long), batch: ArrowColumnarBatchRow) => (extra._1, extra._2, batch) }
     val numItems = sketched.map(_._2).sum
     (numItems, sketched)
@@ -120,10 +110,12 @@ class ArrowRangePartitioner[V](
       totalRows += batch.numRows.toInt
       batch.appendColumns( Array(new ArrowColumnVector(weights)) )
     }
-    // TODO: try with resources for grouped and sorted? How long do we want 'unique' and 'weighted' to live?
+    // TODO: try with resources?
     val grouped = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator)._2, totalRows)
     val sorted = ArrowColumnarBatchRow.multiColumnSort(grouped, orders)
+    grouped.close()
     val (unique, weighted) = ArrowColumnarBatchRow.unique(sorted, orders).splitColumns(grouped.numFields-1)
+    sorted.close()
 
     // now we gather our bounds
     assert(weighted.numFields == 1)
@@ -145,6 +137,8 @@ class ArrowRangePartitioner[V](
     }
 
     rangeBoundsLength = Option(cumSize)
+    unique.close()
+    weighted.close()
     bounds
   }
 
