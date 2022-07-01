@@ -2,7 +2,7 @@ package nl.liacs.mijpelaar.evaluation
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column.encoders.ColumnEncoder
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, ColumnBatch, ColumnDataFrame, ColumnDataFrameReader, TColumn}
+import org.apache.spark.sql.column._
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.{SQLExecution, SparkPlan}
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -133,11 +133,14 @@ object EvaluationSuite {
     val cols = df.columns
     assert(cols.length > 0)
     val sorted_df = if (cols.length == 1) df.sort(cols(0)) else df.sort(cols(0), cols(1))
+    println(sorted_df.queryExecution.executedPlan.execute().toDebugString)
     val vanilla_start = System.nanoTime()
-    sorted_df.toLocalIterator().forEachRemaining( row => row.length )
+//    sorted_df.toLocalIterator().forEachRemaining( row => row.length )
+    val something = sorted_df.queryExecution.executedPlan.execute().mapPartitions( iter => iter ).collect()
     val vanilla_stop = System.nanoTime()
     fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
     fw.flush()
+    assert(something.length > 0)
 
     val cdf: ColumnDataFrame =
       new ColumnDataFrameReader(spark).format("org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat")

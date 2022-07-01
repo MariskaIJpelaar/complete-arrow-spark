@@ -442,6 +442,8 @@ object ArrowColumnarBatchRow {
    * Users may add additional decoding by providing the 'extraDecoder' function*/
   def decode(bytes: Array[Byte],
              extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch): Iterator[Any] = {
+    if (bytes.length == 0)
+      return Iterator.empty
     new NextIterator[Any] {
       private val bis = new ByteArrayInputStream(bytes)
       private val ois = {
@@ -504,6 +506,8 @@ object ArrowColumnarBatchRow {
     if (batch.numFields < 1)
       return batch
 
+    val start = System.nanoTime()
+
     // prepare comparator and UnionVector
     val union = new UnionVector("Combiner", batch.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
     val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
@@ -529,10 +533,15 @@ object ArrowColumnarBatchRow {
     assert(first_vector.getValueCount > 0)
     indices.allocateNew(first_vector.getValueCount)
     indices.setValueCount(first_vector.getValueCount)
+
+    val postPrepare = System.nanoTime()
+
     (new IndexSorter).sort(union, indices, comparator)
 
+    val postSort = System.nanoTime()
+
     // sort all columns
-    new ArrowColumnarBatchRow( batch.columns map { column =>
+    val ret = new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
       assert(vector.getValueCount == indices.getValueCount)
 
@@ -551,6 +560,15 @@ object ArrowColumnarBatchRow {
 
       new ArrowColumnVector(new_vector)
     }, batch.numRows)
+
+    val postPermute = System.nanoTime()
+
+    val preparation = (postPrepare - start) / 1e9d
+    val sorting = (postSort - postPrepare) / 1e9d
+    val permuting = (postPermute - postSort) / 1e9d
+    println("size: %d, nrOrders: %d, numCols: %d, preparation: %04.3f, sorting: %04.3f, permuting: %04.3f".format(batch.numRows.toInt, sortOrders.size, batch.numFields, preparation, sorting, permuting))
+
+    ret
   }
 
   /**
@@ -698,27 +716,29 @@ object ArrowColumnarBatchRow {
     // First, we fill the reservoir with k elements
     var inputSize = 0L
     var nrBatches = 0
-    var length = 0L
     var remainderBatch: Option[ArrowColumnarBatchRow] = None
     val reservoirBuf = new ArrayBuffer[ArrowColumnarBatchRow](k)
     while (inputSize < k) {
+      var length = 0L
       if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
-      val batch = input.next()
-      assert(batch.numRows < Integer.MAX_VALUE)
-      length = math.min(k-inputSize, batch.numRows)
-      reservoirBuf += batch
-      inputSize += length
-      nrBatches += 1
+      Resources.autoCloseTry(input.next()) { batch =>
+        assert(batch.numRows < Integer.MAX_VALUE)
+        length = math.min(k-inputSize, batch.numRows)
+        reservoirBuf += batch.take(0 until length.toInt)
 
-      // do we have elements remaining?
-      if (length < batch.numRows)
-        remainderBatch = Option(batch)
+        // do we have elements remaining?
+        if (length < batch.numRows)
+          remainderBatch = Option(batch.take(length.toInt until batch.numRows.toInt))
+
+        nrBatches += 1
+      }
+      inputSize += length
     }
 
     var iter: Iterator[ArrowColumnarBatchRow] = input
     // add our remainder to the iterator, if there is any
     remainderBatch.foreach { batch =>
-      iter = Iterator(batch.take( (length.toInt) until batch.numRows.toInt )) ++ iter
+      iter = Iterator(batch) ++ iter
     }
 
     val reservoir = ArrowColumnarBatchRow.create(reservoirBuf.toIterator)
@@ -745,6 +765,8 @@ object ArrowColumnarBatchRow {
   }
 
   def bucketDistributor(key: ArrowColumnarBatchRow, rangeBounds: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): Array[Int] = {
+    if (key.numFields < 1 || rangeBounds.numFields < 1)
+      return Array.empty
     // prepare comparator and UnionVectors
     val keyUnion = new UnionVector("KeyCombiner", key.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
     val rangeUnion = new UnionVector("rangeCombiner", rangeBounds.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)

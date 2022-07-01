@@ -25,7 +25,6 @@ import org.apache.spark.sql.internal.SQLConf
 //  override def executeTakeArrow(n: Int): Array[ArrowPartition] = plan.executeTakeArrow(n)
 //}
 
-
 case class ArrowBasicOperators(spark: SparkSession) extends SparkStrategy {
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
     if (!plan.isInstanceOf[Sort])
