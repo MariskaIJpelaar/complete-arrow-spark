@@ -246,25 +246,6 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             inputMetrics.incRecordsRead(partition.numFields)
             partition
         }
-
-//        val array = new ArrayBuffer[ArrowColumnarBatchRow]()
-//        nextIterator()
-//
-//        var numFields = 0
-//
-//        while (currentIterator.isDefined && currentIterator.get.hasNext) {
-//          val nextElement = currentIterator.get.next()
-//          incTaskInputMetricsBytesRead()
-//          nextElement match {
-//            case partition: ArrowColumnarBatchRow =>
-//              inputMetrics.incRecordsRead(partition.numFields)
-//              array += partition
-//              numFields = partition.numFields
-//          }
-//        }
-//
-//        val cols = ArrowColumnarBatchRow.take(numFields, array.toIterator)
-//        new ArrowColumnarBatchRow(cols, if (cols.length > 0) cols(0).getValueVector.getValueCount else 0)
       }
 
       override def close(): Unit = {

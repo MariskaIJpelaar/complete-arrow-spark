@@ -8,23 +8,6 @@ import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRela
 import org.apache.spark.sql.execution.exchange.{ArrowShuffleExchangeExec, ENSURE_REQUIREMENTS}
 import org.apache.spark.sql.internal.SQLConf
 
-///** Note: copied and edited from SparkStrategies::SparkStrategy */
-//abstract class SpArrowStrategy extends SparkStrategy {
-//  protected def ArrowPlanLater(plan: LogicalPlan with ArrowLimit): SparkPlan with ArrowLimit = ArrowLimitPlanLater(plan)
-//}
-//
-//
-///** Note: Mostly copied from SparkStrategies::PlanLater with type-change  */
-//case class ArrowLimitPlanLater(plan: LogicalPlan with ArrowLimit) extends LeafExecNode with ArrowLimit {
-//  override protected def doExecute(): RDD[InternalRow] = {
-//    throw new UnsupportedOperationException()
-//  }
-//
-//  override def output: Seq[Attribute] = plan.output
-//
-//  override def executeTakeArrow(n: Int): Array[ArrowPartition] = plan.executeTakeArrow(n)
-//}
-
 case class ArrowBasicOperators(spark: SparkSession) extends SparkStrategy {
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
     if (!plan.isInstanceOf[Sort])

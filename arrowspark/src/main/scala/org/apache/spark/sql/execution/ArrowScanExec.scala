@@ -58,17 +58,6 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
   }
 
-//  override def executeCollect(): Array[InternalRow] = {
-//    val rdd = execute()
-//    rdd.collect()
-//  }
-//
-//  /** Takes the first n columns */
-//  override def executeTake(n: Int): Array[InternalRow] = {
-//    val rdd = execute()
-//    rdd.take(n)
-//  }
-
   // copied from org/apache/spark/sql/execution/DataSourceScanExec.scala
   @transient
   private lazy val pushedDownFilters = {
@@ -89,15 +78,6 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     val bucketingEnabled = fsRelation.sparkSession.sessionState.conf.bucketingEnabled
     val shouldProcess: Path => Boolean = filePath =>
       fs.optionalBucketSet.forall { bucketSet => bucketingEnabled || BucketingUtils.getBucketId(filePath.getName).forall(bucketSet.get) }
-
-    // above one-liner used to be this:
-//    val shouldProcess: Path => Boolean = fs.optionalBucketSet match {
-//      case Some(bucketSet) if bucketingEnabled =>
-//        // Do not prune the file if bucket file name is invalid
-//        filePath => BucketingUtils.getBucketId(filePath.getName).forall(bucketSet.get)
-//      case _ =>
-//        _ => true
-//    }
 
     val splitFiles = selectedPartitions.flatMap { partition =>
       partition.files.flatMap { file =>

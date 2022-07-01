@@ -11,7 +11,6 @@ object ColumnDataset {
     val qe = sparkSession.sessionState.executePlan(logicalPlan)
     qe.assertAnalyzed()
     val schema = qe.analyzed.schema
-//    schema.fields.transform( field => field.copy(dataType = ArrayType.apply(field.dataType)) )
     val temp = ColumnEncoder(schema)
     new Dataset[ColumnBatch](qe, temp)
   }

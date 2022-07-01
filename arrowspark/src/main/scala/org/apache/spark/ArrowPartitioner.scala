@@ -31,7 +31,6 @@ class ArrowRangePartitioner[V](
   require(samplePointsPerPartitionHint > 0,
     s"Sample points per partition must be greater than 0 but found $samplePointsPerPartitionHint")
 
-//  private var ordering = implicitly[Ordering[ArrowColumnarBatchRow]]
 
   /** Note: inspiration from: org.apache.spark.RangePartitioner::sketch */
   private def sketch(rdd: RDD[ArrowColumnarBatchRow], sampleSizePerPartition: Int):

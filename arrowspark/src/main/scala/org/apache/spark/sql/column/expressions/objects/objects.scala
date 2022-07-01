@@ -3,7 +3,7 @@ package org.apache.spark.sql.column.expressions.objects
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.Block.BlockHelper
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, FalseLiteral}
-import org.apache.spark.sql.catalyst.expressions.{Expression, LeafExpression, NonSQLExpression, UnaryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Expression, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.column.expressions.{GenericColumn, GenericColumnBatch}
 import org.apache.spark.sql.column.{ColumnBatch, TColumn}
 import org.apache.spark.sql.errors.QueryExecutionErrors
@@ -30,17 +30,6 @@ case class CreateExternalColumn(child: Expression) extends UnaryExpression with 
       s"""
          |${eval.code}
        """.stripMargin
-//    val childrenCodes = children.zipWithIndex.map { case (e, i) =>
-//      val eval = e.genCode(ctx)
-//      s"""
-//         |${eval.code}
-//         |if (${eval.isNull}) {
-//         |  $values[$i] = null;
-//         |} else {
-//         |  $values[$i] = ${eval.value};
-//         |}
-//       """.stripMargin
-//    }
 
     val childrenCode = ctx.splitExpressionsWithCurrentInputs(
       expressions = childCode :: Nil,
@@ -145,8 +134,6 @@ case class GetExternalColumn(index: Int, child: Expression, dataType: DataType) 
      """
     ev.copy(code = code, isNull = FalseLiteral)
   }
-
-  //  override def dataType: DataType = ObjectType(classOf[TColumn])
 }
 
 

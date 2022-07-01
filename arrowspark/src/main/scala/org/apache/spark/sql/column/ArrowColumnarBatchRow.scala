@@ -576,7 +576,6 @@ object ArrowColumnarBatchRow {
     indices.setValueCount(vector.getValueCount)
     val comparator = new SparkComparator(sortOrder, DefaultVectorComparators.createDefaultComparator(vector))
     (new IndexSorter).sort(vector, indices, comparator)
-//    indices.setValueCount(vector.getValueCount)
 
     new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector

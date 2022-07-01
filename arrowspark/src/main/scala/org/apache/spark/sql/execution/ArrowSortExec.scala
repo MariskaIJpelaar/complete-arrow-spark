@@ -43,9 +43,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     sortedIdx = ctx.references.length
     thisSorted = ctx.addReferenceObj("sortedBatch", sortedBatch)
 
-//    partitions = ctx.addMutableState("scala.collection.mutable.Buffer<ArrowColumnarBatchRow>", "partitions",
-//      forceInline = true)
-
     val columns = ctx.addMutableState("org.apache.spark.sql.vectorized.ArrowColumnVector[]", "columns",
       forceInline = true)
     val batch = ctx.addMutableState(classOf[ArrowColumnarBatchRow].getName, "batch", forceInline = true)
@@ -57,9 +54,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          |   ${child.asInstanceOf[CodegenSupport].produce(ctx, this)}
          | }
       """.stripMargin.trim)
-
-//    val outputBatch = ctx.freshName("outputBatch")
-//    val sortTime = metricTerm(ctx, "sortTime")
 
     val numRows = ctx.freshName("numRows")
     val reversedOrders = ctx.freshName("reversedOrders")
