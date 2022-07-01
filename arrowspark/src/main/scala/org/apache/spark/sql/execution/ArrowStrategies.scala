@@ -7,7 +7,10 @@ import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRela
 import org.apache.spark.sql.execution.exchange.{ArrowShuffleExchangeExec, ENSURE_REQUIREMENTS}
 import org.apache.spark.sql.internal.SQLConf
 
-case class ArrowBasicOperators(spark: SparkSession) extends SparkStrategy {
+/** For later extensions */
+abstract class ArrowSparkStrategy extends SparkStrategy {}
+
+case class ArrowBasicOperators(spark: SparkSession) extends ArrowSparkStrategy {
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
     if (!plan.isInstanceOf[Sort])
       return Nil

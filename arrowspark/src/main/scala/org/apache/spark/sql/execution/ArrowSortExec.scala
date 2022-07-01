@@ -25,7 +25,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   private var partitionsIdx: Int = _
   private var thisPartitions: String = _
   private var sortedIdx: Int = _
-  private var sortedBatch: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(Array.empty[ArrowColumnVector], 0)
+  private val sortedBatch: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(Array.empty[ArrowColumnVector], 0)
   private var thisSorted: String = _
 
   override protected def doProduce(ctx: CodegenContext): String = {
@@ -34,17 +34,12 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
     // initialize class member variables
     val thisPlan = ctx.addReferenceObj("plan", this)
-    val thisChild = ctx.addReferenceObj("child", child)
-//    val metrics = ctx.addMutableState(classOf[TaskMetrics].getName, "metrics",
-//      v => s"$v = org.apache.spark.TaskContext.get().taskMetrics();", forceInline = true)
     val orders = ctx.addReferenceObj("sortOrder", sortOrder)
     partitionsIdx = ctx.references.length
     thisPartitions = ctx.addReferenceObj("partitions", partitions)
     sortedIdx = ctx.references.length
     thisSorted = ctx.addReferenceObj("sortedBatch", sortedBatch)
 
-    val columns = ctx.addMutableState("org.apache.spark.sql.vectorized.ArrowColumnVector[]", "columns",
-      forceInline = true)
     val batch = ctx.addMutableState(classOf[ArrowColumnarBatchRow].getName, "batch", forceInline = true)
 
     val addToSorter = ctx.freshName("addToSorter")
@@ -55,16 +50,10 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          | }
       """.stripMargin.trim)
 
-    val numRows = ctx.freshName("numRows")
-    val reversedOrders = ctx.freshName("reversedOrders")
     val order = ctx.freshName("order")
     val col = ctx.freshName("col")
 
-    val noneType = "scala.Option.apply(null)"
     val staticBatch = classOf[ArrowColumnarBatchRow].getName + "$.MODULE$"
-    val bytesArray = ctx.freshName("bytesArray")
-    val batchArray = ctx.freshName("batchArray")
-    val staticIterator = classOf[Iterator[ArrowColumnarBatchRow]].getName + "$.MODULE$"
 
     val code =
       s"""

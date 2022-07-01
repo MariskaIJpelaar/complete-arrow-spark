@@ -5,7 +5,7 @@ import scala.util.{Failure, Success, Try}
 
 object Resources {
   /** from: https://stackoverflow.com/a/39868021 */
-  def autoCloseTry[A <: AutoCloseable, B](closeable: A)(fun: (A) => B): Try[B] = {
+  def autoCloseTry[A <: AutoCloseable, B](closeable: A)(fun: A => B): Try[B] = {
     var t: Option[Throwable] = None
     try {
       Success(fun(closeable))

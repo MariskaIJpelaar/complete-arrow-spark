@@ -35,7 +35,7 @@ class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
     Option(values(i))
   }
 
-  /** Concats this TColumn with an other TColumn and returns the result */
+  /** Concatenates this TColumn with an other TColumn and returns the result */
   override def concat(other: TColumn): TColumn = {
     if (!other.isInstanceOf[GenericColumn])
       return this

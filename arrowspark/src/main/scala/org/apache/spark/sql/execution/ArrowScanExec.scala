@@ -151,6 +151,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
   }
 
   // copied and edited from org/apache/spark/sql/execution/DataSourceScanExec.scala
+  //
   // We can only determine the actual partitions at runtime when a dynamic partition filter is
   // present. This is because such a filter relies on information that is only available at run
   // time (for instance the keys used in the other side of a join).

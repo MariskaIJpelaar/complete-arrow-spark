@@ -18,7 +18,9 @@ import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
-/** Note: copied and adapted from org.apache.spark.sql.execution.UnsafeRowSerializer */
+/** Note: copied and adapted from org.apache.spark.sql.execution.UnsafeRowSerializer
+ * Also note: getting this right took quite some effort, if you want to improve/ change it,
+ * please know what you are doing :) */
 class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extends Serializer with Serializable {
   override def newInstance(): SerializerInstance = new ArrowColumnarBatchRowSerializerInstance(dataSize)
   override def supportsRelocationOfSerializedObjects: Boolean = true
@@ -44,7 +46,6 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       val cos = codec.compressedOutputStream(s)
       cos.write(intermediate.toByte)
       oos = Option(new ObjectOutputStream(cos))
-//      oos.get.writeChar(intermediate)
       oos.get
     }
 
@@ -89,10 +90,10 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private val all = new ArrayBuffer[Byte]()
     private val batchSizes = 65536 // 64k
     private val batch = new Array[Byte](batchSizes)
-    private var readin = s.read(batch)
-    while (readin != -1) {
-      all ++= batch.slice(0, readin)
-      readin = s.read(batch)
+    private var reader = s.read(batch)
+    while (reader != -1) {
+      all ++= batch.slice(0, reader)
+      reader = s.read(batch)
     }
 
 

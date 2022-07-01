@@ -73,12 +73,10 @@ case class CreateExternalColumnBatch(children: Seq[Expression]) extends Expressi
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
     val columnBatchClass = classOf[GenericColumnBatch].getName
     val columnClass = classOf[TColumn].getName
-    val genericColumnClass = classOf[GenericColumn].getName
     val values = ctx.freshName("values")
 
     val childrenCodes = children.zipWithIndex.map { case (e, i) =>
       val eval = e.genCode(ctx)
-      val ct: Class[_] =  eval.value.javaType
       s"""
          |${eval.code}
          |if (${eval.isNull}) {

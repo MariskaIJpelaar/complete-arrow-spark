@@ -28,7 +28,7 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
 
   /** member variables copied from BypassMergeSortShuffleWriter */
   private val logger = LoggerFactory.getLogger(classOf[BypassMergeSortShuffleWriter[_, _]])
-  private val fileBufferSize = conf.get(SHUFFLE_FILE_BUFFER_SIZE).toInt * 1024;
+  private val fileBufferSize = conf.get(SHUFFLE_FILE_BUFFER_SIZE).toInt * 1024
   private val transferToEnabled = conf.getBoolean("spark.file.transferTo", defaultValue = true)
   private val shuffleId = handle.dependency.shuffleId
   private val partitioner = handle.dependency.partitioner

@@ -77,7 +77,7 @@ trait TColumn extends Serializable {
   /** Returns true if there are any NULL values in this row */
   def anyNull: Boolean = 0 until length exists (i => isNullAt(i))
 
-  /** Concats this TColumn with an other TColumn and returns the result */
+  /** Concatenates this TColumn with an other TColumn and returns the result */
   def concat(other: TColumn): TColumn
 
   override def equals(o: Any): Boolean = {

@@ -276,7 +276,7 @@ object ArrowColumnarBatchRow {
    *                       is passed to other calls of extraCollector.
    */
   def take(batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
-           extraTaker: (Any) => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
+           extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
            extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None): (Any, Array[ArrowColumnVector]) = {
     if (!batches.hasNext) {
       if (numCols.isDefined)
@@ -377,7 +377,7 @@ object ArrowColumnarBatchRow {
   def encode(iter: Iterator[Any],
              numCols: Option[Int] = None,
              numRows: Option[Int] = None,
-             extraEncoder: (Any => (Array[Byte], ArrowColumnarBatchRow)) =
+             extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) =
                 batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow])): Iterator[Array[Byte]] = {
     if (!iter.hasNext)
       return Iterator(Array.emptyByteArray)
@@ -586,7 +586,6 @@ object ArrowColumnarBatchRow {
       tp.splitAndTransfer(0, vector.getValueCount)
       val new_vector = tp.getTo
 
-//      new_vector.allocateNew()
       new_vector.setInitialCapacity(indices.getValueCount)
       new_vector.allocateNew()
       assert(indices.getValueCount > 0)

@@ -4,8 +4,8 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.{ArrowShuffleWriteProcessor, ShuffleWriteMetricsReporter}
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBatchRowProjection
-import org.apache.spark.sql.catalyst.expressions.{Attribute, BoundReference}
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -89,10 +89,6 @@ object ArrowShuffleExchangeExec {
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val mutablePair = new MutablePair[Array[Byte], Null]()
       iter.map(row => mutablePair.update(ArrowColumnarBatchRow.encode(Iterator(projection(row).copy())).toArray.apply(0), null))
-    }
-    // Construct ordering on extracted sort key
-    val orderingAttributes = sortingExpressions.zipWithIndex.map { case (ord, i) =>
-      ord.copy(child = BoundReference(i, ord.dataType, ord.nullable))
     }
     val part = new ArrowRangePartitioner(numPartitions, rddForSampling, sortingExpressions, ascending = true)
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
