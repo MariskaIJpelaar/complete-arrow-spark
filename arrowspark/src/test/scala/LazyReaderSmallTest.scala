@@ -3,14 +3,12 @@ import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
-import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
 import org.apache.spark.sql.column.encoders.ColumnEncoder
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.{SQLExecution, SparkPlan}
-import org.apache.spark.sql.expressions.Aggregator
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
-import org.apache.spark.sql.{Encoder, SparkSession}
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ParquetWriter
 
