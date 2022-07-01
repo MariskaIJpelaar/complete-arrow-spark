@@ -24,19 +24,17 @@ class BucketSearcher[V <: ValueVector](
     var low = 0
     var high = bucketVector.getValueCount -1
 
-    while (low < bucketVector.getValueCount) {
-      val mid = low + (high - low) / 2
-      val comp = comparator.compare(keyIndex, mid)
+    var comp = 0
+    var mid = 0
+    while (low <= high) {
+      mid = low + (high - low) / 2
+      comp = comparator.compare(keyIndex, mid)
       if (comp == 0) return mid // we found an exact match, which is the upperbound of the mid-th partition
       else if (comp < 0) high = mid -1 // we need a lower partition
       else if (comp > 0) low = mid + 1 // we need a higher partition
-
-      // we found a range
-      if (high < low && low < bucketVector.getValueCount)  return mid
     }
 
-    // key is larger than every upper bound and should thus be in the last partition
-    bucketVector.getValueCount
+    if (comp < 0) mid else mid+1
   }
 
 }
