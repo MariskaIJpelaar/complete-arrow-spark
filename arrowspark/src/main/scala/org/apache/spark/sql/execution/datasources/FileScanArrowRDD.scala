@@ -17,8 +17,6 @@ import scala.reflect.runtime.universe._
 /**
  * Files to scan an ArrowRDD from a partitioned file
  * inspiration from: org/apache/spark/sql/execution/datasources/FileScanRDD.scala
- *
- * TODO: should be properly tested, in particular: memory management!
  */
 
 /**
@@ -219,7 +217,6 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             if (e.getCause.isInstanceOf[SparkUpgradeException]) {
               throw e.getCause
             } else if (e.getMessage.contains("Can not read value at")) {
-              // Fixme: for some reason I cannot use cannotReadParquetFilesError(e: Exception)
               val message = "Encounter error while reading parquet files. " +
                 "One possible cause: Parquet column cannot be converted in the " +
                 "corresponding files. Details: "

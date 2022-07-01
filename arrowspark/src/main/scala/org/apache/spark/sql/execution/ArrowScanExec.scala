@@ -34,30 +34,6 @@ trait ArrowFileFormat extends FileFormat {
 }
 
 case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with Logging {
-
-  // note: this function is directly copied from SparkPlan.executeTake(n, takeFromEnd)
-  /** TODO: perhaps remove this function */
-  private def determinePartsToScan(partsScanned: Int, bufEmpty: Boolean, n: Int, bufLen: Int, totalParts: Int): Range = {
-    // The number of partitions to try in this iteration. It is ok for this number to be
-    // greater than totalParts because we actually cap it at totalParts in runJob.
-    var numPartsToTry = 1L
-    if (partsScanned > 0) {
-      // If we didn't find any rows after the previous iteration, quadruple and retry.
-      // Otherwise, interpolate the number of partitions we need to try, but overestimate
-      // it by 50%. We also cap the estimation in the end.
-      val limitScaleUpFactor = Math.max(conf.limitScaleUpFactor, 2)
-      if (bufEmpty) {
-        numPartsToTry = partsScanned * limitScaleUpFactor
-      } else {
-        val left = n - bufLen
-        // As left > 0, numPartsToTry is always >= 1
-        numPartsToTry = Math.ceil(1.5 * left * partsScanned / bufLen).toInt
-        numPartsToTry = Math.min(numPartsToTry, partsScanned * limitScaleUpFactor)
-      }
-    }
-    partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
-  }
-
   // copied from org/apache/spark/sql/execution/DataSourceScanExec.scala
   @transient
   private lazy val pushedDownFilters = {

@@ -83,7 +83,6 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       throw new UnsupportedOperationException()
   }
 
-  /** TODO: close readers and such? */
   override def deserializeStream(s: InputStream): DeserializationStream = new DeserializationStream {
     /** Currently, we read in everything.
      * FIXME: read in batches :) */
@@ -154,15 +153,13 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       }
 
 
-      override protected def close(): Unit = {}
+      override protected def close(): Unit = { ois.foreach (_.close()) }
 
     }
 
     /** returning a dummy */
     override def readKey[T]()(implicit evidence$9: ClassTag[T]): T = null.asInstanceOf[T]
-
-    /** TODO: we first want to know when this is called... */
-    override def readValue[T]()(implicit evidence$10: ClassTag[T]): T = throw new UnsupportedOperationException()
+    override def readValue[T]()(implicit evidence$10: ClassTag[T]): T = null.asInstanceOf[T]
 
     /** The following methods are never called by shuffle-code (according to UnsafeRowSerializer) */
     override def readObject[T]()(implicit evidence$8: ClassTag[T]): T = throw new UnsupportedOperationException

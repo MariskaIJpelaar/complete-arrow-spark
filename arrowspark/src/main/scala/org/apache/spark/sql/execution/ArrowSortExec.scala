@@ -94,13 +94,10 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   override def doConsume(ctx: CodegenContext, input: Seq[ExprCode], row: ExprCode): String = {
     val temp = ctx.freshName("temp")
 
-    // TODO: remove debug prints
     val code = s"""
-       |System.out.println("aaaaa");
        |${row.code}
        |${classOf[util.List[ArrowColumnarBatchRow]].getName} $temp = scala.collection.JavaConverters.bufferAsJavaList($thisPartitions);
        |$temp.add((${classOf[ArrowColumnarBatchRow].getName})${row.value});
-       |System.out.println(((${classOf[ArrowColumnarBatchRow].getName})${row.value}).length());
        |references[$partitionsIdx] = (${classOf[ArrayBuffer[ArrowColumnarBatchRow]].getName})scala.collection.JavaConverters.asScalaBuffer($temp);
      """.stripMargin
     code

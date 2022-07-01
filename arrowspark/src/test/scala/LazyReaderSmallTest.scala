@@ -294,7 +294,6 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val spark = generateSpark()
 
     // Construct DataFrame
-    // TODO: make a dataset (ArrowColumnEncoder) specifically for ArrowColumns
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
 
     // Perform ColumnarSort
