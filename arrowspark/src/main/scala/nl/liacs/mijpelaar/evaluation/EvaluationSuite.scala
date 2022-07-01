@@ -1,11 +1,16 @@
 package nl.liacs.mijpelaar.evaluation
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.column.encoders.ColumnEncoder
 import org.apache.spark.sql.column.{ArrowColumnarBatchRow, ColumnBatch, ColumnDataFrame, ColumnDataFrameReader, TColumn}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
+import org.apache.spark.sql.execution.{SQLExecution, SparkPlan}
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.FileWriter
 import java.nio.file.Paths
+import java.util
+import scala.collection.JavaConverters.asJavaIteratorConverter
 import scala.reflect.io.Directory
 
 object EvaluationSuite {
@@ -91,7 +96,7 @@ object EvaluationSuite {
     assert(cols.length > 0)
     val sorted_df = if (cols.length == 1) df.sort(cols(0)) else df.sort(cols(0), cols(1))
     val vanilla_start = System.nanoTime()
-    val first = sorted_df.first()
+    sorted_df.toLocalIterator().forEachRemaining( row => row.length )
     val vanilla_stop = System.nanoTime()
     fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
     fw.flush()
@@ -102,16 +107,20 @@ object EvaluationSuite {
     val cCols = cdf.columns
     assert(cCols.length > 0)
     val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
+    val schema = sorted_cdf.schema
+    val encoder = ColumnEncoder(schema)
     val cas_start = System.nanoTime()
-    val cFirst = sorted_cdf.first()
+    SQLExecution.withNewExecutionId(sorted_cdf.queryExecution, Some("myLocalIterator")) {
+      sorted_cdf.queryExecution.executedPlan.resetMetrics()
+      val fromRow = encoder.resolveAndBind(sorted_cdf.queryExecution.logical.output, spark.sessionState.analyzer).createDeserializer()
+      val action: SparkPlan => util.Iterator[ColumnBatch] = {
+        case AdaptiveSparkPlanExec(inputPlan, _, _, _, _) => inputPlan.executeToIterator().map(fromRow).asJava
+      }
+      action(sorted_cdf.queryExecution.executedPlan)
+    }.forEachRemaining( batch => batch.length )
     val cas_stop = System.nanoTime()
     fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()
-
-    if (!first.equals(cFirst.getRow(0)))
-      println("ERROR: first row does not match spark-result")
-    if (!isSorted(cFirst, 0 until 2))
-      println("ERROR: first was not sorted")
   }
 
   /** Sort on the first two columns (which we assume are integers) of a directory of parquet files */
@@ -125,7 +134,7 @@ object EvaluationSuite {
     assert(cols.length > 0)
     val sorted_df = if (cols.length == 1) df.sort(cols(0)) else df.sort(cols(0), cols(1))
     val vanilla_start = System.nanoTime()
-    val first = sorted_df.first()
+    sorted_df.toLocalIterator().forEachRemaining( row => row.length )
     val vanilla_stop = System.nanoTime()
     fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
     fw.flush()
@@ -136,16 +145,20 @@ object EvaluationSuite {
     val cCols = cdf.columns
     assert(cCols.length > 0)
     val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
+    val schema = sorted_cdf.schema
+    val encoder = ColumnEncoder(schema)
     val cas_start = System.nanoTime()
-    val cFirst = sorted_cdf.first()
+    SQLExecution.withNewExecutionId(sorted_cdf.queryExecution, Some("myLocalIterator")) {
+      sorted_cdf.queryExecution.executedPlan.resetMetrics()
+      val fromRow = encoder.resolveAndBind(sorted_cdf.queryExecution.logical.output, spark.sessionState.analyzer).createDeserializer()
+      val action: SparkPlan => util.Iterator[ColumnBatch] = {
+        case AdaptiveSparkPlanExec(inputPlan, _, _, _, _) => inputPlan.executeToIterator().map(fromRow).asJava
+      }
+      action(sorted_cdf.queryExecution.executedPlan)
+    }.forEachRemaining( batch => batch.length )
     val cas_stop = System.nanoTime()
     fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()
-
-    if (!first.equals(cFirst.getRow(0)))
-      println("ERROR: first row does not match spark-result")
-    if (!isSorted(cFirst, 0 until 2))
-      println("ERROR: first was not sorted")
   }
 
 
