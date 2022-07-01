@@ -506,8 +506,6 @@ object ArrowColumnarBatchRow {
     if (batch.numFields < 1)
       return batch
 
-    val start = System.nanoTime()
-
     // prepare comparator and UnionVector
     val union = new UnionVector("Combiner", batch.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
     val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
@@ -534,11 +532,7 @@ object ArrowColumnarBatchRow {
     indices.allocateNew(first_vector.getValueCount)
     indices.setValueCount(first_vector.getValueCount)
 
-    val postPrepare = System.nanoTime()
-
     (new IndexSorter).sort(union, indices, comparator)
-
-    val postSort = System.nanoTime()
 
     // sort all columns
     val ret = new ArrowColumnarBatchRow( batch.columns map { column =>
@@ -560,13 +554,6 @@ object ArrowColumnarBatchRow {
 
       new ArrowColumnVector(new_vector)
     }, batch.numRows)
-
-    val postPermute = System.nanoTime()
-
-    val preparation = (postPrepare - start) / 1e9d
-    val sorting = (postSort - postPrepare) / 1e9d
-    val permuting = (postPermute - postSort) / 1e9d
-    println("size: %d, nrOrders: %d, numCols: %d, preparation: %04.3f, sorting: %04.3f, permuting: %04.3f".format(batch.numRows.toInt, sortOrders.size, batch.numFields, preparation, sorting, permuting))
 
     ret
   }

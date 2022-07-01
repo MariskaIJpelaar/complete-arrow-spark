@@ -16,9 +16,10 @@ object Main {
     new CommandLine(new Main()).execute(args: _*)
   }
 
-  private val rnd = scala.util.Random
+  private val seed = 19971128
+  private val rnd = new scala.util.Random(seed)
   private val generateRandomNumber = (start: Int, end: Int) => start + rnd.nextInt( (end-start) + 1)
-  val toRow: Int => Row = (index: Int) => Row(generateRandomNumber(0, 9), index)
+  val toRow: Int => Row = (index: Int) => Row(generateRandomNumber(0, 9), generateRandomNumber(0, Integer.MAX_VALUE-1))
 }
 
 class Main extends Callable[Unit] {

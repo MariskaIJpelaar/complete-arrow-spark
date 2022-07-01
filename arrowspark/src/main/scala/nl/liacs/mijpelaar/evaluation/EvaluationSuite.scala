@@ -136,11 +136,10 @@ object EvaluationSuite {
     println(sorted_df.queryExecution.executedPlan.execute().toDebugString)
     val vanilla_start = System.nanoTime()
 //    sorted_df.toLocalIterator().forEachRemaining( row => row.length )
-    val something = sorted_df.queryExecution.executedPlan.execute().mapPartitions( iter => iter ).collect()
+    sorted_df.queryExecution.executedPlan.execute().mapPartitions( iter => iter ).toLocalIterator.foreach( row => row )
     val vanilla_stop = System.nanoTime()
     fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
     fw.flush()
-    assert(something.length > 0)
 
     val cdf: ColumnDataFrame =
       new ColumnDataFrameReader(spark).format("org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat")
