@@ -10,9 +10,18 @@ import scala.reflect.ClassTag
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
   override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this).map(_._2)
   override def take(num: Int): Array[ArrowColumnarBatchRow] = ArrowRDD.take(num, this)
+  override def toLocalIterator: Iterator[ArrowColumnarBatchRow] = ArrowRDD.toLocalIterator(this)
 }
 
 object ArrowRDD {
+  /** Returns a local iterator for each partition */
+  def toLocalIterator[T](rdd: RDD[T]): Iterator[T] = {
+    val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRow.encode(res))
+    childRDD.toLocalIterator.flatMap( result =>
+      ArrowColumnarBatchRow.decode(result).asInstanceOf[Iterator[T]]
+    )
+  }
+
   /**
    * Collect utility for rdds that contain ArrowColumnarBatchRows. Users can pass optional functions to process data
    * if the rdd has more complex data than only ArrowColumnarBatchRows

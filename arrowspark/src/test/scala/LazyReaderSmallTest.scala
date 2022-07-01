@@ -6,6 +6,8 @@ import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.column._
 import org.apache.spark.sql.column.encoders.ColumnEncoder
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
+import org.apache.spark.sql.execution.{SQLExecution, SparkPlan}
 import org.apache.spark.sql.expressions.Aggregator
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.apache.spark.sql.{Encoder, SparkSession}
@@ -15,6 +17,7 @@ import utils.ParquetWriter
 import java.io.File
 import java.util
 import java.util.{Collections, Comparator}
+import scala.collection.JavaConverters.asJavaIteratorConverter
 import scala.language.postfixOps
 import scala.reflect.io.Directory
 
@@ -353,33 +356,15 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val schema = df.schema
     val encoder = ColumnEncoder(schema)
 
-    class NothingAgg(val f: ColumnBatch => Any) extends Aggregator[ColumnBatch, Long, Long] {
-      override def zero: Long = 0
-      override def reduce(b: Long, a: ColumnBatch): Long = b
-      override def merge(b1: Long, b2: Long): Long = b1 + b2
-      override def finish(reduction: Long): Long = reduction
-      override def bufferEncoder: Encoder[Long] = ExpressionEncoder[Long]()
-      override def outputEncoder: Encoder[Long] = ExpressionEncoder[Long]()
+    val a = SQLExecution.withNewExecutionId(new_df.queryExecution, Some("myLocalIterator")) {
+      new_df.queryExecution.executedPlan.resetMetrics()
+      val fromRow = encoder.resolveAndBind(new_df.queryExecution.logical.output, spark.sessionState.analyzer).createDeserializer()
+      val action: SparkPlan => util.Iterator[ColumnBatch] = {
+        case AdaptiveSparkPlanExec(inputPlan, _, _, _, _) => inputPlan.executeToIterator().map(fromRow).asJava
+      }
+      action(new_df.queryExecution.executedPlan)
     }
-    val nothing: ColumnBatch => ColumnBatch = (batch: ColumnBatch) => batch
-    val nothingAgg = new NothingAgg( nothing )
-
-    val nothingUDAF = org.apache.spark.sql.functions.udaf(nothingAgg, encoder)
-//    val nothingUDF = org.apache.spark.sql.functions.udf(nothing)
-    df.agg(nothingUDAF(df.col("numA")))
-
-//    new_df.foreach( _: ColumnBatch => Unit )
-
-//    new_df.toLocalIterator().forEachRemaining( batch => assert(EvaluationSuite.isSorted(batch, 0 to 1)) )
-//
-//
-//    val array = new_df.queryExecution.executedPlan.execute().map( batch =>
-//      EvaluationSuite.isSortedBatch(batch.asInstanceOf[ArrowColumnarBatchRow], 0 to 1) ).collect()
-//
-//    assert(array.forall( a => a) )
-
-//    org.openjdk.jmh.infra.Blackhole
-
+    a.forEachRemaining( batch => batch.length)
 
     directory.deleteRecursively()
   }

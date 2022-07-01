@@ -11,6 +11,11 @@ case class ArrowCollectExec(child: SparkPlan) extends UnaryExecNode {
 
   override def output: Seq[Attribute] = child.output
 
+  override def executeToIterator(): Iterator[InternalRow] = {
+    val rdd = execute()
+    if (rdd.isInstanceOf[ArrowRDD]) rdd.toLocalIterator else ArrowRDD.toLocalIterator(rdd)
+  }
+
   override def executeCollect(): Array[InternalRow] = {
     val rdd = execute()
     if (rdd.isInstanceOf[ArrowRDD]) rdd.collect() else ArrowRDD.collect(rdd).map(_._2)
