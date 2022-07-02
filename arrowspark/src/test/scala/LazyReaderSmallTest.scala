@@ -168,7 +168,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     val spark = generateSpark()
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
-    df.explain("formatted")
+    df.explain(true)
     checkFirstNonRandom(df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow])
 
     directory.deleteRecursively()
@@ -181,7 +181,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     val spark = generateSpark()
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
-    df.explain("formatted")
+    df.explain(true)
     checkFirstNonRandom(df.first())
 
     directory.deleteRecursively()
@@ -194,7 +194,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     val spark = generateSpark()
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
-    df.explain("formatted")
+    df.explain(true)
     checkAnswerNonRandom(df.collect())
 
     directory.deleteRecursively()
@@ -207,7 +207,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     val spark = generateSpark()
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
-    df.explain("formatted")
+    df.explain(true)
     checkAnswer(table, df.collect())
 
     directory.deleteRecursively()
@@ -226,7 +226,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Perform ColumnarSort
     val new_df = df.sort("numA", "numB")
-    new_df.explain("formatted")
+    new_df.explain(true)
 
     // Compute answer
     computeAnswer(table)
@@ -250,7 +250,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Perform ColumnarSort
     val new_df = df.sort("numB")
-    new_df.explain("formatted")
+    new_df.explain(true)
 
     // Compute answer
     computeAnswer(table, onColA = false)
@@ -274,7 +274,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Perform ColumnarSort
     val new_df = df.sort("numA", "numB")
-    new_df.explain("formatted")
+    new_df.explain(true)
 
     // Compute answer
     computeAnswer(table)
@@ -298,7 +298,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Perform ColumnarSort
     val new_df = df.sort("numA", "numB")
-    new_df.explain("formatted")
+    new_df.explain(true)
 
     // Compute answer
     computeAnswer(table)
@@ -323,7 +323,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Perform ColumnarSort
     val new_df = df.sort("numA", "numB")
-    new_df.explain("formatted")
+    new_df.explain(true)
 
     // Compute answer
     computeAnswer(table)
@@ -348,7 +348,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Perform ColumnarSort
     val new_df = df.sort("numA", "numB")
-    new_df.explain("formatted")
+    new_df.explain(true)
 
     val schema = df.schema
     val encoder = ColumnEncoder(schema)
