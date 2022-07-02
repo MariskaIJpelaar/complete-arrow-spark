@@ -325,7 +325,6 @@ object ArrowColumnarBatchRow {
       }
     }
 
-
     batches.takeWhile( _ => numRows.forall( num => size < num)).foreach { item =>
       var readableBytes = 0L
       var current_size = 0L

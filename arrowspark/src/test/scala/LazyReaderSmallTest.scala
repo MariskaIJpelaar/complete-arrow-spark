@@ -62,7 +62,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
   def generateSpark(): SparkSession = {
     val spark = SparkSession.builder().appName("LazyReaderSmallTest")
       .config("spark.memory.offHeap.enabled", "true")
-      .config("spark.memory.offHeap.size", "3048576")
+      .config("spark.memory.offHeap.size", "1GB")
       .master("local[4]")
       .withExtensions(ArrowSparkExtensionWrapper.injectAll).getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
