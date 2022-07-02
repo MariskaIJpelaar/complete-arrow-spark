@@ -1,6 +1,5 @@
 package nl.liacs.mijpelaar
 
-import io.netty.util.internal.PlatformDependent
 import nl.liacs.mijpelaar.evaluation.EvaluationSuite
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
@@ -105,8 +104,6 @@ class Main extends Callable[Unit] {
        * Run the actual experiments
        */
       0 until nr_runs foreach { _ =>
-        // TODO: temp print until we are sure there are no memory issues
-        println(PlatformDependent.usedDirectMemory())
         if (data_dir != "")
           EvaluationSuite.sort(spark, fw, Directory(data_dir))
         else if (data_file != "")
