@@ -12,7 +12,7 @@ scriptpath="$(dirname "$(realpath "$BASH_SOURCE")")"
 # Creates the build-directory if it does not exist yet
 mkdir -p "$scriptpath/build"
 
-# Downloads maven 3.8.5
+# Downloads maven 3.8.6
 maventar=$scriptpath/build/apache-maven-3.8.6-bin.tar.gz
 if [[ ! -f "$maventar" ]]; then
   wget --quiet -P "$scriptpath/build" https://dlcdn.apache.org/maven/maven-3/3.8.6/binaries/apache-maven-3.8.6-bin.tar.gz

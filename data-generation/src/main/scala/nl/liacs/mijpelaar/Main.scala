@@ -1,6 +1,6 @@
-package nl.lu.mijpelaar
+package nl.liacs.mijpelaar
 
-import nl.lu.mijpelaar.Main.toRow
+import nl.liacs.mijpelaar.Main.toRow
 import org.apache.commons.io.FilenameUtils
 import org.apache.spark.sql.types.{IntegerType, StructField, StructType}
 import org.apache.spark.sql.{Row, SparkSession}
