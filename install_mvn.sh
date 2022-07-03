@@ -15,7 +15,7 @@ mkdir -p "$scriptpath/build"
 # Downloads maven 3.8.5
 maventar=$scriptpath/build/apache-maven-3.8.5-bin.tar.gz
 if [[ ! -f "$maventar" ]]; then
-  wget --quiet -P "$scriptpath/build" https://dlcdn.apache.org/maven/maven-3/3.8.5/binaries/apache-maven-3.8.5-bin.tar.gz
+  wget --quiet -P "$scriptpath/build" https://dlcdn.apache.org/maven/maven-3/3.8.6/binaries/apache-maven-3.8.6-bin.tar.gz
   tar --directory "$scriptpath"/build -xf "$maventar"
 fi
 
