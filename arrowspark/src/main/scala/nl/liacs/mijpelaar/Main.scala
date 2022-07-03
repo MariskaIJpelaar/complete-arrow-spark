@@ -91,8 +91,8 @@ class Main extends Callable[Unit] {
        */
       new File(log_dir.toAbsolutePath.toString).mkdir() // create directory if it does not exist yet
       val write_file = log_dir.resolve(log_file)
-      Files.write(write_file, "".getBytes(StandardCharsets.UTF_8)) // clear file
-      val fw = new FileWriter(write_file.toFile, true) // append to log file
+      // Files.write(write_file, "".getBytes(StandardCharsets.UTF_8)) // clear file
+      val fw = new FileWriter(write_file.toFile) 
       fw.write(s"# Experiment repeated $nr_runs times, with running times in seconds\n")
       if (data_file != "")
         fw.write(s"# File used: $data_file\n")
