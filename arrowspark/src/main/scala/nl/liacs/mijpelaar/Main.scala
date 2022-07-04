@@ -64,6 +64,7 @@ class Main extends Callable[Unit] {
       val builder = SparkSession.builder().appName("LazyReaderSmallTest")
         .config("spark.memory.offHeap.enabled", "true")
         .config("spark.memory.offHeap.size", "10g")
+        .config("spark.local.dir", sparkLocalDir)
 //        .config("spark.eventLog.enabled", "true")
         .withExtensions(ArrowSparkExtensionWrapper.injectAll)
       if (local)
