@@ -242,6 +242,7 @@
               <artifactSet>
                 <includes>
                   <include>info.picocli:picocli</include>
+                  <include>org.apache.arrow:arrow-algorithm</include>
                 </includes>
               </artifactSet>
             </configuration>
