@@ -6,8 +6,7 @@ import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import picocli.CommandLine
 
 import java.io.{File, FileWriter}
-import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.{Path, Paths}
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -64,7 +63,7 @@ class Main extends Callable[Unit] {
       val start: Long = System.nanoTime()
       val builder = SparkSession.builder().appName("LazyReaderSmallTest")
         .config("spark.memory.offHeap.enabled", "true")
-        .config("spark.memory.offHeap.size", "3048576")
+        .config("spark.memory.offHeap.size", "10g")
 //        .config("spark.eventLog.enabled", "true")
         .withExtensions(ArrowSparkExtensionWrapper.injectAll)
       if (local)
