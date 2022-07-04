@@ -6,8 +6,6 @@ import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
 import org.apache.spark.sql.column.encoders.ColumnEncoder
-import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
-import org.apache.spark.sql.execution.{SQLExecution, SparkPlan}
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ParquetWriter
@@ -15,7 +13,6 @@ import utils.ParquetWriter
 import java.io.File
 import java.util
 import java.util.{Collections, Comparator}
-import scala.collection.JavaConverters.asJavaIteratorConverter
 import scala.language.postfixOps
 import scala.reflect.io.Directory
 
@@ -353,15 +350,17 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val schema = df.schema
     val encoder = ColumnEncoder(schema)
 
-    val a = SQLExecution.withNewExecutionId(new_df.queryExecution, Some("myLocalIterator")) {
-      new_df.queryExecution.executedPlan.resetMetrics()
-      val fromRow = encoder.resolveAndBind(new_df.queryExecution.logical.output, spark.sessionState.analyzer).createDeserializer()
-      val action: SparkPlan => util.Iterator[ColumnBatch] = {
-        case AdaptiveSparkPlanExec(inputPlan, _, _, _, _) => inputPlan.executeToIterator().map(fromRow).asJava
-      }
-      action(new_df.queryExecution.executedPlan)
-    }
-    a.forEachRemaining( batch => batch.length)
+    new_df.queryExecution.executedPlan.execute().count()
+
+//    val a = SQLExecution.withNewExecutionId(new_df.queryExecution, Some("myLocalIterator")) {
+//      new_df.queryExecution.executedPlan.resetMetrics()
+//      val fromRow = encoder.resolveAndBind(new_df.queryExecution.logical.output, spark.sessionState.analyzer).createDeserializer()
+//      val action: SparkPlan => util.Iterator[ColumnBatch] = {
+//        case AdaptiveSparkPlanExec(inputPlan, _, _, _, _) => inputPlan.executeToIterator().map(fromRow).asJava
+//      }
+//      action(new_df.queryExecution.executedPlan)
+//    }
+//    a.forEachRemaining( batch => batch.length)
 
     directory.deleteRecursively()
   }
