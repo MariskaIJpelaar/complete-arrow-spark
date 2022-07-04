@@ -66,7 +66,7 @@ class Main extends Callable[Unit] {
         .config("spark.memory.offHeap.size", "10g")
         .config("spark.local.dir", sparkLocalDir)
 //        .config("spark.eventLog.enabled", "true")
-        .withExtensions(ArrowSparkExtensionWrapper.injectAll)
+//        .withExtensions(ArrowSparkExtensionWrapper.injectAll)
       if (local)
         builder.master("local[4]")
       val spark = builder.getOrCreate()
