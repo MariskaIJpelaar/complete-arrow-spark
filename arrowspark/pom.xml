@@ -243,6 +243,7 @@
                 <includes>
                   <include>info.picocli:picocli</include>
                   <include>org.apache.arrow:arrow-algorithm</include>
+                  <include>org.apache.parquet:parquet-arrow</include>
                 </includes>
               </artifactSet>
             </configuration>
