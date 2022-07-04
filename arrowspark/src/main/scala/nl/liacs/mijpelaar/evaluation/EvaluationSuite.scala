@@ -128,17 +128,17 @@ object EvaluationSuite {
     fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
     fw.flush()
 
-//    val cdf: ColumnDataFrame =
-//      new ColumnDataFrameReader(spark).format("org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat")
-//        .loadDF(dir.path)
-//    val cCols = cdf.columns
-//    assert(cCols.length > 0)
-//    val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
-//    val cas_start = System.nanoTime()
-//    sorted_cdf.queryExecution.executedPlan.execute().count()
-//    val cas_stop = System.nanoTime()
-//    fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
-//    fw.flush()
+    val cdf: ColumnDataFrame =
+      new ColumnDataFrameReader(spark).format("org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat")
+        .loadDF(dir.path)
+    val cCols = cdf.columns
+    assert(cCols.length > 0)
+    val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
+    val cas_start = System.nanoTime()
+    sorted_cdf.queryExecution.executedPlan.execute().count()
+    val cas_stop = System.nanoTime()
+    fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
+    fw.flush()
   }
 
 
