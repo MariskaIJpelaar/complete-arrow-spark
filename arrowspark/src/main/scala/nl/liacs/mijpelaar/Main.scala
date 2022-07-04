@@ -2,7 +2,6 @@ package nl.liacs.mijpelaar
 
 import nl.liacs.mijpelaar.evaluation.EvaluationSuite
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import picocli.CommandLine
 
 import java.io.{File, FileWriter}
