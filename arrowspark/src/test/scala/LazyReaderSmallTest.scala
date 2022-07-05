@@ -347,20 +347,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val new_df = df.sort("numA", "numB")
     new_df.explain(true)
 
-    val schema = df.schema
-    val encoder = ColumnEncoder(schema)
-
     new_df.queryExecution.executedPlan.execute().count()
-
-//    val a = SQLExecution.withNewExecutionId(new_df.queryExecution, Some("myLocalIterator")) {
-//      new_df.queryExecution.executedPlan.resetMetrics()
-//      val fromRow = encoder.resolveAndBind(new_df.queryExecution.logical.output, spark.sessionState.analyzer).createDeserializer()
-//      val action: SparkPlan => util.Iterator[ColumnBatch] = {
-//        case AdaptiveSparkPlanExec(inputPlan, _, _, _, _) => inputPlan.executeToIterator().map(fromRow).asJava
-//      }
-//      action(new_df.queryExecution.executedPlan)
-//    }
-//    a.forEachRemaining( batch => batch.length)
 
     directory.deleteRecursively()
   }

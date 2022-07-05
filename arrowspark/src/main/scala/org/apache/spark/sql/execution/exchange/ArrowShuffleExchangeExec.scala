@@ -95,14 +95,7 @@ object ArrowShuffleExchangeExec {
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)
-      iter.map { row =>
-        var partitionIds: Option[Array[Int]] = None
-        Resources.autoCloseTry(getPartitionKey(row).asInstanceOf[ArrowColumnarBatchRow]) { projected =>
-          partitionIds = Option(part.getPartitions(projected))
-        }
-        assert(partitionIds.isDefined)
-        (partitionIds.get, row)
-      }
+      iter.map { row => (part.getPartitions(getPartitionKey(row).asInstanceOf[ArrowColumnarBatchRow]), row) }
     }, isOrderSensitive = false)
 
     val dependency = new ShuffleDependency[Array[Int], InternalRow, InternalRow](

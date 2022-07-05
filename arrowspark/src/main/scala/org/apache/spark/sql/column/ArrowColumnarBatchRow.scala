@@ -258,18 +258,15 @@ object ArrowColumnarBatchRow {
 
     // get first batch
     val (extra, first) = extraTaker(batches.next())
-    Resources.autoCloseTry(first) { _ =>
-      extraCollected = extraCollector(extra, None)
-      builderOptional = Some(new ArrowColumnarBatchRowBuilder(first, numCols, numRows))
-    }
-    val builder = builderOptional.getOrElse(
-      throw new RuntimeException("ArrowColumnarBatchRow::take() could not create a Builder")
-    )
+    extraCollected = extraCollector(extra, None)
+    val builder = new ArrowColumnarBatchRowBuilder(first, numCols, numRows)
+    first.close()
 
     while (batches.hasNext && numRows.forall( num => builder.length < num)) {
       val (extra, batch) = extraTaker(batches.next())
       extraCollected = extraCollector(extra, Option(extraCollected))
-      Resources.autoCloseTry(batch) { _ => builder.append(batch) }
+      builder.append(batch)
+      batch.close()
     }
 
     (extraCollected, builder.buildColumns())
@@ -619,18 +616,18 @@ object ArrowColumnarBatchRow {
     while (inputSize < k) {
       var length = 0L
       if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
-      Resources.autoCloseTry(input.next()) { batch =>
-        assert(batch.numRows < Integer.MAX_VALUE)
-        length = math.min(k-inputSize, batch.numRows)
-        reservoirBuf += batch.take(0 until length.toInt)
+      val batch = input.next()
+      assert(batch.numRows < Integer.MAX_VALUE)
+      length = math.min(k-inputSize, batch.numRows)
+      reservoirBuf += batch.take(0 until length.toInt)
 
-        // do we have elements remaining?
-        if (length < batch.numRows)
-          remainderBatch = Option(batch.take(length.toInt until batch.numRows.toInt))
+      // do we have elements remaining?
+      if (length < batch.numRows)
+        remainderBatch = Option(batch.take(length.toInt until batch.numRows.toInt))
 
-        nrBatches += 1
-      }
+      nrBatches += 1
       inputSize += length
+      batch.close()
     }
 
     var iter: Iterator[ArrowColumnarBatchRow] = input
@@ -648,15 +645,15 @@ object ArrowColumnarBatchRow {
     }
 
     while (input.hasNext) {
-      Resources.autoCloseTry(input.next()) { batch =>
-        val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
-        val end = generateRandomNumber(start, batch.numRows.toInt)
-        val sample = batch.take(start until end)
-        0 until sample.numRows.toInt foreach { index =>
-          reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
-        }
-        inputSize += sample.numRows
+      val batch = input.next()
+      val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
+      val end = generateRandomNumber(start, batch.numRows.toInt)
+      val sample = batch.take(start until end)
+      0 until sample.numRows.toInt foreach { index =>
+        reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
       }
+      inputSize += sample.numRows
+      batch.close()
     }
 
     (reservoir, inputSize)
