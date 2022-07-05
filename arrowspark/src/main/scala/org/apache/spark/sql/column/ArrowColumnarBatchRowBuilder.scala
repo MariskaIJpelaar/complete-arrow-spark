@@ -30,7 +30,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       newVec.allocateNew()
       num_bytes = vector.getDataBuffer.readableBytes()
       // make sure we have enough space
-      while (newVec.getBufferSizeFor(newVec.getValueCapacity) < num_bytes) newVec.reAlloc()
+      while (newVec.getValueCapacity < size) newVec.reAlloc()
       // copy contents
       validityRangeSetter(newVec.getValidityBuffer, 0L until size)
       newVec.getDataBuffer.setBytes(0, vector.getDataBuffer)
