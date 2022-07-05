@@ -2,7 +2,6 @@ package nl.liacs.mijpelaar.evaluation
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
-import org.apache.spark.sql.column.encoders.ColumnEncoder
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.FileWriter
@@ -103,8 +102,6 @@ object EvaluationSuite {
     val cCols = cdf.columns
     assert(cCols.length > 0)
     val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
-    val schema = sorted_cdf.schema
-    val encoder = ColumnEncoder(schema)
     val cas_start = System.nanoTime()
     sorted_cdf.queryExecution.executedPlan.execute().count()
     val cas_stop = System.nanoTime()
@@ -135,8 +132,10 @@ object EvaluationSuite {
     assert(cCols.length > 0)
     val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
     val cas_start = System.nanoTime()
-    sorted_cdf.queryExecution.executedPlan.execute().count()
+    val rdd = sorted_cdf.queryExecution.executedPlan.execute()
+    rdd.count()
     val cas_stop = System.nanoTime()
+    rdd.foreach( batch => batch.asInstanceOf[ArrowColumnarBatchRow].close())
     fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()
   }

@@ -5,7 +5,6 @@ import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
-import org.apache.spark.sql.column.encoders.ColumnEncoder
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ParquetWriter
@@ -166,7 +165,9 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val spark = generateSpark()
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain(true)
-    checkFirstNonRandom(df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow])
+    val first = df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow]
+    checkFirstNonRandom(first)
+    first.close()
 
     directory.deleteRecursively()
   }

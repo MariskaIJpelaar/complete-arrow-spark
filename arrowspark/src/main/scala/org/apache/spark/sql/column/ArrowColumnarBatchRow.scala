@@ -1,6 +1,5 @@
 package org.apache.spark.sql.column
 
-import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
 import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
@@ -573,9 +572,10 @@ object ArrowColumnarBatchRow {
       // we 'copy' the content of the first batch ...
       tp.splitAndTransfer(0, first.numRows.toInt)
       // ... and re-use the ValueVector so we do not have to determine vector types :)
-      vector.clear()
-      vector.allocateNew()
-      new ArrowColumnVector(vector)
+      val new_vec = tp.getTo
+      new_vec.clear()
+      new_vec.allocateNew()
+      new ArrowColumnVector(new_vec)
     }
 
     val iter = Iterator(first) ++ input
@@ -583,6 +583,8 @@ object ArrowColumnarBatchRow {
     var i = 0
     while (iter.hasNext) {
       val batch = iter.next()
+      batch.columns.foreach( col => assert(col.getValueVector.getValueCount == batch.numRows.toInt) )
+
       0 until batch.numRows.toInt foreach { index =>
         // do sample
         if (rand.nextDouble() <= fraction) {
@@ -590,6 +592,7 @@ object ArrowColumnarBatchRow {
           i += 1
         }
       }
+      batch.close()
     }
     array foreach ( column => column.getValueVector.setValueCount(i) )
     new ArrowColumnarBatchRow(array, i)
