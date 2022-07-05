@@ -11,7 +11,7 @@ import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.arrow.vector.types.pojo.ArrowType.Struct
 import org.apache.arrow.vector.types.pojo.FieldType
-import org.apache.arrow.vector.{BitVectorHelper, FieldVector, IntVector, TypeLayout, ValueVector, VectorLoader, VectorSchemaRoot, ZeroVector}
+import org.apache.arrow.vector.{FieldVector, IntVector, TypeLayout, ValueVector, VectorLoader, VectorSchemaRoot, ZeroVector}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
@@ -27,7 +27,6 @@ import java.io._
 import java.nio.channels.Channels
 import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
-import scala.collection.immutable.NumericRange
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
@@ -38,7 +37,7 @@ import scala.util.Random
 // TODO: create sorts by Iterators?, Create sample by iterators?
 // TODO: difference between 'take' and 'merge'?
 
-class ArrowColumnarBatchRow(@transient protected val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
+class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
   override def numFields: Int = columns.length
 
   def length: Long = numRows
@@ -231,36 +230,6 @@ object ArrowColumnarBatchRow {
     new ArrowColumnarBatchRow(cols, length)
   }
 
-  /** Note: inspiration from org.apache.arrow.vector.BitVectorHelper::setBit */
-  private def validityRangeSetter(validityBuffer: ArrowBuf, bytes: NumericRange[Long]): Unit = {
-    if (bytes.isEmpty)
-      return
-
-    val start_byte = BitVectorHelper.byteIndex(bytes.head)
-    val last_byte = BitVectorHelper.byteIndex(bytes.last)
-    val start_bit = BitVectorHelper.bitIndex(bytes.head)
-    val last_bit = BitVectorHelper.bitIndex(bytes.last)
-    val num_bytes = last_byte - start_byte + 1
-    val largest_bit = 8
-
-    if (num_bytes > Integer.MAX_VALUE)
-      throw new RuntimeException("[ArrowColumnarBatchRow::validityRangeSetter] too many bytes to set")
-
-    val old: Array[Byte] = new Array[Byte](num_bytes.toInt)
-    validityBuffer.getBytes(start_byte, old, 0, num_bytes.toInt)
-
-    old.zipWithIndex foreach { case (byte, index) =>
-      val msb = if (index == old.length) last_bit+1 else largest_bit
-      var bitMask = (1 << msb) -1 // everything is valid, from msb-1 to the last bit
-      val lsb = if (index == 0) start_bit else 0 // everything is valid from msb-1 to lsb
-      bitMask = (bitMask >> lsb) << lsb
-
-      old(index) = (byte | bitMask).toByte
-    }
-
-    validityBuffer.setBytes(start_byte, old, 0, num_bytes)
-  }
-
   /**
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
    * @param numCols the number of columns to take
@@ -285,80 +254,25 @@ object ArrowColumnarBatchRow {
     }
 
     var extraCollected: Any = None
-    var size = 0L
-    var array: Array[ArrowColumnVector] = Array.empty
-    // number of bytes written
-    var num_bytes: Long = 0L
+    var builderOptional: Option[ArrowColumnarBatchRowBuilder] = None
 
     // get first batch
     val (extra, first) = extraTaker(batches.next())
-    Resources.autoCloseTry(first) { batch =>
+    Resources.autoCloseTry(first) { _ =>
       extraCollected = extraCollector(extra, None)
-      if (numCols.isEmpty && batch.numRows > Integer.MAX_VALUE)
-        throw new RuntimeException("ArrowColumnarBatchRow::take() First batch is too large")
+      builderOptional = Some(new ArrowColumnarBatchRowBuilder(first, numCols, numRows))
+    }
+    val builder = builderOptional.getOrElse(
+      throw new RuntimeException("ArrowColumnarBatchRow::take() could not create a Builder")
+    )
 
-      // Note: until we get any problems, we are going to assume the batches are in-order :)
-      size = batch.numRows.min(numRows.getOrElse(Integer.MAX_VALUE).toLong)
-
-      // The first batch should be separate, so we can determine the vector-types
-      array = Array.tabulate[ArrowColumnVector](numCols.getOrElse(batch.numFields)) { i =>
-        val vector = batch.columns(i).getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator)
-        numRows.fold( tp.splitAndTransfer(0, batch.numRows.toInt) )( num =>
-          tp.splitAndTransfer(0, num)
-        )
-        // we 'copy' the content of the first batch ...
-        val newVec = tp.getTo
-
-        // ... and re-use the ValueVector so we do not have to determine vector types :)
-        newVec.clear()
-        numRows.foreach( nums => newVec.setInitialCapacity(nums))
-        newVec.allocateNew()
-        num_bytes = vector.getDataBuffer.readableBytes()
-        // make sure we have enough space
-        while (newVec.getBufferSizeFor(newVec.getValueCapacity) < num_bytes) newVec.reAlloc()
-        // copy contents
-        validityRangeSetter(newVec.getValidityBuffer, 0L until size)
-        newVec.getDataBuffer.setBytes(0, vector.getDataBuffer)
-
-        new ArrowColumnVector(newVec)
-      }
+    while (batches.hasNext && numRows.forall( num => builder.length < num)) {
+      val (extra, batch) = extraTaker(batches.next())
+      extraCollected = extraCollector(extra, Option(extraCollected))
+      Resources.autoCloseTry(batch) { _ => builder.append(batch) }
     }
 
-    batches.takeWhile( _ => numRows.forall( num => size < num)).foreach { item =>
-      var readableBytes = 0L
-      var current_size = 0L
-      val (extra, batch) = extraTaker(item)
-      Resources.autoCloseTry(batch) { _ =>
-        extraCollected = extraCollector(extra, Option(extraCollected))
-        // the columns we want
-        val columns = numCols.fold(batch.columns)( nums => batch.columns.slice(0, nums) )
-        // the rows that are left to read
-        current_size = batch.numRows.min( numRows.getOrElse(Integer.MAX_VALUE) - size )
-
-        (array, columns).zipped foreach { case (output, input) =>
-          if (size + current_size > Integer.MAX_VALUE)
-            throw new RuntimeException("[ArrowColumnarBatchRow::take() batches are too big to be combined!")
-          val ivector = input.getValueVector
-          readableBytes = ivector.getDataBuffer.readableBytes().max(readableBytes)
-          val ovector = output.getValueVector
-          // make sure we have enough space
-          while (ovector.getValueCapacity < size + current_size) ovector.reAlloc()
-          // copy contents
-          validityRangeSetter(ovector.getValidityBuffer, size until size+current_size)
-          output.getValueVector.getDataBuffer.setBytes(num_bytes, ivector.getDataBuffer)
-        }
-
-      }
-      num_bytes += readableBytes
-      size += current_size
-    }
-
-    array foreach { vector =>
-      vector.getValueVector.setValueCount(size.toInt)
-    }
-
-    (extraCollected, array)
+    (extraCollected, builder.buildColumns())
   }
 
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
@@ -784,17 +698,17 @@ object ArrowColumnarBatchRow {
     new BucketSearcher(keyUnion, rangeUnion, comparator).distribute()
   }
 
-  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, Array[ArrowColumnarBatchRow]] = {
-    val distributed = mutable.Map[Int, ArrayBuffer[ArrowColumnarBatchRow]]()
+  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
+    val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
 
     partitionIds.zipWithIndex foreach { case (partitionId, index) =>
       val newRow = key.take(index until index+1)
       if (distributed.contains(partitionId))
-        distributed(partitionId) += newRow
+        distributed(partitionId).append(newRow)
       else
-        distributed(partitionId) = ArrayBuffer(newRow)
+        distributed(partitionId) = new ArrowColumnarBatchRowBuilder(newRow)
     }
 
-    distributed.map ( items => (items._1, items._2.toArray) ).toMap
+    distributed.map ( items => (items._1, items._2.build()) ).toMap
   }
 }

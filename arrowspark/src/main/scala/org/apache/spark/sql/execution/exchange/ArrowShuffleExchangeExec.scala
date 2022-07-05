@@ -98,7 +98,7 @@ object ArrowShuffleExchangeExec {
       iter.map { row =>
         var partitionIds: Option[Array[Int]] = None
         Resources.autoCloseTry(getPartitionKey(row).asInstanceOf[ArrowColumnarBatchRow]) { projected =>
-          partitionIds = Some(part.getPartitions(getPartitionKey(projected).asInstanceOf[ArrowColumnarBatchRow]))
+          partitionIds = Option(part.getPartitions(projected))
         }
         assert(partitionIds.isDefined)
         (partitionIds.get, row)
