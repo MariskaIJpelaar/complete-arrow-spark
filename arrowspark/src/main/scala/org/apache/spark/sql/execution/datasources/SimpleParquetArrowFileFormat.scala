@@ -13,11 +13,16 @@ import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat, Pa
 import org.apache.spark.sql.sources.{DataSourceRegister, Filter}
 import org.apache.spark.sql.types.StructType
 
+/** FIXME: Ugly, but for now, we will try to manage memory allocation through a public variable */
+object SimpleParquetArrowFileFormat {
+  var rootAllocator = new RootAllocator(Integer.MAX_VALUE)
+}
+
 /** SimpleArrowFileFormat that does not support filters or options
  * Note: some functions have been copied from:
  * https://github.com/Sebastiaan-Alvarez-Rodriguez/arrow-spark/blob/master/arrow-spark-connector/src/main/scala/org/apache/spark/sql/execution/datasources/arrow/ArrowFileFormat.scala */
 class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegister with Serializable with Logging {
-  private lazy val rootAllocator = new RootAllocator(Integer.MAX_VALUE)
+  private lazy val rootAllocator = SimpleParquetArrowFileFormat.rootAllocator
 
   /** Checks whether we can split the file: copied from arrow-spark::ArrowFileFormat */
   override def isSplitable(sparkSession: SparkSession, options: Map[String, String], path: Path): Boolean = false

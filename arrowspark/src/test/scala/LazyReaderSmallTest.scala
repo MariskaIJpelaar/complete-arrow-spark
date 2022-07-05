@@ -1,4 +1,6 @@
 import io.netty.util.internal.PlatformDependent
+import org.apache.arrow.memory.DefaultAllocationManagerOption
+import org.apache.arrow.memory.DefaultAllocationManagerOption.AllocationManagerType
 import org.apache.avro.SchemaBuilder
 import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
@@ -6,6 +8,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
+import org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ParquetWriter
@@ -159,16 +162,29 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
 
   test("Lazy read first row of simple Dataset with ascending numbers through the RDD") {
+    System.setProperty(DefaultAllocationManagerOption.ALLOCATION_MANAGER_TYPE_PROPERTY_NAME, AllocationManagerType.Netty.name())
     generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
     val spark = generateSpark()
+
+    // FIXME: memory management, with debug-mode: see notes
+    val before = PlatformDependent.usedDirectMemory()
+    println(PlatformDependent.usedDirectMemory())
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+    println(PlatformDependent.usedDirectMemory())
     df.explain(true)
+    println(PlatformDependent.usedDirectMemory())
     val first = df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow]
+    println(PlatformDependent.usedDirectMemory())
     checkFirstNonRandom(first)
+    println(PlatformDependent.usedDirectMemory())
     first.close()
+    println(PlatformDependent.usedDirectMemory())
+    SimpleParquetArrowFileFormat.rootAllocator.close()
+
+    assertResult(before)(PlatformDependent.usedDirectMemory())
 
     directory.deleteRecursively()
   }
@@ -334,13 +350,13 @@ class LazyReaderSmallTest extends AnyFunSuite {
   }
 
   test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading, on-partition check") {
+    System.setProperty(DefaultAllocationManagerOption.ALLOCATION_MANAGER_TYPE_PROPERTY_NAME, AllocationManagerType.Netty.name())
+
     // Generate Dataset
     val size = default_size * 15
     val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true, size = size)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
-
-    println(PlatformDependent.maxDirectMemory())
 
     val spark = generateSpark()
 
@@ -351,12 +367,14 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val new_df = df.sort("numA", "numB")
     new_df.explain(true)
 
-    new_df.queryExecution.executedPlan.execute().count()
+    println(PlatformDependent.usedDirectMemory())
+
+    val rdd = new_df.queryExecution.executedPlan.execute()
+    rdd.count()
+    rdd.foreach( batch => batch.asInstanceOf[ArrowColumnarBatchRow].close())
+
+    println(PlatformDependent.usedDirectMemory())
 
     directory.deleteRecursively()
   }
-
-  // TODO: make a new test that runs multiple times?
-
-
 }
