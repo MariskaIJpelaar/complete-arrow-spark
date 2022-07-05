@@ -785,6 +785,9 @@ object ArrowColumnarBatchRow {
   }
 
   def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, Array[ArrowColumnarBatchRow]] = {
+    println(s"ArrowColumnarBatchRow::distribute: ${partitionIds.length}")
+    println(s"ArrowColumnarBatchRow::distribute, total memory (mb): ${Runtime.getRuntime.totalMemory / (1024*1024)}")
+    println(s"ArrowColumnarBatchRow::distribute, free memory (mb): ${Runtime.getRuntime.freeMemory / (1024*1024)}")
     val distributed = mutable.Map[Int, ArrayBuffer[ArrowColumnarBatchRow]]()
 
     partitionIds.zipWithIndex foreach { case (partitionId, index) =>

@@ -2,7 +2,6 @@ package org.apache.arrow.algorithm.sort
 
 import org.apache.arrow.vector.ValueVector
 import org.apache.arrow.vector.complex.UnionVector
-import org.apache.spark.sql.catalyst.expressions.SortOrder
 
 
 /** Comparator for a UnionVector to sort according to a given SortOrder */
