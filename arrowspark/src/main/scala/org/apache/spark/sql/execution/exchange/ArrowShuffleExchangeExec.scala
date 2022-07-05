@@ -1,5 +1,6 @@
 package org.apache.spark.sql.execution.exchange
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.{ArrowShuffleWriteProcessor, ShuffleWriteMetricsReporter}
@@ -94,7 +95,14 @@ object ArrowShuffleExchangeExec {
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)
-      iter.map { row => (part.getPartitions(getPartitionKey(row).asInstanceOf[ArrowColumnarBatchRow]), row)}
+      iter.map { row =>
+        var partitionIds: Option[Array[Int]] = None
+        Resources.autoCloseTry(getPartitionKey(row).asInstanceOf[ArrowColumnarBatchRow]) { projected =>
+          partitionIds = Some(part.getPartitions(getPartitionKey(projected).asInstanceOf[ArrowColumnarBatchRow]))
+        }
+        assert(partitionIds.isDefined)
+        (partitionIds.get, row)
+      }
     }, isOrderSensitive = false)
 
     val dependency = new ShuffleDependency[Array[Int], InternalRow, InternalRow](

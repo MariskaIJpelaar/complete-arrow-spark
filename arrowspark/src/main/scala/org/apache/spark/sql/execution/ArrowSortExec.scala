@@ -69,6 +69,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  } else {
        |    $batch = $staticBatch.multiColumnSort($batch, $orders);
        |  }
+       |  references[$sortedIdx].close() // close previous sorted batch
        |  references[$sortedIdx] = $batch;
        |
        |  $needToSort = false;

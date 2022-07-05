@@ -13,9 +13,6 @@ class BucketSearcher[V <: ValueVector](
     assert(bucketVector.getValueCount > 0)
 
     val indices = new Array[Int](keyVector.getValueCount)
-    println(s"BucketSearcher: ${indices.length}")
-    println(s"BucketSearcher, total memory (mb): ${Runtime.getRuntime.totalMemory / (1024*1024)}")
-    println(s"BucketSearcher, free memory (mb): ${Runtime.getRuntime.freeMemory / (1024*1024)}")
     comparator.attachVectors(keyVector, bucketVector)
 
     0 until keyVector.getValueCount foreach { i => indices(i) = binary_search(i) }

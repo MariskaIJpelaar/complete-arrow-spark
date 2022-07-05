@@ -1,5 +1,6 @@
 package org.apache.spark
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.io.CompressionCodec
@@ -214,9 +215,12 @@ class ArrowRangePartitioner[V](
     result
   }
 
-  override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] =
-    ArrowColumnarBatchRow.bucketDistributor(
-      key,
-      ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(rangeBounds))._2),
-      orders)
+  override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = {
+    var partitionIds: Option[Array[Int]] = None
+    Resources.autoCloseTry(ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(rangeBounds))._2)) { ranges =>
+      partitionIds = Some(ArrowColumnarBatchRow.bucketDistributor(key, ranges, orders))
+    }
+    assert(partitionIds.isDefined)
+    partitionIds.get
+  }
 }
