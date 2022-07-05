@@ -1,3 +1,4 @@
+import io.netty.util.internal.PlatformDependent
 import org.apache.avro.SchemaBuilder
 import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
@@ -339,6 +340,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
+    println(PlatformDependent.maxDirectMemory())
+
     val spark = generateSpark()
 
     // Construct DataFrame
@@ -352,6 +355,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     directory.deleteRecursively()
   }
+
+  // TODO: make a new test that runs multiple times?
 
 
 }
