@@ -88,7 +88,11 @@ object ArrowShuffleExchangeExec {
     val rddForSampling = rdd.mapPartitionsInternal { iter =>
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val mutablePair = new MutablePair[Array[Byte], Null]()
-      iter.map(row => mutablePair.update(ArrowColumnarBatchRow.encode(Iterator(projection(row).copy())).toArray.apply(0), null))
+      iter.map(row => {
+        val ret = mutablePair.update(ArrowColumnarBatchRow.encode(Iterator(projection(row))).toArray.apply(0), null)
+        row.asInstanceOf[ArrowColumnarBatchRow].close()
+        ret
+      })
     }
     val part = new ArrowRangePartitioner(numPartitions, rddForSampling, sortingExpressions, ascending = true)
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {

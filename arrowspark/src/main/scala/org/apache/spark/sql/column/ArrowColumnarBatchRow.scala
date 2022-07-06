@@ -254,7 +254,6 @@ object ArrowColumnarBatchRow {
     }
 
     var extraCollected: Any = None
-    var builderOptional: Option[ArrowColumnarBatchRowBuilder] = None
 
     // get first batch
     val (extra, first) = extraTaker(batches.next())
@@ -437,7 +436,7 @@ object ArrowColumnarBatchRow {
       val name = sortOrder.child.asInstanceOf[AttributeReference].name
       batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
         val valueVector = vector.getValueVector
-        val tp = valueVector.getTransferPair(allocator)
+        val tp = valueVector.getTransferPair(allocator.newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::union::transfer", 0, Integer.MAX_VALUE))
         tp.splitAndTransfer(0, batch.numRows.toInt)
         union.addVector(tp.getTo.asInstanceOf[FieldVector])
         comparators(index) = (
@@ -481,6 +480,7 @@ object ArrowColumnarBatchRow {
       new ArrowColumnVector(new_vector)
     }, batch.numRows)
     indices.close()
+    union.close()
     ret
   }
 
@@ -558,7 +558,9 @@ object ArrowColumnarBatchRow {
     union.setValueCount(batch.numRows.toInt)
 
     // compute the index-vector
-    val indices = new VectorDeduplicator(comparator, union).uniqueIndices()
+    val deduplicator = new VectorDeduplicator(comparator, union)
+    val indices = deduplicator.uniqueIndices()
+    deduplicator.close()
 
     // make unique by getting indices
     val unique_batch = new ArrowColumnarBatchRow( batch.columns map { column =>
@@ -648,6 +650,7 @@ object ArrowColumnarBatchRow {
     var nrBatches = 0
     var remainderBatch: Option[ArrowColumnarBatchRow] = None
     val reservoirBuf = new ArrayBuffer[ArrowColumnarBatchRow](k)
+
     while (inputSize < k) {
       var length = 0L
       if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
@@ -688,6 +691,7 @@ object ArrowColumnarBatchRow {
         reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
       }
       inputSize += sample.numRows
+      sample.close()
       batch.close()
     }
 
@@ -748,6 +752,7 @@ object ArrowColumnarBatchRow {
         distributed(partitionId).append(newRow)
       else
         distributed(partitionId) = new ArrowColumnarBatchRowBuilder(newRow)
+      newRow.close()
     }
 
     distributed.map ( items => (items._1, items._2.build()) ).toMap

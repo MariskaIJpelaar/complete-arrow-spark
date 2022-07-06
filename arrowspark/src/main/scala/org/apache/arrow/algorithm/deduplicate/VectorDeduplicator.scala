@@ -2,10 +2,9 @@ package org.apache.arrow.algorithm.deduplicate
 
 import org.apache.arrow.algorithm.sort.VectorValueComparator
 import org.apache.arrow.vector.{IntVector, ValueVector}
-import org.apache.spark.sql.column
 
 /** Removes adjacent duplicate values according to a given comparator */
-class VectorDeduplicator[V <: ValueVector](private val comparator: VectorValueComparator[V], private val vector: V) {
+class VectorDeduplicator[V <: ValueVector](private val comparator: VectorValueComparator[V], private val vector: V) extends AutoCloseable{
   private val original = {
     val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("VectorDeduplicator::original", 0, Integer.MAX_VALUE))
     tp.transfer()
@@ -60,5 +59,5 @@ class VectorDeduplicator[V <: ValueVector](private val comparator: VectorValueCo
     vector
   }
 
-
+  override def close(): Unit = original.close()
 }

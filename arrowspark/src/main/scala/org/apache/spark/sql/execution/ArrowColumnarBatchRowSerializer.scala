@@ -52,12 +52,16 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private def getWriter(batch: ArrowColumnarBatchRow): ArrowStreamWriter = {
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
-        new VectorLoader(root.get).load(batch.toArrowRecordBatch(batch.numFields))
+        val recordBatch = batch.toArrowRecordBatch(batch.numFields)
+        new VectorLoader(root.get).load(recordBatch)
+        recordBatch.close()
         writer.get.start()
         return writer.get
       }
 
-      new VectorLoader(root.get).load(batch.toArrowRecordBatch(batch.numFields))
+      val recordBatch = batch.toArrowRecordBatch(batch.numFields)
+      new VectorLoader(root.get).load(recordBatch)
+      recordBatch.close()
       writer.get
     }
 

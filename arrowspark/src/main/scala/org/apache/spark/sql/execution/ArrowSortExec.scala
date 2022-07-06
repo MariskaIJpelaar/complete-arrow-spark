@@ -95,15 +95,18 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitionsInternal { iter =>
       var batch = ArrowColumnarBatchRow.create(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
-
-      if (sortOrder.length == 1) {
-        val col = attributeReferenceToCol(sortOrder.head)
-        batch = ArrowColumnarBatchRow.sort(batch, col, sortOrder.head)
-      } else {
-        batch = ArrowColumnarBatchRow.multiColumnSort(batch, sortOrder)
+      val new_batch: ArrowColumnarBatchRow = {
+        if (sortOrder.length == 1) {
+          val col = attributeReferenceToCol(sortOrder.head)
+          ArrowColumnarBatchRow.sort(batch, col, sortOrder.head)
+        } else {
+          ArrowColumnarBatchRow.multiColumnSort(batch, sortOrder)
+        }
       }
+      batch.close()
 
-      Iterator(batch)
+
+      Iterator(new_batch)
     }
   }
 
