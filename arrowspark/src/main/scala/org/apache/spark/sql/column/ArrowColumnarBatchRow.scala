@@ -93,7 +93,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
       if (fieldBuffers.size != expectedBufferCount)
         throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
       for (buf <- fieldBuffers)
-        buffers.add(codec.compress(vector.getAllocator, buf))
+        buffers.add(codec.compress(vector.getAllocator, buf)) //TODO: use different allocator here!
       for (child <- vector.getChildrenFromFields)
         appendNodes(child, nodes, buffers)
     }
