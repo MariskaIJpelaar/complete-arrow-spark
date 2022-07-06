@@ -24,6 +24,9 @@ import scala.reflect.runtime.universe._
  * @param sparkSession the SparkSession associated with this RDD
  * @param readFunction function to read in a PartitionedArrowFile and convert it to an Iterator of Array[ValueVector]
  * @param filePartitions the partitions to operate on
+ *
+ * // TODO: close batch in readFunction
+ * TODO: Caller should close batch in RDD
  */
 class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
                                      readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow],
@@ -33,7 +36,9 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
 
+  /** TODO: Caller should close batches in iterator */
   override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
+    // TODO: Close?
     val iterator = new Iterator[ArrowColumnarBatchRow] with AutoCloseable {
       private val inputMetrics = context.taskMetrics().inputMetrics
       private val existingBytesRead = inputMetrics.bytesRead
@@ -66,6 +71,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
         currentIterator = None
       }
 
+      // TODO: Caller should close
       private def readCurrentFile(): Iterator[ArrowColumnarBatchRow] = {
         try {
           readFunction(currentFile.get)
@@ -93,6 +99,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             // The readFunction may read some bytes before consuming the iterator, e.g.,
             // vectorized Parquet reader. Here we use a lazily initialized variable to delay the
             // creation of iterator so that we will throw exception in `getNext`.
+            // TODO: Close
             lazy private val internalIter: Iterator[ArrowColumnarBatchRow] = readCurrentFile()
 
             override def getNext(): AnyRef = {
@@ -158,10 +165,12 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
         (currentIterator.isDefined && currentIterator.get.hasNext) || nextIterator()
       }
 
+      // TODO: Caller should close
       override def next(): ArrowColumnarBatchRow = {
         val nextElement = currentIterator.get.next()
         incTaskInputMetricsBytesRead()
         nextElement match {
+          // TODO: partition close?
           case partition: ArrowColumnarBatchRow =>
             inputMetrics.incRecordsRead(partition.numFields)
             partition

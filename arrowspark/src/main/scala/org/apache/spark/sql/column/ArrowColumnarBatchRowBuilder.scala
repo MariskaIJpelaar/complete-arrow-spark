@@ -6,6 +6,7 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import scala.collection.immutable.NumericRange
 
+/** Note: closes first  */
 class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) {
   protected var num_bytes = 0L
   protected[column] var size = 0
@@ -15,7 +16,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
 
     size = first.numRows.toInt.min(numRows.getOrElse(Integer.MAX_VALUE))
 
-    first.columns.slice(0, numCols.getOrElse(first.columns.length)).map(column => {
+    val cols = first.columns.slice(0, numCols.getOrElse(first.columns.length)).map(column => {
       val vector = column.getValueVector
       val tp = vector.getTransferPair(vector.getAllocator
         .newChildAllocator("ArrowColumnarBatchRowBuilder::first", 0, Integer.MAX_VALUE))
@@ -38,6 +39,8 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
 
       new ArrowColumnVector(newVec)
     })
+    first.close()
+    cols
   }
 
   def length: Int = size
@@ -73,6 +76,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     validityBuffer.setBytes(start_byte, old, 0, num_bytes)
   }
 
+  /** Note: closes batch */
   def append(batch: ArrowColumnarBatchRow): Unit = {
     if (numRows.isEmpty && batch.numRows > Integer.MAX_VALUE)
       throw new RuntimeException("ArrowColumnarBatchRowBuilder batch is too large")
@@ -98,9 +102,11 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     }
     num_bytes += readableBytes
     size += current_size
+    batch.close()
   }
 
-  /** Note: invalidates the Builder */
+  /** Note: invalidates the Builder
+   * Caller is responsible for closing the vectors */
   def buildColumns(): Array[ArrowColumnVector] = {
     // transfer ownership to new Array
     columns.map( column => {
@@ -113,7 +119,8 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     })
   }
 
-  /** Note: invalidates the Builder */
+  /** Note: invalidates the Builder
+   * TODO: Caller is responsible for closing the vector */
   def build(): ArrowColumnarBatchRow = {
     // transfer ownership to new ArrowColumnarBatchRow
     val transferred = buildColumns()

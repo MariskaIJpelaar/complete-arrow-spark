@@ -7,14 +7,16 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
+// TODO: Caller should close shit here!
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
-  override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this).map(_._2)
-  override def take(num: Int): Array[ArrowColumnarBatchRow] = ArrowRDD.take(num, this)
-  override def toLocalIterator: Iterator[ArrowColumnarBatchRow] = ArrowRDD.toLocalIterator(this)
+  override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this).map(_._2) // TODO: Caller close
+  override def take(num: Int): Array[ArrowColumnarBatchRow] = ArrowRDD.take(num, this) // TODO: Caller Close
+  override def toLocalIterator: Iterator[ArrowColumnarBatchRow] = ArrowRDD.toLocalIterator(this) // TODO: Caller Close
 }
 
 object ArrowRDD {
   /** Returns a local iterator for each partition */
+    // TODO: Caller should close
   def toLocalIterator[T](rdd: RDD[T]): Iterator[T] = {
     val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRow.encode(res))
     childRDD.toLocalIterator.flatMap( result =>
@@ -23,6 +25,8 @@ object ArrowRDD {
   }
 
   /**
+   * TODO: Caller should close
+   * TODO: Should we close parameters?
    * Collect utility for rdds that contain ArrowColumnarBatchRows. Users can pass optional functions to process data
    * if the rdd has more complex data than only ArrowColumnarBatchRows
    * @param rdd rdd with the batches
@@ -40,6 +44,7 @@ object ArrowRDD {
     val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
       if (!it.hasNext) Array.emptyByteArray else it.next()
     })
+    // TODO: Close!
     val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
     res.foreach(result => {
       val decoded = ArrowColumnarBatchRow.decode(result, extraDecoder = extraDecoder)
@@ -48,14 +53,18 @@ object ArrowRDD {
     buf.toArray
   }
 
-  /** Note: copied and adapted from RDD.scala */
+  /** Note: copied and adapted from RDD.scala
+   * TODO: Caller should close
+   * TODO: Should we close RDD? */
   def take[T: ClassTag](num: Int, rdd: RDD[T])(implicit ct: ClassTag[T]): Array[T] = {
     if (num == 0) new Array[ArrowColumnarBatchRow](0)
 
     val scaleUpFactor = Math.max(rdd.conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
+    // TODO: Close
     val buf = new ArrayBuffer[ArrowColumnarBatchRow]
     val totalParts = rdd.partitions.length
     var partsScanned = 0
+    // TODO: Close res
     val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRow.encode(res.asInstanceOf[Iterator[ArrowColumnarBatchRow]], numRows = Option(num)) }
 
     while (buf.size < num && partsScanned < totalParts) {

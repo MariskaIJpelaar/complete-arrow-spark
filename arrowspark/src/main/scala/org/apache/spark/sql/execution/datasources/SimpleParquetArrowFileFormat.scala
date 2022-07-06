@@ -33,6 +33,7 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
   override def toString: String = "Simple-Arrow-Spark-Format"
 
   /** Returns a function that can be used to read a single file in as an Iterator of Array[ValueVector] */
+    //TODO: Caller close
   override def buildArrowReaderWithPartitionValues(sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType, requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String], hadoopConf: Configuration): PartitionedFile => Iterator[ArrowColumnarBatchRow] = {
     (file: PartitionedFile) => { new ParquetReaderIterator(file, allocator)}
   }

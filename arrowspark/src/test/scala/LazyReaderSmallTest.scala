@@ -272,6 +272,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect(), colNrs = 1 until num_cols)
 
+    column.resetRootAllocator()
+
     directory.deleteRecursively()
   }
 

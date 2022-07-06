@@ -11,30 +11,32 @@ import scala.reflect.io.Directory
 object EvaluationSuite {
   val isSortedBatch: (ArrowColumnarBatchRow, Range) => Boolean = (answer: ArrowColumnarBatchRow, colNrs: Range) => {
     val columns: Array[ArrowColumnVector] = ArrowColumnarBatchRow.take(Iterator(answer))._2
-
-    var result = true
-    if (columns.length <= 0) result = false
-    else if (answer.numRows == 1) result = true
-    else if (columns.exists( col => col.getValueVector.getValueCount != answer.numRows )) result = false
-    else {
-      1 until answer.numRows.toInt foreach { rowIndex =>
-        colNrs.takeWhile { colIndex =>
-          val numOne = columns(colIndex).getInt(rowIndex - 1)
-          val numTwo = columns(colIndex).getInt(rowIndex)
-          if (numOne == numTwo) {
-            true // continue to check the next column
-          } else if (numOne < numTwo) {
-            false // stop looking, it's alright
-          } else {
-            // stop looking, it's bad
-            result = false
-            false
+    try {
+      var result = true
+      if (columns.length <= 0) result = false
+      else if (answer.numRows == 1) result = true
+      else if (columns.exists( col => col.getValueVector.getValueCount != answer.numRows )) result = false
+      else {
+        1 until answer.numRows.toInt foreach { rowIndex =>
+          colNrs.takeWhile { colIndex =>
+            val numOne = columns(colIndex).getInt(rowIndex - 1)
+            val numTwo = columns(colIndex).getInt(rowIndex)
+            if (numOne == numTwo) {
+              true // continue to check the next column
+            } else if (numOne < numTwo) {
+              false // stop looking, it's alright
+            } else {
+              // stop looking, it's bad
+              result = false
+              false
+            }
           }
         }
       }
+      result
+    } finally {
+      columns.foreach( vector => vector.close() )
     }
-    columns.foreach( vector => vector.close() )
-    result
   }
 
 

@@ -21,10 +21,12 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     child.output.indexWhere(relRef => relRef.name.equals(order.child.asInstanceOf[AttributeReference].name))
   }
 
+  // TODO: close?
   private val partitions: scala.collection.mutable.Buffer[ArrowColumnarBatchRow] = new ArrayBuffer[ArrowColumnarBatchRow]()
   private var partitionsIdx: Int = _
   private var thisPartitions: String = _
   private var sortedIdx: Int = _
+  // TODO: close?
   private val sortedBatch: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(Array.empty[ArrowColumnVector], 0)
   private var thisSorted: String = _
 
@@ -71,7 +73,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  } else {
        |    $newBatch = $staticBatch.multiColumnSort($batch, $orders);
        |  }
-       |  $batch.close();
        |  references[$sortedIdx] = $newBatch;
        |
        |  $needToSort = false;
@@ -83,6 +84,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     code
   }
 
+  // TODO: close?
   override def doConsume(ctx: CodegenContext, input: Seq[ExprCode], row: ExprCode): String = {
     val temp = ctx.freshName("temp")
 
@@ -95,8 +97,10 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     code
   }
 
+  // TODO: caller is responsible for cleaning ArrowColumnarBatchRows
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitionsInternal { iter =>
+      // TODO: close batch/ iter?
       val batch = ArrowColumnarBatchRow.create(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
       val newBatch: ArrowColumnarBatchRow = {
         if (sortOrder.length == 1) {
@@ -106,9 +110,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
           ArrowColumnarBatchRow.multiColumnSort(batch, sortOrder)
         }
       }
-      batch.close()
-
-
       Iterator(newBatch)
     }
   }

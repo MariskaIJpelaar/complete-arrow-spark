@@ -14,10 +14,13 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
 
   override def nullable: Boolean = false
 
-  override def eval(input: InternalRow): Any = {
+  /** TODO: Caller should close returned batch */
+  override def eval(input: InternalRow): ArrowColumnarBatchRow = {
+    // TODO: Close input
     assert(input.isInstanceOf[ArrowColumnarBatchRow])
 
     expressions match {
+      // TODO: Close
       case references: Seq[BoundReference] => input.asInstanceOf[ArrowColumnarBatchRow].projection(references.map(_.ordinal))
       case _ =>
         val columns = Array.tabulate[ArrowColumnVector](expressions.length) { i =>

@@ -1,5 +1,6 @@
 package org.apache.spark.sql.execution
 
+import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.spark.SparkEnv
@@ -52,20 +53,27 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private def getWriter(batch: ArrowColumnarBatchRow): ArrowStreamWriter = {
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
-        val recordBatch = batch.toArrowRecordBatch(batch.numFields)
-        new VectorLoader(root.get).load(recordBatch)
-        recordBatch.close()
-        writer.get.start()
-        return writer.get
+        val recordBatch: ArrowRecordBatch = batch.toArrowRecordBatch(batch.numFields)
+        try {
+          new VectorLoader(root.get).load(recordBatch)
+          writer.get.start()
+          return writer.get
+        } finally {
+          recordBatch.close()
+        }
       }
 
-      val recordBatch = batch.toArrowRecordBatch(batch.numFields)
-      new VectorLoader(root.get).load(recordBatch)
-      recordBatch.close()
-      writer.get
+      val recordBatch: ArrowRecordBatch = batch.toArrowRecordBatch(batch.numFields)
+      try {
+        new VectorLoader(root.get).load(recordBatch)
+        writer.get
+      } finally {
+        recordBatch.close()
+      }
     }
 
     override def writeValue[T](value: T)(implicit evidence$6: ClassTag[T]): SerializationStream = {
+      // TODO: CLose?
       val batch = value.asInstanceOf[ArrowColumnarBatchRow]
       dataSize.foreach( metric => metric.add(batch.getSizeInBytes))
 
@@ -102,6 +110,8 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     }
 
 
+    /** TODO: Closes items in provided iterator
+     * TODO: Caller should close batches in iterator */
     override def asKeyValueIterator: Iterator[(Int, ArrowColumnarBatchRow)] = new NextIterator[(Int, ArrowColumnarBatchRow)] {
       private val bis = new ByteArrayInputStream(all.toArray)
       private val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
@@ -130,6 +140,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
 
       initReader()
 
+      // TODO: Caller should close
       override protected def getNext(): (Int, ArrowColumnarBatchRow) = {
         if (reader.isEmpty) {
           finished = true
