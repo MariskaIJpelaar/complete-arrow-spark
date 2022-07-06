@@ -1,10 +1,10 @@
 package org.apache.spark
 
-import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
+import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -91,19 +91,14 @@ class ArrowRangePartitioner[V](
 
     // Checks if we have non-empty batches
     if (candidates.length < 1) new ArrowColumnarBatchRow(Array.empty, 0)
-    var allocator: Option[BufferAllocator] = None
-    candidates.takeWhile { case (batch, _) =>
-      assert(batch.numRows <= Integer.MAX_VALUE)
-      allocator = batch.getFirstAllocator
-      allocator.isDefined
-    }
-    if (allocator.isEmpty) new ArrowColumnarBatchRow(Array.empty, 0)
+    val allocator = column.rootAllocator
+      .newChildAllocator("ArrowPartitioner::determineBounds", 0, Integer.MAX_VALUE)
 
     // we start by sorting the batches, and making the rows unique
     // we keep the weights by adding them as an extra column to the batch
     var totalRows = 0
     val batches = candidates map { case (batch, weight) =>
-      val weights = new Float4Vector("weights", allocator.get)
+      val weights = new Float4Vector("weights", allocator)
       weights.setValueCount(batch.numRows.toInt)
       0 until batch.numRows.toInt foreach { index => weights.set(index, weight) }
       totalRows += batch.numRows.toInt

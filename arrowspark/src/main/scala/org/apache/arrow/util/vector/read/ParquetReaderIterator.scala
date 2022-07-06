@@ -1,6 +1,6 @@
 package org.apache.arrow.util.vector.read
 
-import org.apache.arrow.memory.RootAllocator
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.types.pojo.Schema
 import org.apache.arrow.vector.{IntVector, ValueVector, VectorSchemaRoot}
 import org.apache.hadoop.conf.Configuration
@@ -13,6 +13,7 @@ import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.parquet.io.api.{GroupConverter, PrimitiveConverter}
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
+import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources.PartitionedFile
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -39,7 +40,7 @@ private class DumpGroupConverter extends GroupConverter {
 }
 
 
-class ParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] {
+class ParquetReaderIterator(protected val file: PartitionedFile, protected val allocator: BufferAllocator) extends Iterator[ArrowColumnarBatchRow] {
   if (file.length > Integer.MAX_VALUE)
     throw new RuntimeException("[IntegerParquetReaderIterator] Partition is too large")
 
@@ -59,6 +60,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
     converter.fromParquet(parquetSchema).getArrowSchema
   }
   private lazy val colDesc = parquetSchema.getColumns
+  var i = 0
 
   override def hasNext: Boolean = pageReadStore != null
 
@@ -69,7 +71,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
     val colReader = new ColumnReadStoreImpl(pageReadStore, new DumpGroupConverter(),
       parquetSchema, reader.getFileMetaData.getCreatedBy)
 
-    val vectorSchemaRoot = VectorSchemaRoot.create(schema, rootAllocator)
+    val vectorSchemaRoot = VectorSchemaRoot.create(schema, allocator)
     val vectors = vectorSchemaRoot.getFieldVectors
 
     if (pageReadStore.getRowCount > Integer.MAX_VALUE)
@@ -100,12 +102,14 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
     val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
     /** transfer ownership */
     val transferred = data.map { vector =>
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(column.rootAllocator.
+        newChildAllocator(s"ParquetReaderIterator::transfer::$i::${vector.getName}", 0, Integer.MAX_VALUE))
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
     }
-    val batch = new ArrowColumnarBatchRow(Array.tabulate(data.length)(i => transferred(i)), rows)
+    val batch = new ArrowColumnarBatchRow(transferred, rows)
     vectorSchemaRoot.close()
+    i += 1
     batch
   }
 }

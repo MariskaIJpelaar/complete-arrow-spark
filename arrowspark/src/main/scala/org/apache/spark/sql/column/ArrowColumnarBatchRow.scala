@@ -110,7 +110,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   override def copy(): InternalRow = {
     new ArrowColumnarBatchRow( columns map { v =>
       val vector = v.getValueVector
-      val allocator = vector.getAllocator
+      val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRow::copy", 0, Integer.MAX_VALUE)
       val tp = vector.getTransferPair(allocator)
 
       tp.splitAndTransfer(0, numRows.toInt)
@@ -126,7 +126,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   def projection(indices: Seq[Int]): ArrowColumnarBatchRow = {
     new ArrowColumnarBatchRow( indices.toArray map ( index => {
       val vector = columns(index).getValueVector
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(column.rootAllocator.newChildAllocator("ArrowColumnarBatchRow::projection", 0, Integer.MAX_VALUE))
       tp.splitAndTransfer(0, numRows.toInt)
       new ArrowColumnVector(tp.getTo)
     }), numRows)
@@ -141,7 +141,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   def take(range: Range): ArrowColumnarBatchRow = {
     new ArrowColumnarBatchRow( columns map ( column => {
       val vector = column.getValueVector
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(org.apache.spark.sql.column.rootAllocator.newChildAllocator("ArrowColumnarBatchRow::take(Range)", 0, Integer.MAX_VALUE))
       tp.splitAndTransfer(range.head, range.length)
       new ArrowColumnVector(tp.getTo)
     }), range.length)
@@ -314,7 +314,7 @@ object ArrowColumnarBatchRow {
     val root = VectorSchemaRoot.of(columns.map(column => {
       if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
       val vector = column.getValueVector
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(org.apache.spark.sql.column.rootAllocator.newChildAllocator("ArrowColumnarBatchRow::encode", 0, Integer.MAX_VALUE))
       tp.splitAndTransfer(0, first_length.toInt)
       tp.getTo.asInstanceOf[FieldVector]
     }).toSeq: _*)
@@ -340,6 +340,7 @@ object ArrowColumnarBatchRow {
       oos.writeLong(batch_length)
       oos.writeInt(extra.length)
       oos.write(extra)
+      batch.close()
       if (left.isDefined) left = Option((left.get-batch_length).toInt)
     }
 
@@ -367,7 +368,7 @@ object ArrowColumnarBatchRow {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         new ObjectInputStream(codec.compressedInputStream(bis))
       }
-      private val allocator = column.rootAllocator
+      private val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRow::decode", 0, Integer.MAX_VALUE)
       private val reader = new ArrowStreamReader(ois, allocator)
 
       override protected def getNext(): Any = {
@@ -383,7 +384,7 @@ object ArrowColumnarBatchRow {
         ois.readFully(array)
 
         extraDecoder(array, new ArrowColumnarBatchRow((columns map { vector =>
-          val allocator = vector.getAllocator
+          val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRow::decode::extraDecoder", 0, Integer.MAX_VALUE)
           val tp = vector.getTransferPair(allocator)
 
           tp.transfer()
@@ -424,13 +425,15 @@ object ArrowColumnarBatchRow {
       return batch
 
     // prepare comparator and UnionVector
-    val union = new UnionVector("Combiner", batch.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val allocator = column.rootAllocator
+      .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::union", 0, Integer.MAX_VALUE)
+    val union = new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)
     val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
     sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
       val name = sortOrder.child.asInstanceOf[AttributeReference].name
       batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
         val valueVector = vector.getValueVector
-        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        val tp = valueVector.getTransferPair(allocator)
         tp.splitAndTransfer(0, batch.numRows.toInt)
         union.addVector(tp.getTo.asInstanceOf[FieldVector])
         comparators(index) = (
@@ -444,20 +447,22 @@ object ArrowColumnarBatchRow {
 
     // compute the index-vector
     val first_vector = batch.columns(0).getValueVector
-    val indices = new IntVector("indexHolder", first_vector.getAllocator)
+    val indices = new IntVector("indexHolder", column.rootAllocator
+        .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::indices", 0, Integer.MAX_VALUE))
     assert(first_vector.getValueCount > 0)
     indices.allocateNew(first_vector.getValueCount)
     indices.setValueCount(first_vector.getValueCount)
 
     (new IndexSorter).sort(union, indices, comparator)
 
-    // sort all columns
+    // sort all columns by permutation according to indices
     val ret = new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
       assert(vector.getValueCount == indices.getValueCount)
 
       // transfer type
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(org.apache.spark.sql.column.rootAllocator
+        .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::permutation", 0, Integer.MAX_VALUE))
       tp.splitAndTransfer(0, vector.getValueCount)
       val new_vector = tp.getTo
 
@@ -487,19 +492,23 @@ object ArrowColumnarBatchRow {
       return batch
 
     val vector = batch.columns(col).getValueVector
-    val indices = new IntVector("indexHolder", vector.getAllocator)
+    val indices =
+      new IntVector("indexHolder", column.rootAllocator
+          .newChildAllocator("ArrowColumnarBatchRow::sort::indices", 0, Integer.MAX_VALUE))
     assert(vector.getValueCount > 0)
     indices.allocateNew(vector.getValueCount)
     indices.setValueCount(vector.getValueCount)
     val comparator = new SparkComparator(sortOrder, DefaultVectorComparators.createDefaultComparator(vector))
     (new IndexSorter).sort(vector, indices, comparator)
 
+    // sort by permutation
     new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
       assert(vector.getValueCount == indices.getValueCount)
 
       // transfer type
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(org.apache.spark.sql.column.rootAllocator
+          .newChildAllocator("ArrowColumnarBatchRow::sort::permutations", 0, Integer.MAX_VALUE))
       tp.splitAndTransfer(0, vector.getValueCount)
       val new_vector = tp.getTo
 
@@ -521,13 +530,15 @@ object ArrowColumnarBatchRow {
       return batch
 
     // prepare comparator and UnionVector
-    val union = new UnionVector("Combiner", batch.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val allocator = column.rootAllocator
+      .newChildAllocator("ArrowColumnarBatchRow::unique::union", 0, Integer.MAX_VALUE)
+    val union = new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)
     val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
     sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
       val name = sortOrder.child.asInstanceOf[AttributeReference].name
       batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
         val valueVector = vector.getValueVector
-        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        val tp = valueVector.getTransferPair(allocator)
         tp.splitAndTransfer(0, batch.numRows.toInt)
         union.addVector(tp.getTo.asInstanceOf[FieldVector])
         comparators(index) = (
@@ -543,12 +554,14 @@ object ArrowColumnarBatchRow {
     val indices = new VectorDeduplicator(comparator, union).uniqueIndices()
 
 
+    // make unique by getting indices
     new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
       assert(indices.getValueCount > 0)
 
       // transfer type
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(org.apache.spark.sql.column.rootAllocator
+        .newChildAllocator("ArrowColumnarBatchRow::unique::make_unique", 0, Integer.MAX_VALUE))
       tp.splitAndTransfer(0, indices.getValueCount)
       val new_vector = tp.getTo
 
@@ -576,7 +589,8 @@ object ArrowColumnarBatchRow {
 
     val array = Array.tabulate[ArrowColumnVector](first.numFields) { i =>
       val vector = first.columns(i).getValueVector
-      val tp = vector.getTransferPair(vector.getAllocator)
+      val tp = vector.getTransferPair(column.rootAllocator
+        .newChildAllocator("ArrowColumnarBatchRow::sample", 0, Integer.MAX_VALUE))
       // we 'copy' the content of the first batch ...
       tp.splitAndTransfer(0, first.numRows.toInt)
       // ... and re-use the ValueVector so we do not have to determine vector types :)
@@ -674,15 +688,19 @@ object ArrowColumnarBatchRow {
     if (key.numFields < 1 || rangeBounds.numFields < 1)
       return Array.empty
     // prepare comparator and UnionVectors
-    val keyUnion = new UnionVector("KeyCombiner", key.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
-    val rangeUnion = new UnionVector("rangeCombiner", rangeBounds.columns(0).getValueVector.getAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val keyAllocator = column.rootAllocator
+      .newChildAllocator("ArrowColumnarBatchRow::bucketDistributor::union", 0, Integer.MAX_VALUE)
+    val rangeAllocator = column.rootAllocator
+      .newChildAllocator("ArrowColumnarBatchRow::bucketDistributor::range", 0, Integer.MAX_VALUE)
+    val keyUnion = new UnionVector("KeyCombiner", keyAllocator, FieldType.nullable(Struct.INSTANCE), null)
+    val rangeUnion = new UnionVector("rangeCombiner", rangeAllocator, FieldType.nullable(Struct.INSTANCE), null)
     val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
     sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
       val name = sortOrder.child.asInstanceOf[AttributeReference].name
       // prepare keyUnion and comparator
       key.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
         val valueVector = vector.getValueVector
-        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        val tp = valueVector.getTransferPair(keyAllocator)
         tp.splitAndTransfer(0, key.numRows.toInt)
         keyUnion.addVector(tp.getTo.asInstanceOf[FieldVector])
         comparators(index) = (
@@ -693,7 +711,7 @@ object ArrowColumnarBatchRow {
       // prepare rangeUnion
       rangeBounds.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
         val valueVector = vector.getValueVector
-        val tp = valueVector.getTransferPair(valueVector.getAllocator)
+        val tp = valueVector.getTransferPair(rangeAllocator)
         tp.splitAndTransfer(0, rangeBounds.numRows.toInt)
         rangeUnion.addVector(tp.getTo.asInstanceOf[FieldVector])
       })

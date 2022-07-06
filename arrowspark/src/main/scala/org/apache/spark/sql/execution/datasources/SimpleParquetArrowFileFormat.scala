@@ -17,7 +17,7 @@ import org.apache.spark.sql.{SparkSession, column}
  * Note: some functions have been copied from:
  * https://github.com/Sebastiaan-Alvarez-Rodriguez/arrow-spark/blob/master/arrow-spark-connector/src/main/scala/org/apache/spark/sql/execution/datasources/arrow/ArrowFileFormat.scala */
 class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegister with Serializable with Logging {
-  private lazy val rootAllocator = column.rootAllocator
+  private lazy val allocator = column.rootAllocator.newChildAllocator("SimpleParquetArrowFileFormat", 0, Integer.MAX_VALUE)
 
   /** Checks whether we can split the file: copied from arrow-spark::ArrowFileFormat */
   override def isSplitable(sparkSession: SparkSession, options: Map[String, String], path: Path): Boolean = false
@@ -34,6 +34,6 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
 
   /** Returns a function that can be used to read a single file in as an Iterator of Array[ValueVector] */
   override def buildArrowReaderWithPartitionValues(sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType, requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String], hadoopConf: Configuration): PartitionedFile => Iterator[ArrowColumnarBatchRow] = {
-    (file: PartitionedFile) => { new ParquetReaderIterator(file, rootAllocator)}
+    (file: PartitionedFile) => { new ParquetReaderIterator(file, allocator)}
   }
 }
