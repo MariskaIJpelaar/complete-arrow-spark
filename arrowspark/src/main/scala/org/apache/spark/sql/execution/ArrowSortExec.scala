@@ -41,6 +41,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     thisSorted = ctx.addReferenceObj("sortedBatch", sortedBatch)
 
     val batch = ctx.addMutableState(classOf[ArrowColumnarBatchRow].getName, "batch", forceInline = true)
+    val newBatch = ctx.freshName("newBatch")
 
     val addToSorter = ctx.freshName("addToSorter")
     val addToSorterFuncName = ctx.addNewFunction(addToSorter,
@@ -61,15 +62,17 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  $addToSorterFuncName();
        |
        |  $batch = $staticBatch.create($thisPartitions.toIterator());
+       |  ${classOf[ArrowColumnarBatchRow].getName} $newBatch = null;
        |
        |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
        |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());
        |    int $col = $thisPlan.attributeReferenceToCol($order);
-       |    $batch = $staticBatch.sort($batch, $col, $order);
+       |    $newBatch = $staticBatch.sort($batch, $col, $order);
        |  } else {
-       |    $batch = $staticBatch.multiColumnSort($batch, $orders);
+       |    $newBatch = $staticBatch.multiColumnSort($batch, $orders);
        |  }
-       |  references[$sortedIdx] = $batch;
+       |  $batch.close();
+       |  references[$sortedIdx] = $newBatch;
        |
        |  $needToSort = false;
        |  ${consume(ctx, null, thisSorted)}
@@ -94,8 +97,8 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitionsInternal { iter =>
-      var batch = ArrowColumnarBatchRow.create(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
-      val new_batch: ArrowColumnarBatchRow = {
+      val batch = ArrowColumnarBatchRow.create(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
+      val newBatch: ArrowColumnarBatchRow = {
         if (sortOrder.length == 1) {
           val col = attributeReferenceToCol(sortOrder.head)
           ArrowColumnarBatchRow.sort(batch, col, sortOrder.head)
@@ -106,7 +109,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
       batch.close()
 
 
-      Iterator(new_batch)
+      Iterator(newBatch)
     }
   }
 
