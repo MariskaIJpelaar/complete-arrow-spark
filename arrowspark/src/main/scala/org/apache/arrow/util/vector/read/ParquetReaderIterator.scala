@@ -13,7 +13,6 @@ import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.parquet.io.api.{GroupConverter, PrimitiveConverter}
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
-import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources.PartitionedFile
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -60,7 +59,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
     converter.fromParquet(parquetSchema).getArrowSchema
   }
   private lazy val colDesc = parquetSchema.getColumns
-  var i = 0
+  var j = 0
 
   override def hasNext: Boolean = pageReadStore != null
 
@@ -88,7 +87,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
 
       val vector = vectors.get(i).asInstanceOf[IntVector]
       vector.setInitialCapacity(rows)
-      vector.allocateNew()
+      vector.allocateNew()// required after allocateNew()?
       0 until rows foreach { row =>
         if (cr.getCurrentDefinitionLevel == dmax) vector.setSafe(row, cr.getInteger)
         else vector.setNull(row)
@@ -103,13 +102,13 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
     /** transfer ownership */
     val transferred = data.map { vector =>
       val tp = vector.getTransferPair(vector.getAllocator
-        .newChildAllocator(s"ParquetReaderIterator::transfer::$i::${vector.getName}", 0, Integer.MAX_VALUE))
+        .newChildAllocator(s"ParquetReaderIterator::transfer::$j::${vector.getName}", 0, Integer.MAX_VALUE))
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
     }
     val batch = new ArrowColumnarBatchRow(transferred, rows)
     vectorSchemaRoot.close()
-    i += 1
+    j += 1
     batch
   }
 }

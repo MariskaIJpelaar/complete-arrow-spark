@@ -310,7 +310,7 @@ object ArrowColumnarBatchRow {
     val first_length = first.numRows.min(left.getOrElse(Int.MaxValue).toLong)
     if (first_length > Integer.MAX_VALUE)
       throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-    val columns = if (numCols.isDefined) first.columns.slice(0, numCols.get) else first.columns
+    val columns = first.columns.slice(0, numCols.getOrElse(first.numFields))
     val root = VectorSchemaRoot.of(columns.map(column => {
       if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
       val vector = column.getValueVector
@@ -323,6 +323,7 @@ object ArrowColumnarBatchRow {
     val writer = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
     writer.start()
     writer.writeBatch()
+    root.close()
     oos.writeLong(first_length)
     oos.writeInt(extra.length)
     oos.write(extra)
@@ -335,12 +336,15 @@ object ArrowColumnarBatchRow {
       val batch_length = batch.numRows.min(left.getOrElse(Int.MaxValue).toLong)
       if (batch_length > Integer.MAX_VALUE)
         throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-      new VectorLoader(root).load(batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Option(batch_length.toInt)))
+      val recordBatch = batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Option(batch_length.toInt))
+      batch.close()
+      new VectorLoader(root).load(recordBatch)
       writer.writeBatch()
+      recordBatch.close()
+      root.close()
       oos.writeLong(batch_length)
       oos.writeInt(extra.length)
       oos.write(extra)
-      batch.close()
       if (left.isDefined) left = Option((left.get-batch_length).toInt)
     }
 
@@ -351,7 +355,6 @@ object ArrowColumnarBatchRow {
     oos.flush()
     writer.close()
     oos.close()
-    root.close()
     Iterator(bos.toByteArray)
   }
 
