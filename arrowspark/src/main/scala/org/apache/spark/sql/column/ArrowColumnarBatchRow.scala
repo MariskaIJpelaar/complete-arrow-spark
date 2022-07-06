@@ -480,7 +480,7 @@ object ArrowColumnarBatchRow {
 
       new ArrowColumnVector(new_vector)
     }, batch.numRows)
-
+    indices.close()
     ret
   }
 
@@ -506,7 +506,7 @@ object ArrowColumnarBatchRow {
     (new IndexSorter).sort(vector, indices, comparator)
 
     // sort by permutation
-    new ArrowColumnarBatchRow( batch.columns map { column =>
+    val ret = new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
       assert(vector.getValueCount == indices.getValueCount)
 
@@ -526,6 +526,8 @@ object ArrowColumnarBatchRow {
 
       new ArrowColumnVector(new_vector)
     }, batch.numRows)
+    indices.close()
+    ret
   }
 
 
@@ -558,9 +560,8 @@ object ArrowColumnarBatchRow {
     // compute the index-vector
     val indices = new VectorDeduplicator(comparator, union).uniqueIndices()
 
-
     // make unique by getting indices
-    new ArrowColumnarBatchRow( batch.columns map { column =>
+    val unique_batch = new ArrowColumnarBatchRow( batch.columns map { column =>
       val vector = column.getValueVector
       assert(indices.getValueCount > 0)
 
@@ -577,6 +578,8 @@ object ArrowColumnarBatchRow {
 
       new ArrowColumnVector(new_vector)
     }, indices.getValueCount)
+    indices.close()
+    unique_batch
   }
 
   /**
@@ -585,6 +588,8 @@ object ArrowColumnarBatchRow {
    * @param fraction the probability of a sample being taken
    * @param seed a seed for the "random"-generator
    * @return a fresh batch with the sampled rows
+   *
+   * Note: closes the batches
    */
   def sample(input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
     if (!input.hasNext) new ArrowColumnarBatchRow(Array.empty, 0)
@@ -728,7 +733,10 @@ object ArrowColumnarBatchRow {
     rangeUnion.setValueCount(rangeBounds.numRows.toInt)
 
     // find partition-ids
-    new BucketSearcher(keyUnion, rangeUnion, comparator).distribute()
+    val partitionIds = new BucketSearcher(keyUnion, rangeUnion, comparator).distribute()
+    keyUnion.close()
+    rangeUnion.close()
+    partitionIds
   }
 
   def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {

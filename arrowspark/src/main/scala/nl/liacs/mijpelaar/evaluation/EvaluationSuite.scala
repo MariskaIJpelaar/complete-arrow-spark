@@ -12,16 +12,11 @@ object EvaluationSuite {
   val isSortedBatch: (ArrowColumnarBatchRow, Range) => Boolean = (answer: ArrowColumnarBatchRow, colNrs: Range) => {
     val columns: Array[ArrowColumnVector] = ArrowColumnarBatchRow.take(Iterator(answer))._2
 
-    if (columns.length <= 0) {
-      false
-    } else if (answer.numRows == 1) {
-      // one row is always sorted
-      true
-    } else if (columns.exists( col => col.getValueVector.getValueCount != answer.numRows )) {
-      // not enough elements
-      false
-    } else {
-      var result = true
+    var result = true
+    if (columns.length <= 0) result = false
+    else if (answer.numRows == 1) result = true
+    else if (columns.exists( col => col.getValueVector.getValueCount != answer.numRows )) result = false
+    else {
       1 until answer.numRows.toInt foreach { rowIndex =>
         colNrs.takeWhile { colIndex =>
           val numOne = columns(colIndex).getInt(rowIndex - 1)
@@ -37,8 +32,9 @@ object EvaluationSuite {
           }
         }
       }
-      result
     }
+    columns.foreach( vector => vector.close() )
+    result
   }
 
 

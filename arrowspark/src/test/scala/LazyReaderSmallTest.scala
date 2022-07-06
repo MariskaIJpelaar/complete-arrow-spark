@@ -220,6 +220,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
     df.explain(true)
     checkAnswer(table, df.collect())
 
+    column.resetRootAllocator()
+
     directory.deleteRecursively()
   }
 
@@ -243,6 +245,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect(), size = size)
+
+    column.resetRootAllocator()
 
     directory.deleteRecursively()
   }
