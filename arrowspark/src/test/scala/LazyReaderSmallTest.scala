@@ -6,10 +6,9 @@ import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
-import org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
+import org.apache.spark.sql.{SparkSession, column}
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ParquetWriter
 
@@ -54,8 +53,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
         HadoopOutputFile.fromPath(new Path(directory.path, s"file$i.parquet"), new Configuration()),
         records.subList(i*recordsSize, (i+1)*recordsSize)
     ))}
-
     ParquetWriter.write_batch(schema, writeables, true)
+    ParquetWriter.close()
     table
   }
 
@@ -163,28 +162,19 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
   test("Lazy read first row of simple Dataset with ascending numbers through the RDD") {
     System.setProperty(DefaultAllocationManagerOption.ALLOCATION_MANAGER_TYPE_PROPERTY_NAME, AllocationManagerType.Netty.name())
+
     generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
     val spark = generateSpark()
 
-    // FIXME: memory management, with debug-mode: see notes
-    val before = PlatformDependent.usedDirectMemory()
-    println(PlatformDependent.usedDirectMemory())
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
-    println(PlatformDependent.usedDirectMemory())
     df.explain(true)
-    println(PlatformDependent.usedDirectMemory())
     val first = df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow]
-    println(PlatformDependent.usedDirectMemory())
     checkFirstNonRandom(first)
-    println(PlatformDependent.usedDirectMemory())
     first.close()
-    println(PlatformDependent.usedDirectMemory())
-    SimpleParquetArrowFileFormat.rootAllocator.close()
-
-    assertResult(before)(PlatformDependent.usedDirectMemory())
+    column.resetRootAllocator()
 
     directory.deleteRecursively()
   }
@@ -197,7 +187,10 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val spark = generateSpark()
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain(true)
+
     checkFirstNonRandom(df.first())
+
+    column.resetRootAllocator()
 
     directory.deleteRecursively()
   }
@@ -211,6 +204,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
     df.explain(true)
     checkAnswerNonRandom(df.collect())
+
+    column.resetRootAllocator()
 
     directory.deleteRecursively()
   }

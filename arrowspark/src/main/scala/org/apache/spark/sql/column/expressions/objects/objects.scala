@@ -45,7 +45,7 @@ case class CreateExternalColumn(child: Expression) extends UnaryExpression with 
             |if (${eval.isNull})
             |   $tmp = new $genericColumnClass();
             |else
-            |   $tmp = new $genericColumnClass(${eval.value});
+            |   $tmp = new $genericColumnClass(${eval.value}, true);
             |final $columnClass ${ev.value} = $tmp;
        """.stripMargin
 

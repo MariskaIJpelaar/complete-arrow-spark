@@ -3,7 +3,7 @@ package org.apache.spark.sql.column
 import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
 import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
-import org.apache.arrow.memory.{ArrowBuf, BufferAllocator, RootAllocator}
+import org.apache.arrow.memory.{ArrowBuf, BufferAllocator}
 import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
@@ -16,6 +16,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
+import org.apache.spark.sql.column
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarArray}
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
@@ -268,6 +269,9 @@ object ArrowColumnarBatchRow {
       batch.close()
     }
 
+    /** clear up the remainder */
+    batches.foreach( extraTaker(_)._2.close() )
+
     (extraCollected, builder.buildColumns())
   }
 
@@ -339,10 +343,14 @@ object ArrowColumnarBatchRow {
       if (left.isDefined) left = Option((left.get-batch_length).toInt)
     }
 
+    // clean up the rest of the iterator
+    iter.foreach( extraEncoder(_)._2.close() )
+
     // clean up and return the singleton-iterator
     oos.flush()
     writer.close()
     oos.close()
+    root.close()
     Iterator(bos.toByteArray)
   }
 
@@ -359,7 +367,7 @@ object ArrowColumnarBatchRow {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         new ObjectInputStream(codec.compressedInputStream(bis))
       }
-      private val allocator = new RootAllocator()
+      private val allocator = column.rootAllocator
       private val reader = new ArrowStreamReader(ois, allocator)
 
       override protected def getNext(): Any = {

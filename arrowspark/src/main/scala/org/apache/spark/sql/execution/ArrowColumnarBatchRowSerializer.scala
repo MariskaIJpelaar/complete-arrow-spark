@@ -1,11 +1,11 @@
 package org.apache.spark.sql.execution
 
-import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
+import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -75,6 +75,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     override def close(): Unit = {
       writer.foreach( writer => writer.close() )
       oos.foreach( oos => oos.close() )
+      root.foreach( vectorSchemaRoot => vectorSchemaRoot.close() )
     }
 
     /** The following methods are never called by shuffle-code (according to UnsafeRowSerializer) */
@@ -116,7 +117,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
         ois = Option(new ObjectInputStream(cis))
       }
-      private lazy val allocator = new RootAllocator()
+      private lazy val allocator = column.rootAllocator
       private var reader: Option[ArrowStreamReader] = None
       private def initReader(): Unit = {
         initOis()

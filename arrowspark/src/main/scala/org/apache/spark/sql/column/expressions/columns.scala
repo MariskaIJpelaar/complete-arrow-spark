@@ -4,6 +4,7 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.GenericRow
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.column.{ColumnBatch, TColumn}
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarArray}
 
 import scala.reflect.ClassTag.Nothing
 
@@ -14,7 +15,22 @@ class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
 
   def this(size: Int) = this(new Array[Any](size))
 
-  def this(arrayData: ArrayData) = this(arrayData.array)
+  /** Note: expensive */
+  def this(arrayData: ArrayData, clean: Boolean) = {
+    this(arrayData.array)
+    if (clean) {
+      arrayData match {
+        case column: ColumnarArray => 0 until column.numElements() foreach { index =>
+          /** Sorry, we really need to clean up */
+          val field = classOf[ColumnarArray].getDeclaredField("data")
+          field.setAccessible(true)
+          field.get(column).asInstanceOf[ColumnVector] match {
+            case vector: ArrowColumnVector => vector.close()
+          }
+        }
+      }
+    }
+  }
 
   /** Number of elements in the Column */
   override def length: Int = values.length

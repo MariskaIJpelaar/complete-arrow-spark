@@ -43,6 +43,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
   if (file.length > Integer.MAX_VALUE)
     throw new RuntimeException("[IntegerParquetReaderIterator] Partition is too large")
 
+
   /** with help from: https://blog.actorsfit.com/a?ID=01000-cf624b9b-13ce-4228-9acb-29b722aec266 */
   private lazy val reader = {
     // make sure the reader conforms to our limits :)
@@ -97,7 +98,15 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
 
     vectorSchemaRoot.setRowCount(rows)
     val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
-    new ArrowColumnarBatchRow(Array.tabulate(data.length)(i => new ArrowColumnVector(data(i))), rows)
+    /** transfer ownership */
+    val transferred = data.map { vector =>
+      val tp = vector.getTransferPair(vector.getAllocator)
+      tp.transfer()
+      new ArrowColumnVector(tp.getTo)
+    }
+    val batch = new ArrowColumnarBatchRow(Array.tabulate(data.length)(i => transferred(i)), rows)
+    vectorSchemaRoot.close()
+    batch
   }
 }
 

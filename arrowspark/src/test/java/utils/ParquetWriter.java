@@ -27,6 +27,8 @@ import java.util.List;
 // from: https://stackoverflow.com/a/39734610 (2022-03-18)
 // https://www.programcreek.com/java-api-examples/?api=org.apache.avro.generic.GenericRecordBuilder (2022-03-18)
 
+// FIXME: convert from static to actual object, because it got a bit out-of-hand :)
+
 public class ParquetWriter {
     private static final Schema default_schema = SchemaBuilder.builder("simple").record("record")
             .fields().requiredInt("id").requiredString("name")
@@ -46,15 +48,26 @@ public class ParquetWriter {
     }
 
     private static VectorSchemaRoot root = null;
+    private static BufferAllocator allocator = null;
     public static VectorSchemaRoot get_vector_schema_root() { return root; }
 
+    public static void close() {
+        if (root != null)
+            root.close();
+        if (allocator != null)
+            allocator.close();
+        root = null;
+        allocator = null;
+    }
+
+
     private static void set_vector_schema_root(List<GenericData.Record> recordsToWrite) {
-        BufferAllocator allocater = new RootAllocator(Integer.MAX_VALUE);
+        allocator = new RootAllocator(Integer.MAX_VALUE);
         org.apache.arrow.vector.types.pojo.Schema arrowSchema = new SchemaConverter().fromParquet(get_message_type()).getArrowSchema();
 
         List<FieldVector> field_vectors = new ArrayList<>();
         for (Field field : arrowSchema.getFields()) {
-            FieldVector vector = field.createVector(allocater);
+            FieldVector vector = field.createVector(allocator);
 
             if (field.getType().getTypeID() == ArrowType.ArrowTypeID.Int) {
                 ((IntVector) vector).allocateNew(recordsToWrite.size());
