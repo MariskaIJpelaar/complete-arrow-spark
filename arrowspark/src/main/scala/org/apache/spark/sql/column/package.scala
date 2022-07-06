@@ -9,7 +9,6 @@ package object column {
    * In fact, it is recommended to use the same allocator throughout the whole program, but we should probably
    * handle accessibility better, and make use of ChildAllocators */
 
-    //TODO: for all children: make nested again!
   var rootAllocator = new RootAllocator(Integer.MAX_VALUE)
   private def closeAllocator(allocator: BufferAllocator): Unit = {
     allocator.getChildAllocators.forEach(closeAllocator(_))

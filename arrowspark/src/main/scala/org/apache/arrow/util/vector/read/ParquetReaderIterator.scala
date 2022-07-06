@@ -102,8 +102,8 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
     val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
     /** transfer ownership */
     val transferred = data.map { vector =>
-      val tp = vector.getTransferPair(column.rootAllocator.
-        newChildAllocator(s"ParquetReaderIterator::transfer::$i::${vector.getName}", 0, Integer.MAX_VALUE))
+      val tp = vector.getTransferPair(vector.getAllocator
+        .newChildAllocator(s"ParquetReaderIterator::transfer::$i::${vector.getName}", 0, Integer.MAX_VALUE))
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
     }

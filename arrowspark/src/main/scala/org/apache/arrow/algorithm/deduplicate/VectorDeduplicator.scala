@@ -7,14 +7,14 @@ import org.apache.spark.sql.column
 /** Removes adjacent duplicate values according to a given comparator */
 class VectorDeduplicator[V <: ValueVector](private val comparator: VectorValueComparator[V], private val vector: V) {
   private val original = {
-    val tp = vector.getTransferPair(column.rootAllocator.newChildAllocator("VectorDeduplicator::original", 0, Integer.MAX_VALUE))
+    val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("VectorDeduplicator::original", 0, Integer.MAX_VALUE))
     tp.transfer()
     tp.getTo
   }
 
   // returns the indices required to create de-duplicated vector from the original
   def uniqueIndices(): IntVector = {
-    val indices = new IntVector("indices", column.rootAllocator.newChildAllocator("VectorDeduplicator::indices", 0, Integer.MAX_VALUE))
+    val indices = new IntVector("indices", original.getAllocator.newChildAllocator("VectorDeduplicator::indices", 0, Integer.MAX_VALUE))
 
     comparator.attachVector(original.asInstanceOf[V])
     // the first one won't be a duplicate :)

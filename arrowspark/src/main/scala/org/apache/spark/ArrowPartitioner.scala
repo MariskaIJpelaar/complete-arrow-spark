@@ -1,10 +1,10 @@
 package org.apache.spark
 
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
-import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -91,7 +91,16 @@ class ArrowRangePartitioner[V](
 
     // Checks if we have non-empty batches
     if (candidates.length < 1) new ArrowColumnarBatchRow(Array.empty, 0)
-    val allocator = column.rootAllocator
+    var allocatorOption: Option[BufferAllocator] = None
+    var i = 0
+    while (allocatorOption.isEmpty && i < candidates.size) {
+      val batch = candidates(i)._1
+      allocatorOption = batch.getFirstAllocator
+      i += 1
+    }
+
+    val allocator = allocatorOption
+      .getOrElse(throw new RuntimeException("[ArrowPartitioner::determineBounds] cannot get allocator"))
       .newChildAllocator("ArrowPartitioner::determineBounds", 0, Integer.MAX_VALUE)
 
     // we start by sorting the batches, and making the rows unique

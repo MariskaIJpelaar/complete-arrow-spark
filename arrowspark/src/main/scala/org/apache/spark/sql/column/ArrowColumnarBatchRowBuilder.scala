@@ -17,7 +17,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
 
     first.columns.slice(0, numCols.getOrElse(first.columns.length)).map(column => {
       val vector = column.getValueVector
-      val tp = vector.getTransferPair(org.apache.spark.sql.column.rootAllocator
+      val tp = vector.getTransferPair(vector.getAllocator
         .newChildAllocator("ArrowColumnarBatchRowBuilder::first", 0, Integer.MAX_VALUE))
       numRows.fold( tp.splitAndTransfer(0, first.numRows.toInt) )( num =>
         tp.splitAndTransfer(0, num)
@@ -106,7 +106,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     columns.map( column => {
       val vector = column.getValueVector
       vector.setValueCount(size)
-      val tp = vector.getTransferPair(org.apache.spark.sql.column.rootAllocator
+      val tp = vector.getTransferPair(vector.getAllocator
         .newChildAllocator("ArrowColumnarBatchRowBuilder::buildColumns", 0, Integer.MAX_VALUE))
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
