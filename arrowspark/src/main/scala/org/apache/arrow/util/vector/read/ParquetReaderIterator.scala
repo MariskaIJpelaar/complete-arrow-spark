@@ -63,7 +63,6 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
 
   override def hasNext: Boolean = pageReadStore != null
 
-  // TODO: Caller is responsible for closing batch
   override def next(): ArrowColumnarBatchRow = {
     if (!hasNext)
       throw new RuntimeException("[ParquetReaderIterator] has no next")

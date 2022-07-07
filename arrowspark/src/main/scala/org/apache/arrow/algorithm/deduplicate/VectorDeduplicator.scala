@@ -4,24 +4,20 @@ import org.apache.arrow.algorithm.sort.VectorValueComparator
 import org.apache.arrow.vector.{IntVector, ValueVector}
 
 /** Removes adjacent duplicate values according to a given comparator */
-class VectorDeduplicator[V <: ValueVector](private val comparator: VectorValueComparator[V], private val vector: V) extends AutoCloseable{
-  private val original = {
-    val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("VectorDeduplicator::original", 0, Integer.MAX_VALUE))
-    tp.transfer()
-    tp.getTo
-  }
-
+object VectorDeduplicator {
   // returns the indices required to create de-duplicated vector from the original
-  def uniqueIndices(): IntVector = {
-    val indices = new IntVector("indices", original.getAllocator.newChildAllocator("VectorDeduplicator::indices", 0, Integer.MAX_VALUE))
+  // does not close the provided vector
+  // TODO: Caller is responsible for closing returned IntVector
+  def uniqueIndices[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): IntVector = {
+    val indices = new IntVector("indices", vector.getAllocator.newChildAllocator("VectorDeduplicator::indices", 0, Integer.MAX_VALUE))
 
-    comparator.attachVector(original.asInstanceOf[V])
+    comparator.attachVector(vector)
     // the first one won't be a duplicate :)
     indices.setSafe(0, 0)
     var previous_unique_index = 0
     var unique_index = 1
 
-    0 until original.getValueCount foreach { index =>
+    0 until vector.getValueCount foreach { index =>
       // found the next unique value!
       if (comparator.compare(previous_unique_index, index) != 0) {
         indices.setSafe(unique_index, index)
@@ -35,7 +31,16 @@ class VectorDeduplicator[V <: ValueVector](private val comparator: VectorValueCo
   }
 
   // returns the original vector with duplicates removed
-  def unique(): V = {
+  // closes the passed vector
+  // TODO: Caller is responsible for closing returned vector
+  def unique[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): V = {
+    val original = {
+      val tp = vector.getTransferPair(vector.getAllocator
+        .newChildAllocator("VectorDeduplicator::unique::transfer", vector.getBufferSize, Integer.MAX_VALUE))
+      tp.transfer()
+      tp.getTo
+    }
+
     vector.clear()
     vector.allocateNew()
 
@@ -58,6 +63,4 @@ class VectorDeduplicator[V <: ValueVector](private val comparator: VectorValueCo
     vector.setValueCount(unique_index)
     vector
   }
-
-  override def close(): Unit = original.close()
 }

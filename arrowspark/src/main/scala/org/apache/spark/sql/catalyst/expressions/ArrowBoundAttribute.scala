@@ -5,7 +5,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCo
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataType, StructField, StructType}
-import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarArray}
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ArrowColumnarArray}
 
 /** A single reference to encapsulate multiple BoundReferences for a ArrowColumnarBatch */
 case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpression {
@@ -14,22 +14,27 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
 
   override def nullable: Boolean = false
 
-  /** TODO: Caller should close returned batch */
-  override def eval(input: InternalRow): ArrowColumnarBatchRow = {
-    // TODO: Close input
-    assert(input.isInstanceOf[ArrowColumnarBatchRow])
-
-    expressions match {
-      // TODO: Close
-      case references: Seq[BoundReference] => input.asInstanceOf[ArrowColumnarBatchRow].projection(references.map(_.ordinal))
-      case _ =>
-        val columns = Array.tabulate[ArrowColumnVector](expressions.length) { i =>
-          expressions(i).eval(input).asInstanceOf[ColumnarArray].copy().asInstanceOf[ArrowColumnVector]
+  /** Note: closes input
+   * TODO: Caller should close returned batch */
+  override def eval(input: InternalRow): ArrowColumnarBatchRow = input match {
+    case batch: ArrowColumnarBatchRow =>
+      try {
+        expressions match {
+          case references: Seq[BoundReference] => batch.projection(references.map(_.ordinal))
+          case _ =>
+            val columns = Array.tabulate[ArrowColumnVector](expressions.length) { i =>
+              expressions(i).eval(input).asInstanceOf[ArrowColumnarArray].getData
+            }
+            ArrowColumnarBatchRow.create(columns)
         }
-        new ArrowColumnarBatchRow(columns, if (columns.length > 0) columns(0).getValueVector.getValueCount else  0)
-    }
+      } finally {
+        batch.close()
+      }
+    case _ => throw new RuntimeException("[ArrowBoundAttribute::eval] only ArrowColumnarBatches are supported")
   }
 
+  /** Note: closes input
+   * TODO: Caller is responsible for closing ev.value */
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
     expressions match {
       case references: Seq[BoundReference] =>
@@ -37,11 +42,12 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
         val projections = ctx.addReferenceObj(objName = "projections", obj = references.map(_.ordinal))
         val code = code"""
                          | ${classOf[ArrowColumnarBatchRow].getName} ${ev.value} = ((${classOf[ArrowColumnarBatchRow].getName}) ${ctx.INPUT_ROW}).projection($projections);
+                         | ((${classOf[ArrowColumnarBatchRow].getName}) ${ctx.INPUT_ROW}).close();
                          |""".stripMargin
         ev.copy(code = code)
       case _ =>
         val array = ctx.freshName("array")
-        val columnType = classOf[ColumnarArray].getName
+        val columnType = classOf[ArrowColumnarArray].getName
         val vectorType = classOf[ArrowColumnVector].getName
 
         val exprEvals = ctx.generateExpressions(expressions, doSubexpressionElimination = SQLConf.get.subexpressionEliminationEnabled)
@@ -52,7 +58,7 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
                 |""".stripMargin
         }
 
-        val arrayType = classOf[Array[ColumnarArray]].getName
+        val arrayType = classOf[Array[ArrowColumnarArray]].getName
         val batchType = classOf[Array[ArrowColumnarBatchRow]].getName
         val numRows = s"($array.length > 0) ? $array[0].getValueVector().getValueCount() : 0;"
         val code = code"""

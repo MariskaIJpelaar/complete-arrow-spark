@@ -18,7 +18,7 @@ import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.column
 import org.apache.spark.sql.types.{DataType, Decimal}
-import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarArray}
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ArrowColumnarArray, ColumnarArray}
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
 import org.apache.spark.util.NextIterator
 import org.apache.spark.util.random.XORShiftRandom
@@ -48,7 +48,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
 
   override def getArray(ordinal: Int): ArrayData = {
     val column = columns(ordinal)
-    new ColumnarArray(column, 0, column.getValueVector.getValueCount)
+    new ArrowColumnarArray(new ColumnarArray(column, 0, column.getValueVector.getValueCount))
   }
 
 
@@ -203,8 +203,8 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
     result
   }
 
+  /** Note: does not close either of the batches */
   override def equals(o: Any): Boolean = o match {
-    // TODO: close?
     case other: ArrowColumnarBatchRow =>
       if (other.numRows != numRows) return false
       if (other.numFields != numFields) return false
@@ -233,13 +233,13 @@ object ArrowColumnarBatchRow {
   /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows
    * Closes the batches in the provided iterator
    * WARNING: uses 'take', a very expensive operation. Use with care!
-   * TODO: User is responsible for closing generated batch */
+   * TODO: Caller is responsible for closing generated batch */
   def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
     ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(iter)._2)
   }
 
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors
-   * TODO: User is responsible for closing the generated batch */
+   * TODO: Caller is responsible for closing the generated batch */
   def create(cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
     val length = if (cols.length > 0) cols(0).getValueVector.getValueCount else 0
     new ArrowColumnarBatchRow(cols, length)
@@ -258,9 +258,9 @@ object ArrowColumnarBatchRow {
    * @param extraCollector collect a new item from custom-data, first parameter is new item, second parameter is
    *                       the result from previous calls, None if there were no previous calls. Result of this function
    *                       is passed to other calls of extraCollector.
+   * Note: user should close the batch if it consumes it (does not return it)
    *
    * TODO: Caller is responsible for closing returned vectors
-   * TODO: Close params?
    */
   def take(batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
@@ -379,7 +379,9 @@ object ArrowColumnarBatchRow {
 
   /** Note: similar to decodeUnsafeRows
    *
-   * Users may add additional decoding by providing the 'extraDecoder' function
+   * Callers may add additional decoding by providing the 'extraDecoder' function. They are responsible for
+   * closing the provided ArrowColumnarBatch if they consume it (do not return it)
+   *
    * TODO: Callers are responsible for closing the returned 'Any' containing the batch */
   def decode(bytes: Array[Byte],
              extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch): Iterator[Any] = {
@@ -406,7 +408,7 @@ object ArrowColumnarBatchRow {
         val array = new Array[Byte](arr_length)
         ois.readFully(array)
 
-        // TODO: Close?
+        // Note: vector is transferred and is thus implicitly closed
         extraDecoder(array, new ArrowColumnarBatchRow((columns map { vector =>
           val allocator = vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::decode::extraDecoder", 0, Integer.MAX_VALUE)
           val tp = vector.getTransferPair(allocator)
@@ -448,67 +450,74 @@ object ArrowColumnarBatchRow {
    * TODO: Caller is responsible for closing returned batch
    */
   def multiColumnSort(batch: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): ArrowColumnarBatchRow = {
+    if (batch.numFields < 1)
+      return batch
+
     try {
-      if (batch.numFields < 1)
-        return batch
-
-      // prepare comparator and UnionVector
-      val allocator = batch.getFirstAllocator
+      // UnionVector representing our batch
+      val firstAllocator = batch.getFirstAllocator
         .getOrElse( throw new RuntimeException("[ArrowColumnarBatchRow::multiColumnSort] cannot get allocator ") )
+      val unionAllocator = firstAllocator
         .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::union", 0, Integer.MAX_VALUE)
-      val union = new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)
-      val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
-      sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
-        val name = sortOrder.child.asInstanceOf[AttributeReference].name
-        batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
-          val valueVector = vector.getValueVector
-          val tp = valueVector.getTransferPair(allocator.newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::union::transfer", 0, Integer.MAX_VALUE))
-          tp.splitAndTransfer(0, batch.numRows.toInt)
-          union.addVector(tp.getTo.asInstanceOf[FieldVector])
-          comparators(index) = (
-            name,
-            new SparkComparator[ValueVector](sortOrder, DefaultVectorComparators.createDefaultComparator(valueVector))
-          )
-        })
+      val union = new UnionVector("Combiner", unionAllocator, FieldType.nullable(Struct.INSTANCE), null)
+
+      // Indices for permutations
+      val indexAllocator = firstAllocator
+        .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::indices", 0, Integer.MAX_VALUE)
+      val indices = new IntVector("indexHolder", indexAllocator)
+
+      try {
+        // prepare comparator and UnionVector
+        val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
+        sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
+          val name = sortOrder.child.asInstanceOf[AttributeReference].name
+          batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
+            val valueVector = vector.getValueVector
+            val tp = valueVector.getTransferPair(unionAllocator
+              .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::union::transfer", 0, Integer.MAX_VALUE))
+            tp.splitAndTransfer(0, batch.numRows.toInt)
+            union.addVector(tp.getTo.asInstanceOf[FieldVector])
+            comparators(index) = (
+              name,
+              new SparkComparator[ValueVector](sortOrder, DefaultVectorComparators.createDefaultComparator(valueVector))
+            )
+          })
+        }
+        val comparator = new SparkUnionComparator(comparators)
+        union.setValueCount(batch.numRows.toInt)
+
+        // prepare indices
+        indices.allocateNew(batch.numRows.toInt)
+        indices.setValueCount(batch.numRows.toInt)
+
+        // compute the index-vector
+        (new IndexSorter).sort(union, indices, comparator)
+
+        // sort all columns by permutation according to indices
+        new ArrowColumnarBatchRow( batch.columns map { column =>
+          val vector = column.getValueVector
+          assert(vector.getValueCount == indices.getValueCount)
+
+          // transfer type
+          val tp = vector.getTransferPair(vector.getAllocator
+            .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::permutation", 0, Integer.MAX_VALUE))
+          tp.splitAndTransfer(0, vector.getValueCount)
+          val new_vector = tp.getTo
+
+          new_vector.setInitialCapacity(indices.getValueCount)
+          new_vector.allocateNew()
+          assert(indices.getValueCount > 0)
+          assert(indices.getValueCount.equals(vector.getValueCount))
+          /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
+          0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
+          new_vector.setValueCount(indices.getValueCount)
+
+          new ArrowColumnVector(new_vector)
+        }, batch.numRows)
+      } finally {
+        union.close()
+        indices.close()
       }
-      val comparator = new SparkUnionComparator(comparators)
-      union.setValueCount(batch.numRows.toInt)
-
-      // compute the index-vector
-      val first_vector = batch.columns(0).getValueVector
-      val indices = new IntVector("indexHolder", first_vector.getAllocator
-        .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::indices", 0, Integer.MAX_VALUE))
-      assert(first_vector.getValueCount > 0)
-      indices.allocateNew(first_vector.getValueCount)
-      indices.setValueCount(first_vector.getValueCount)
-
-      (new IndexSorter).sort(union, indices, comparator)
-
-      // sort all columns by permutation according to indices
-      // TODO: Close?
-      val ret = new ArrowColumnarBatchRow( batch.columns map { column =>
-        val vector = column.getValueVector
-        assert(vector.getValueCount == indices.getValueCount)
-
-        // transfer type
-        val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::permutation", 0, Integer.MAX_VALUE))
-        tp.splitAndTransfer(0, vector.getValueCount)
-        val new_vector = tp.getTo
-
-        new_vector.setInitialCapacity(indices.getValueCount)
-        new_vector.allocateNew()
-        assert(indices.getValueCount > 0)
-        assert(indices.getValueCount.equals(vector.getValueCount))
-        /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
-        0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
-        new_vector.setValueCount(indices.getValueCount)
-
-        new ArrowColumnVector(new_vector)
-      }, batch.numRows)
-      indices.close()
-      union.close()
-      ret
     } finally {
       batch.close()
     }
@@ -525,44 +534,46 @@ object ArrowColumnarBatchRow {
    * TODO: Caller is responsible for closing returned batch
    */
   def sort(batch: ArrowColumnarBatchRow, col: Int, sortOrder: SortOrder): ArrowColumnarBatchRow = {
-    try {
-      if (col < 0 || col > batch.numFields)
-        return batch
+    if (col < 0 || col > batch.numFields)
+      return batch
 
+    try {
       val vector = batch.columns(col).getValueVector
       val indices =
         new IntVector("indexHolder", vector.getAllocator
           .newChildAllocator("ArrowColumnarBatchRow::sort::indices", 0, Integer.MAX_VALUE))
       assert(vector.getValueCount > 0)
-      indices.allocateNew(vector.getValueCount)
-      indices.setValueCount(vector.getValueCount)
-      val comparator = new SparkComparator(sortOrder, DefaultVectorComparators.createDefaultComparator(vector))
-      (new IndexSorter).sort(vector, indices, comparator)
 
-      // sort by permutation
-      // TODO: Close?
-      val ret = new ArrowColumnarBatchRow( batch.columns map { column =>
-        val vector = column.getValueVector
-        assert(vector.getValueCount == indices.getValueCount)
+      try {
+        indices.allocateNew(vector.getValueCount)
+        indices.setValueCount(vector.getValueCount)
+        val comparator = new SparkComparator(sortOrder, DefaultVectorComparators.createDefaultComparator(vector))
+        (new IndexSorter).sort(vector, indices, comparator)
 
-        // transfer type
-        val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRow::sort::permutations", 0, Integer.MAX_VALUE))
-        tp.splitAndTransfer(0, vector.getValueCount)
-        val new_vector = tp.getTo
+        // sort by permutation
+        new ArrowColumnarBatchRow( batch.columns map { column =>
+          val vector = column.getValueVector
+          assert(vector.getValueCount == indices.getValueCount)
 
-        new_vector.setInitialCapacity(indices.getValueCount)
-        new_vector.allocateNew()
-        assert(indices.getValueCount > 0)
-        assert(indices.getValueCount.equals(vector.getValueCount))
-        /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
-        0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
-        new_vector.setValueCount(indices.getValueCount)
+          // transfer type
+          val tp = vector.getTransferPair(vector.getAllocator
+            .newChildAllocator("ArrowColumnarBatchRow::sort::permutations", 0, Integer.MAX_VALUE))
+          tp.splitAndTransfer(0, vector.getValueCount)
+          val new_vector = tp.getTo
 
-        new ArrowColumnVector(new_vector)
-      }, batch.numRows)
-      indices.close()
-      ret
+          new_vector.setInitialCapacity(indices.getValueCount)
+          new_vector.allocateNew()
+          assert(indices.getValueCount > 0)
+          assert(indices.getValueCount.equals(vector.getValueCount))
+          /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
+          0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
+          new_vector.setValueCount(indices.getValueCount)
+
+          new ArrowColumnVector(new_vector)
+        }, batch.numRows)
+      } finally {
+        indices.close()
+      }
     } finally {
       batch.close()
     }
@@ -578,58 +589,62 @@ object ArrowColumnarBatchRow {
    * TODO: Caller is responsible for closing the new batch
    */
   def unique(batch: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): ArrowColumnarBatchRow = {
-    try {
-      if (batch.numFields < 1)
-        return batch
+    if (batch.numFields < 1)
+      return batch
 
-      // prepare comparator and UnionVector
+    try {
+      // UnionVector representing our batch
       val allocator = batch.getFirstAllocator
         .getOrElse( throw new RuntimeException("[ArrowColumnarBatchRow::unique] cannot get allocator ") )
         .newChildAllocator("ArrowColumnarBatchRow::unique::union", 0, Integer.MAX_VALUE)
       val union = new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)
-      val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
-      sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
-        val name = sortOrder.child.asInstanceOf[AttributeReference].name
-        batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
-          val valueVector = vector.getValueVector
-          val tp = valueVector.getTransferPair(allocator)
-          tp.splitAndTransfer(0, batch.numRows.toInt)
-          union.addVector(tp.getTo.asInstanceOf[FieldVector])
-          comparators(index) = (
-            name,
-            new SparkComparator[ValueVector](sortOrder, DefaultVectorComparators.createDefaultComparator(valueVector))
-          )
-        })
+
+      try {
+        // prepare comparator and UnionVector
+        val comparators = new Array[(String, SparkComparator[ValueVector])](sortOrders.length)
+        sortOrders.zipWithIndex foreach { case (sortOrder, index) =>
+          val name = sortOrder.child.asInstanceOf[AttributeReference].name
+          batch.columns.find( vector => vector.getValueVector.getName.equals(name)).foreach( vector => {
+            val valueVector = vector.getValueVector
+            val tp = valueVector.getTransferPair(allocator)
+            tp.splitAndTransfer(0, batch.numRows.toInt)
+            union.addVector(tp.getTo.asInstanceOf[FieldVector])
+            comparators(index) = (
+              name,
+              new SparkComparator[ValueVector](sortOrder, DefaultVectorComparators.createDefaultComparator(valueVector))
+            )
+          })
+        }
+        val comparator = new SparkUnionComparator(comparators)
+        union.setValueCount(batch.numRows.toInt)
+
+        // compute the index-vector
+        val indices = VectorDeduplicator.uniqueIndices(comparator, union)
+        try {
+          // grab the unique values
+          new ArrowColumnarBatchRow( batch.columns map { column =>
+            val vector = column.getValueVector
+            assert(indices.getValueCount > 0)
+
+            // transfer type
+            val tp = vector.getTransferPair(vector.getAllocator
+              .newChildAllocator("ArrowColumnarBatchRow::unique::make_unique", 0, Integer.MAX_VALUE))
+            tp.splitAndTransfer(0, indices.getValueCount)
+            val new_vector = tp.getTo
+
+            new_vector.setInitialCapacity(indices.getValueCount)
+            new_vector.allocateNew()
+            0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
+            new_vector.setValueCount(indices.getValueCount)
+
+            new ArrowColumnVector(new_vector)
+          }, indices.getValueCount)
+        } finally {
+          indices.close()
+        }
+      } finally {
+        union.close()
       }
-      val comparator = new SparkUnionComparator(comparators)
-      union.setValueCount(batch.numRows.toInt)
-
-      // compute the index-vector
-      val deduplicator = new VectorDeduplicator(comparator, union)
-      val indices = deduplicator.uniqueIndices()
-      deduplicator.close()
-
-      // make unique by getting indices
-      // TODO: Close?
-      val unique_batch = new ArrowColumnarBatchRow( batch.columns map { column =>
-        val vector = column.getValueVector
-        assert(indices.getValueCount > 0)
-
-        // transfer type
-        val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRow::unique::make_unique", 0, Integer.MAX_VALUE))
-        tp.splitAndTransfer(0, indices.getValueCount)
-        val new_vector = tp.getTo
-
-        new_vector.setInitialCapacity(indices.getValueCount)
-        new_vector.allocateNew()
-        0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
-        new_vector.setValueCount(indices.getValueCount)
-
-        new ArrowColumnVector(new_vector)
-      }, indices.getValueCount)
-      indices.close()
-      unique_batch
     } finally {
       batch.close()
     }
@@ -710,18 +725,20 @@ object ArrowColumnarBatchRow {
     while (inputSize < k) {
       var length = 0L
       if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
-      val batch = input.next()
-      assert(batch.numRows < Integer.MAX_VALUE)
-      length = math.min(k-inputSize, batch.numRows)
-      reservoirBuf += batch.take(0 until length.toInt)
+      val batch: ArrowColumnarBatchRow = input.next()
+      try {
+        assert(batch.numRows < Integer.MAX_VALUE)
+        length = math.min(k-inputSize, batch.numRows)
+        reservoirBuf += batch.take(0 until length.toInt)
 
-      // do we have elements remaining?
-      if (length < batch.numRows)
-        remainderBatch = Option(batch.take(length.toInt until batch.numRows.toInt))
-
+        // do we have elements remaining?
+        if (length < batch.numRows)
+          remainderBatch = Option(batch.take(length.toInt until batch.numRows.toInt))
+      } finally {
+        batch.close()
+      }
       nrBatches += 1
       inputSize += length
-      batch.close()
     }
 
     // TODO: Close?
@@ -741,15 +758,18 @@ object ArrowColumnarBatchRow {
 
     while (input.hasNext) {
       val batch = input.next()
-      val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
-      val end = generateRandomNumber(start, batch.numRows.toInt)
-      val sample = batch.take(start until end)
-      0 until sample.numRows.toInt foreach { index =>
-        reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+      try {
+        val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
+        val end = generateRandomNumber(start, batch.numRows.toInt)
+        val sample = batch.take(start until end)
+        0 until sample.numRows.toInt foreach { index =>
+          reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+        }
+        inputSize += sample.numRows
+        sample.close()
+      } finally {
+        batch.close()
       }
-      inputSize += sample.numRows
-      sample.close()
-      batch.close()
     }
 
     (reservoir, inputSize)
