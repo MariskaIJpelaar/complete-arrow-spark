@@ -36,8 +36,9 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private var oos: Option[ObjectOutputStream] = None
     private var writer: Option[ArrowStreamWriter] = None
 
+    /** Does not consume batch */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
-      if (root.isEmpty) root = Option(batch.toRoot)
+      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy()))
       root.get
     }
 
@@ -82,7 +83,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       dataSize.foreach( metric => metric.add(batch.getSizeInBytes))
 
       getWriter(batch).writeBatch()
-      getOos.writeLong(batch.numRows)
+      getOos.writeInt(batch.numRows)
 
       this
     }
@@ -163,7 +164,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
 
         val columns = reader.get.getVectorSchemaRoot.getFieldVectors
-        val length = ois.get.readLong()
+        val length = ois.get.readInt()
         (0, new ArrowColumnarBatchRow((columns map { vector =>
           val allocator = vector.getAllocator
             .newChildAllocator("ArrowColumnarBatchRowSerializer::getNext", 0, Integer.MAX_VALUE)

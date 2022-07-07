@@ -32,11 +32,10 @@ import scala.util.Random
 
 // TODO: at some point, we might have to split up functionalities into more files
 // TODO: memory management
-// TODO: change numRows to Int?
 // TODO: create sorts by Iterators?, Create sample by iterators?
 // TODO: difference between 'take' and 'merge'?
 
-class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[ArrowColumnVector], val numRows: Long) extends InternalRow with AutoCloseable with Serializable {
+class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[ArrowColumnVector], val numRows: Int) extends InternalRow with AutoCloseable with Serializable {
   override def numFields: Int = columns.length
 
   def length: Long = numRows
@@ -49,7 +48,6 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
     val column = columns(ordinal)
     new ArrowColumnarArray(new ColumnarArray(column, 0, column.getValueVector.getValueCount))
   }
-
 
   // unsupported getters
   override def get(ordinal: Int, dataType: DataType): AnyRef = throw new UnsupportedOperationException()
@@ -74,12 +72,6 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   def getFirstAllocator: Option[BufferAllocator] =
     if (numFields > 0) Option(columns(0).getValueVector.getAllocator) else None
 
-
-
-  /** Creates a VectorSchemaRoot from this batch
-   * Caller should close the root */
-  def toRoot: VectorSchemaRoot = VectorSchemaRoot.of(columns.map(column => column.getValueVector.asInstanceOf[FieldVector]).toSeq: _*)
-
   /** Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
@@ -89,7 +81,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
       val allocator = vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::copy", 0, Integer.MAX_VALUE)
       val tp = vector.getTransferPair(allocator)
 
-      tp.splitAndTransfer(0, numRows.toInt)
+      tp.splitAndTransfer(0, numRows)
       new ArrowColumnVector(tp.getTo)
     }, numRows)
   }
@@ -105,7 +97,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
     new ArrowColumnarBatchRow( indices.toArray map ( index => {
       val vector = columns(index).getValueVector
       val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::projection", 0, Integer.MAX_VALUE))
-      tp.splitAndTransfer(0, numRows.toInt)
+      tp.splitAndTransfer(0, numRows)
       new ArrowColumnVector(tp.getTo)
     }), numRows)
   }
@@ -301,10 +293,9 @@ object ArrowColumnarBatchRow {
         // This needs to be done separately as we need the schema for the VectorSchemaRoot
         val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
         try {
-          val first_length = first.numRows.min(left.getOrElse(Int.MaxValue).toLong)
-          if (first_length > Integer.MAX_VALUE)
-            throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
+          val first_length: Int = first.numRows.min(left.getOrElse(Int.MaxValue))
           val columns = first.columns.slice(0, numCols.getOrElse(first.numFields))
+          // TODO: use ArrowCOlumnarBatchRowConverter
           val root = VectorSchemaRoot.of(columns.map(column => {
             if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
             val vector = column.getValueVector
@@ -319,7 +310,7 @@ object ArrowColumnarBatchRow {
               writer.start()
               writer.writeBatch()
               root.close()
-              oos.writeLong(first_length)
+              oos.writeInt(first_length)
               oos.writeInt(extra.length)
               oos.write(extra)
               left = left.map( numLeft => (numLeft-first_length).toInt )
@@ -388,7 +379,7 @@ object ArrowColumnarBatchRow {
         }
 
         val columns = reader.getVectorSchemaRoot.getFieldVectors
-        val length = ois.readLong()
+        val length = ois.readInt()
         val arr_length = ois.readInt()
         val array = new Array[Byte](arr_length)
         ois.readFully(array)

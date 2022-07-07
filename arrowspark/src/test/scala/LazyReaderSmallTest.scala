@@ -6,7 +6,7 @@ import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
-import org.apache.spark.sql.column._
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, ColumnBatch, ColumnDataFrame, ColumnDataFrameReader, TColumn}
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.apache.spark.sql.{SparkSession, column}
 import org.scalatest.funsuite.AnyFunSuite

@@ -1,12 +1,13 @@
 package org.apache.spark.sql.column.utils
 
 import org.apache.arrow.memory.ArrowBuf
-import org.apache.arrow.vector.{FieldVector, TypeLayout}
+import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorSchemaRoot}
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
 import java.util
+import scala.collection.convert.ImplicitConversions.`iterable AsScalaIterable`
 
 object ArrowColumnarBatchRowConverters {
   /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
@@ -48,6 +49,20 @@ object ArrowColumnarBatchRowConverters {
       batch.columns.slice(0, numCols) foreach( column =>
         appendNodes(codec, rowCount, column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
       (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
+    } finally {
+      batch.close()
+    }
+  }
+
+  /** Creates a VectorSchemaRoot from the provided batch and closes it
+   * TODO: Caller should close the root */
+  def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): VectorSchemaRoot = {
+    try {
+      // TODO: s.thing with numRows
+      val columns = batch.columns.slice(0, numCols.getOrElse(batch.numFields))
+      VectorSchemaRoot.of(columns.map(column => {
+        column.getValueVector.asInstanceOf[FieldVector]
+      }).toSeq: _*)
     } finally {
       batch.close()
     }
