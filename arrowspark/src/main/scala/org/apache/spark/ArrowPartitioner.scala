@@ -6,7 +6,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowTransformers
+import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
@@ -136,7 +136,7 @@ class ArrowRangePartitioner[V](
 
     val grouped: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator)._2, totalRows)
     val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRow.multiColumnSort(grouped, orders)
-    val (unique, weighted) = ArrowColumnarBatchRow.unique(sorted, orders).splitColumns(grouped.numFields-1)
+    val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRow.unique(sorted, orders), grouped.numFields-1)
     try {
       // now we gather our bounds
       assert(weighted.numFields == 1)

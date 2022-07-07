@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column.utils
 
 import org.apache.arrow.memory.ArrowBuf
+import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
 import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorSchemaRoot}
@@ -83,5 +84,32 @@ object ArrowColumnarBatchRowConverters {
       batch.close()
     }
   }
+
+  /**
+   * Splits the current batch on its columns into two batches
+   * @param col column index to split on
+   * @return a pair of the two batches containing the split columns from this batch
+   *
+   * TODO: Caller is responsible for closing all batches (also this one)
+   */
+
+  /**
+   * Splits the current batch on its columns into two batches
+   * @param batch batch to split and close
+   * @param col column index to split on, we assume col < batch.numFields
+   * @return a pair of two of the batches containing the split columns from this batch
+   *         TODO: Caller is responsible for closing the two returned batches
+   */
+  def splitColumns(batch: ArrowColumnarBatchRow, col: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
+    try {
+      (new ArrowColumnarBatchRow(batch.columns.slice(0, col), batch.numRows),
+        new ArrowColumnarBatchRow(batch.columns.slice(col, batch.numFields), batch.numRows))
+    } finally {
+      batch.close()
+    }
+  }
+
+  // TODO: implement
+  def toUnionVector(batch: ArrowColumnarBatchRow): UnionVector = ???
 
 }
