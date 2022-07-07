@@ -25,7 +25,7 @@ object ArrowColumnarBatchRowSorters {
       return batch
 
     try {
-      // TODO: function for making an UnionVector
+      // TODO: function for making an UnionVector + get a subset of columns based on names
       // UnionVector representing our batch
       val firstAllocator = batch.getFirstAllocator
         .getOrElse( throw new RuntimeException("[ArrowColumnarBatchRow::multiColumnSort] cannot get allocator ") )

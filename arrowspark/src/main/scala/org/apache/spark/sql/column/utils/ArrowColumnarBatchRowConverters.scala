@@ -4,6 +4,8 @@ import org.apache.arrow.memory.ArrowBuf
 import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
+import org.apache.arrow.vector.types.pojo.ArrowType.Struct
+import org.apache.arrow.vector.types.pojo.FieldType
 import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorSchemaRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
@@ -20,7 +22,8 @@ object ArrowColumnarBatchRowConverters {
     if (fieldBuffers.size != expectedBufferCount)
       throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
     fieldBuffers.forEach( buf =>
-      buffers.add(codec.compress(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::appendNodes", 0, Integer.MAX_VALUE), buf))
+      buffers.add(codec.compress(vector.getAllocator
+        .newChildAllocator("ArrowColumnarBatchRowConverters::appendNodes", 0, Integer.MAX_VALUE), buf))
     )
     vector.getChildrenFromFields.forEach( child =>
       appendNodes(codec, rowCount, child, nodes, buffers)
@@ -109,7 +112,39 @@ object ArrowColumnarBatchRowConverters {
     }
   }
 
-  // TODO: implement
-  def toUnionVector(batch: ArrowColumnarBatchRow): UnionVector = ???
+  /**
+   * Creates an UnionVector from the provided batch
+   * @param batch batch to convert and close
+   * @return a fresh UnionVector
+   *         TODO: Caller is responsible for closing the UnionVector
+   */
+  def toUnionVector(batch: ArrowColumnarBatchRow): UnionVector = {
+    try {
+      val allocator = batch.getFirstAllocator
+        .getOrElse( throw new RuntimeException("[ArrowColumnarBatchRowConverters::toUnionVector] cannot get allocator"))
+        .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector", 0, Integer.MAX_VALUE)
+      val union = new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)
+      try {
+        batch.columns foreach { column =>
+          val vector = column.getValueVector
+          val tp = vector.getTransferPair(allocator
+            .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector::transfer", 0, Integer.MAX_VALUE))
+          tp.transfer()
+          union.addVector(tp.getTo.asInstanceOf[FieldVector])
+        }
+        union.setValueCount(batch.numRows)
+
+        // make a copy and assume nothing can go wrong within transfer :)
+        val ret = new UnionVector("UnionReturned", allocator
+          .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector::return", 0, Integer.MAX_VALUE), FieldType.nullable(Struct.INSTANCE), null)
+        union.makeTransferPair(ret).transfer()
+        ret
+      } finally {
+        union.close()
+      }
+    } finally {
+      batch.close()
+    }
+  }
 
 }

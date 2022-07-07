@@ -80,4 +80,17 @@ object ArrowColumnarBatchRowTransformers {
     }
   }
 
+  // TODO: implement
+  def getColumns(batch: ArrowColumnarBatchRow, names: Array[String]): ArrowColumnarBatchRow = {
+    try {
+      // TODO: use list.flatten to go from List[Options] to List[defined-stuff]
+      val cols = names.map { name =>
+
+      }
+      new ArrowColumnarBatchRow(cols, batch.numRows)
+    } finally {
+      batch.close()
+    }
+  }
+
 }
