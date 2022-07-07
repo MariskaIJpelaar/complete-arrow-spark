@@ -8,6 +8,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
 import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowConverters
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
@@ -50,10 +51,12 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       oos.get
     }
 
+    /** Does not consume batch */
     private def getWriter(batch: ArrowColumnarBatchRow): ArrowStreamWriter = {
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
-        val recordBatch: ArrowRecordBatch = batch.toArrowRecordBatch(batch.numFields)
+        val recordBatch: ArrowRecordBatch =
+          ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
         try {
           new VectorLoader(root.get).load(recordBatch)
           writer.get.start()
@@ -63,7 +66,8 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
       }
 
-      val recordBatch: ArrowRecordBatch = batch.toArrowRecordBatch(batch.numFields)
+      val recordBatch: ArrowRecordBatch =
+        ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
       try {
         new VectorLoader(root.get).load(recordBatch)
         writer.get

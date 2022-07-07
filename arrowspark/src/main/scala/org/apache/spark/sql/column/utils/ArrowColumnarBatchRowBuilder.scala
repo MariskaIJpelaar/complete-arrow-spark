@@ -1,13 +1,14 @@
-package org.apache.spark.sql.column
+package org.apache.spark.sql.column.utils
 
 import org.apache.arrow.memory.ArrowBuf
 import org.apache.arrow.vector.BitVectorHelper
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import scala.collection.immutable.NumericRange
 
-/** Note: closes first  */
-class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) {
+/** Note: TODO: closes first  */
+class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends AutoCloseable {
   protected var num_bytes = 0L
   protected[column] var size = 0
   protected[column] val columns: Array[ArrowColumnVector] = {
@@ -76,7 +77,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     validityBuffer.setBytes(start_byte, old, 0, num_bytes)
   }
 
-  /** Note: closes batch */
+  /** Note: TODO: closes batch */
   def append(batch: ArrowColumnarBatchRow): Unit = {
     if (numRows.isEmpty && batch.numRows > Integer.MAX_VALUE)
       throw new RuntimeException("ArrowColumnarBatchRowBuilder batch is too large")
@@ -126,4 +127,6 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     val transferred = buildColumns()
     new ArrowColumnarBatchRow(transferred, size)
   }
+
+  override def close(): Unit = columns.foreach( _.close() )
 }

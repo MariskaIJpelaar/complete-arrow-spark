@@ -3,20 +3,20 @@ package org.apache.spark.sql.column
 import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
 import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator, SparkUnionComparator}
-import org.apache.arrow.memory.{ArrowBuf, BufferAllocator}
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.complex.UnionVector
-import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
-import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
+import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.arrow.vector.types.pojo.ArrowType.Struct
 import org.apache.arrow.vector.types.pojo.FieldType
-import org.apache.arrow.vector.{FieldVector, IntVector, TypeLayout, ValueVector, VectorLoader, VectorSchemaRoot, ZeroVector}
+import org.apache.arrow.vector._
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.column
+import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters}
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ArrowColumnarArray, ColumnarArray}
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
@@ -25,7 +25,6 @@ import org.apache.spark.util.random.XORShiftRandom
 
 import java.io._
 import java.nio.channels.Channels
-import java.util
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -75,33 +74,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   def getFirstAllocator: Option[BufferAllocator] =
     if (numFields > 0) Option(columns(0).getValueVector.getAllocator) else None
 
-  /** copied from org.apache.arrow.vector.VectorUnloader
-   * Caller should close the ArrowRecordBatch */
-  def toArrowRecordBatch(numCols: Int, numRows: Option[Int] = None): ArrowRecordBatch = {
-    val nodes = new util.ArrayList[ArrowFieldNode]
-    val buffers = new util.ArrayList[ArrowBuf]
-    val codec = NoCompressionCodec.INSTANCE
 
-    val rowCount = if (numRows.isEmpty) this.numRows else numRows.get
-    if (rowCount > Integer.MAX_VALUE)
-      throw new RuntimeException("[ArrowColumnarBatchRow::copyNToRoot] too many rows")
-
-    /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
-    def appendNodes(vector: FieldVector, nodes: util.List[ArrowFieldNode], buffers: util.List[ArrowBuf]): Unit = {
-      nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
-      val fieldBuffers = vector.getFieldBuffers
-      val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
-      if (fieldBuffers.size != expectedBufferCount)
-        throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
-      for (buf <- fieldBuffers)
-        buffers.add(codec.compress(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::appendNodes", 0, Integer.MAX_VALUE), buf))
-      for (child <- vector.getChildrenFromFields)
-        appendNodes(child, nodes, buffers)
-    }
-
-    columns.slice(0, numCols) foreach( column => appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
-    new ArrowRecordBatch(rowCount.toInt, nodes, buffers, CompressionUtil.createBodyCompression(codec), true)
-  }
 
   /** Creates a VectorSchemaRoot from this batch
    * Caller should close the root */
@@ -110,8 +83,8 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   /** Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
-  override def copy(): InternalRow = {
-    new ArrowColumnarBatchRow( columns map { v =>
+  override def copy(): ArrowColumnarBatchRow = {
+    new ArrowColumnarBatchRow(columns map { v =>
       val vector = v.getValueVector
       val allocator = vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::copy", 0, Integer.MAX_VALUE)
       val tp = vector.getTransferPair(allocator)
@@ -271,24 +244,26 @@ object ArrowColumnarBatchRow {
       return (None, new Array[ArrowColumnVector](0))
     }
 
-    var extraCollected: Any = None
-
-    // get first batch
-    val (extra, first) = extraTaker(batches.next())
-    extraCollected = extraCollector(extra, None)
-    val builder = new ArrowColumnarBatchRowBuilder(first, numCols, numRows)
-
-    while (batches.hasNext && numRows.forall( num => builder.length < num)) {
-      val (extra, batch) = extraTaker(batches.next())
-      extraCollected = extraCollector(extra, Option(extraCollected))
-      builder.append(batch)
-      batch.close()
+    try {
+      // get first batch and its extra
+      val (extra, first) = extraTaker(batches.next())
+      // builder consumes batch
+      val builder = new ArrowColumnarBatchRowBuilder(first, numCols, numRows)
+      try {
+        var extraCollected = extraCollector(extra, None)
+        while (batches.hasNext && numRows.forall( num => builder.length < num)) {
+          val (extra, batch) = extraTaker(batches.next())
+          builder.append(batch) // builder consumes batch
+          extraCollected = extraCollector(extra, Option(extraCollected))
+        }
+        (extraCollected, builder.buildColumns())
+      } finally {
+        builder.close()
+      }
+    } finally {
+      /** clear up the remainder */
+      batches.foreach( extraTaker(_)._2.close() )
     }
-
-    /** clear up the remainder */
-    batches.foreach( extraTaker(_)._2.close() )
-
-    (extraCollected, builder.buildColumns())
   }
 
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
@@ -302,7 +277,7 @@ object ArrowColumnarBatchRow {
    *
    * Users may add additional encoding by providing the 'extraEncoder' function
    *
-   * Closes the batches found in the iterator */
+   * TODO: Closes the batches found in the iterator */
   def encode(iter: Iterator[Any],
              numCols: Option[Int] = None,
              numRows: Option[Int] = None,
@@ -311,70 +286,80 @@ object ArrowColumnarBatchRow {
     if (!iter.hasNext)
       return Iterator(Array.emptyByteArray)
 
-    // how many rows are left to read?
-    var left = numRows
-    // Setup the streams and writers
-    val bos = new ByteArrayOutputStream()
-    val oos = {
-      val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
-      new ObjectOutputStream(codec.compressedOutputStream(bos))
-    }
-
-    // Prepare first batch
-    // This needs to be done separately as we need the schema for the VectorSchemaRoot
-    val (extra, first) = extraEncoder(iter.next())
-    val first_length = first.numRows.min(left.getOrElse(Int.MaxValue).toLong)
-    if (first_length > Integer.MAX_VALUE)
-      throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-    val columns = first.columns.slice(0, numCols.getOrElse(first.numFields))
-    val root = VectorSchemaRoot.of(columns.map(column => {
-      if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
-      val vector = column.getValueVector
-      val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::encode", 0, Integer.MAX_VALUE))
-      tp.splitAndTransfer(0, first_length.toInt)
-      tp.getTo.asInstanceOf[FieldVector]
-    }).toSeq: _*)
-    first.close()
-
-    val writer = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
-    writer.start()
-    writer.writeBatch()
-    root.close()
-    oos.writeLong(first_length)
-    oos.writeInt(extra.length)
-    oos.write(extra)
-    if (left.isDefined) left = Option((left.get - first_length).toInt)
-
-
-    // while we still have some reading to do
-    while (iter.hasNext && (left.isEmpty || left.get > 0)) {
-      val (extra, batch) = extraEncoder(iter.next())
-      val batch_length = batch.numRows.min(left.getOrElse(Int.MaxValue).toLong)
-      if (batch_length > Integer.MAX_VALUE)
-        throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
-      val recordBatch: ArrowRecordBatch = batch.toArrowRecordBatch(root.getFieldVectors.size(), numRows = Option(batch_length.toInt))
-      try {
-        batch.close()
-        new VectorLoader(root).load(recordBatch)
-        writer.writeBatch()
-        root.close()
-        oos.writeLong(batch_length)
-        oos.writeInt(extra.length)
-        oos.write(extra)
-        if (left.isDefined) left = Option((left.get-batch_length).toInt)
-      } finally {
-        recordBatch.close()
+    try {
+      // how many rows are left to read?
+      var left = numRows
+      // Setup the streams and writers
+      val bos = new ByteArrayOutputStream()
+      val oos = {
+        val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
+        new ObjectOutputStream(codec.compressedOutputStream(bos))
       }
+
+      try {
+        // Prepare first batch
+        // This needs to be done separately as we need the schema for the VectorSchemaRoot
+        val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
+        try {
+          val first_length = first.numRows.min(left.getOrElse(Int.MaxValue).toLong)
+          if (first_length > Integer.MAX_VALUE)
+            throw new RuntimeException("[ArrowColumnarBatchRow] Cannot encode more than Integer.MAX_VALUE rows")
+          val columns = first.columns.slice(0, numCols.getOrElse(first.numFields))
+          val root = VectorSchemaRoot.of(columns.map(column => {
+            if (left.isEmpty) column.getValueVector.asInstanceOf[FieldVector]
+            val vector = column.getValueVector
+            val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::encode", 0, Integer.MAX_VALUE))
+            tp.splitAndTransfer(0, first_length.toInt)
+            tp.getTo.asInstanceOf[FieldVector]
+          }).toSeq: _*)
+          try {
+            val writer = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
+            try {
+              // write first batch
+              writer.start()
+              writer.writeBatch()
+              root.close()
+              oos.writeLong(first_length)
+              oos.writeInt(extra.length)
+              oos.write(extra)
+              left = left.map( numLeft => (numLeft-first_length).toInt )
+
+              // while we still have some reading to do
+              while (iter.hasNext && (left.isEmpty || left.get > 0)) {
+                val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
+                // consumes batch
+                val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
+                  ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
+                try {
+                  new VectorLoader(root).load(recordBatch)
+                  writer.writeBatch()
+                  root.close()
+                  oos.writeLong(batchLength)
+                  oos.writeInt(extra.length)
+                  oos.write(extra)
+                  left = left.map( numLeft => (numLeft-batchLength).toInt )
+                } finally {
+                  recordBatch.close()
+                }
+              }
+              // clean up and return the singleton-iterator
+              oos.flush()
+              Iterator(bos.toByteArray)
+            } finally {
+              writer.close()
+            }
+          } finally {
+            root.close()
+          }
+        } finally {
+          first.close()
+        }
+      } finally {
+        oos.close()
+      }
+    } finally {
+      iter.foreach( extraEncoder(_)._2.close() )
     }
-
-    // clean up the rest of the iterator
-    iter.foreach( extraEncoder(_)._2.close() )
-
-    // clean up and return the singleton-iterator
-    oos.flush()
-    writer.close()
-    oos.close()
-    Iterator(bos.toByteArray)
   }
 
   /** Note: similar to decodeUnsafeRows
@@ -657,7 +642,7 @@ object ArrowColumnarBatchRow {
    * @param seed a seed for the "random"-generator
    * @return a fresh batch with the sampled rows
    *
-   * Note: closes the batches
+   * TODO: Note: closes the batches
    * TODO: Caller is responsible for closing returned batch
    */
   def sample(input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
@@ -712,67 +697,85 @@ object ArrowColumnarBatchRow {
    */
   def sampleAndCount(input: Iterator[ArrowColumnarBatchRow], k: Int, seed: Long = Random.nextLong()):
       (ArrowColumnarBatchRow, Long) = {
-    if (k < 1) (Array.empty[ArrowColumnarBatchRow], 0)
+    try {
+      if (k < 1) (Array.empty[ArrowColumnarBatchRow], 0)
 
-    // First, we fill the reservoir with k elements
-    var inputSize = 0L
-    var nrBatches = 0
-    // TODO: Close?
-    var remainderBatch: Option[ArrowColumnarBatchRow] = None
-    // TODO: Close?
-    val reservoirBuf = new ArrayBuffer[ArrowColumnarBatchRow](k)
-
-    while (inputSize < k) {
-      var length = 0L
-      if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
-      val batch: ArrowColumnarBatchRow = input.next()
+      // First, we fill the reservoir with k elements
+      var inputSize = 0L
+      var nrBatches = 0
+      var remainderBatch: Option[ArrowColumnarBatchRow] = None
+      val reservoirBuf = new ArrayBuffer[ArrowColumnarBatchRow](k)
       try {
-        assert(batch.numRows < Integer.MAX_VALUE)
-        length = math.min(k-inputSize, batch.numRows)
-        reservoirBuf += batch.take(0 until length.toInt)
+        while (inputSize < k) {
+          var length = 0L
+          if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
+          val batch: ArrowColumnarBatchRow = input.next()
+          try {
+            assert(batch.numRows < Integer.MAX_VALUE)
+            length = math.min(k-inputSize, batch.numRows)
+            reservoirBuf += batch.take(0 until length.toInt)
 
-        // do we have elements remaining?
-        if (length < batch.numRows)
-          remainderBatch = Option(batch.take(length.toInt until batch.numRows.toInt))
-      } finally {
-        batch.close()
-      }
-      nrBatches += 1
-      inputSize += length
-    }
-
-    // TODO: Close?
-    var iter: Iterator[ArrowColumnarBatchRow] = input
-    // add our remainder to the iterator, if there is any
-    remainderBatch.foreach { batch =>
-      iter = Iterator(batch) ++ iter
-    }
-
-    val reservoir = ArrowColumnarBatchRow.create(reservoirBuf.toIterator)
-
-    // we now have a reservoir with length k, in which we will replace random elements
-    val rand = new XORShiftRandom(seed)
-    def generateRandomNumber(start: Int = 0, end: Int = Integer.MAX_VALUE-1) : Int = {
-      start + rand.nextInt( (end-start) + 1)
-    }
-
-    while (input.hasNext) {
-      val batch = input.next()
-      try {
-        val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
-        val end = generateRandomNumber(start, batch.numRows.toInt)
-        val sample = batch.take(start until end)
-        0 until sample.numRows.toInt foreach { index =>
-          reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+            // do we have elements remaining?
+            if (length < batch.numRows)
+              remainderBatch = Option(batch.take(length.toInt until batch.numRows.toInt))
+          } finally {
+            batch.close()
+          }
+          nrBatches += 1
+          inputSize += length
         }
-        inputSize += sample.numRows
-        sample.close()
-      } finally {
-        batch.close()
+      } catch {
+        // if we somehow triggered an exception, close everything and throw the exception again
+        case e: Throwable =>
+          remainderBatch.foreach( _.close() )
+          reservoirBuf.foreach( _.close() )
+          throw e
       }
-    }
 
-    (reservoir, inputSize)
+      // closes reservoirBuf
+      val reservoir = ArrowColumnarBatchRow.create(reservoirBuf.toIterator)
+      // add our remainder to the iterator, if there is any
+      val iter: Iterator[ArrowColumnarBatchRow] = remainderBatch.fold(input)( Iterator(_) ++ input )
+      try {
+        // make sure we do not use this batch anymore
+        remainderBatch = None
+
+        // we now have a reservoir with length k, in which we will replace random elements
+        val rand = new XORShiftRandom(seed)
+        def generateRandomNumber(start: Int = 0, end: Int = Integer.MAX_VALUE-1) : Int = {
+          start + rand.nextInt( (end-start) + 1)
+        }
+
+        while (iter.hasNext) {
+          val batch: ArrowColumnarBatchRow = iter.next()
+          try {
+            val start: Int = generateRandomNumber(end = (batch.numRows-1).toInt)
+            val end = generateRandomNumber(start, batch.numRows.toInt)
+            val sample: ArrowColumnarBatchRow = batch.take(start until end)
+            try {
+              0 until sample.numRows.toInt foreach { index =>
+                reservoir.copyAtIndex(batch, generateRandomNumber(end = k-1), index)
+              }
+              inputSize += sample.numRows
+            } finally {
+              sample.close()
+            }
+          } finally {
+            batch.close()
+          }
+        }
+
+        // we have to copy since we want to guarantee to always close reservoir
+        (reservoir.copy(), inputSize)
+      } finally {
+        // if we returned earlier than expected, close the batches in the Iterator
+        iter.foreach( _.close() )
+        reservoir.close()
+      }
+    } finally {
+      // if we somehow returned earlier then expected, close all other batches as well!
+      input.foreach( _.close() )
+    }
   }
 
   /**
