@@ -5,10 +5,11 @@ import org.apache.arrow.vector.BitVectorHelper
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
+import java.io.Closeable
 import scala.collection.immutable.NumericRange
 
 /** Note: TODO: closes first  */
-class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends AutoCloseable {
+class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends Closeable {
   protected var num_bytes = 0L
   protected[column] var size = 0
   protected[column] val columns: Array[ArrowColumnVector] = {

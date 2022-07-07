@@ -80,13 +80,16 @@ class ArrowRangePartitioner[V](
       ((idx, n), sample)
     }
 
+    /** wrapper for case in map */
+    case class extraClass(value: (Int, Long))
+
     // TODO: in map(...), close?
     val sketched = ArrowRDD.collect(
       sketchedRDD,
       extraEncoder = extraEncoder,
       extraDecoder = extraDecoder,
       extraTaker = extraTaker
-    ).map { case (extra: (Int, Long), batch: ArrowColumnarBatchRow) => (extra._1, extra._2, batch) }
+    ).map { case (extra: extraClass, batch: ArrowColumnarBatchRow) => (extra.value._1, extra.value._2, batch) }
     val numItems = sketched.map(_._2).sum
     (numItems, sketched)
   }
@@ -137,10 +140,10 @@ class ArrowRangePartitioner[V](
       var target = step
       // TODO: Close?
       val bounds =  new Array[ArrowColumnarBatchRow](partitions -1)
-      0 until unique.numRows.toInt takeWhile { index =>
+      0 until unique.numRows takeWhile { index =>
         cumWeight += weights.getFloat(index)
         if (cumWeight >= target) {
-          bounds(cumSize) = unique.take(index until index +1)
+          bounds(cumSize) = unique.copy(index until index +1)
           cumSize += 1
           target += step
         }

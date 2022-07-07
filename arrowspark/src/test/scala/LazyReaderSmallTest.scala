@@ -1,4 +1,5 @@
 import io.netty.util.internal.PlatformDependent
+import nl.liacs.mijpelaar.utils.RandomUtils
 import org.apache.arrow.memory.DefaultAllocationManagerOption
 import org.apache.arrow.memory.DefaultAllocationManagerOption.AllocationManagerType
 import org.apache.avro.SchemaBuilder
@@ -25,13 +26,11 @@ class LazyReaderSmallTest extends AnyFunSuite {
   private val schema = SchemaBuilder.builder("simple_double_column")
     .record("record").fields().requiredInt("numA").requiredInt("numB").endRecord()
 
-  private val rnd = scala.util.Random
-  def generateRandomNumber(start: Int = 0, end: Int = Integer.MAX_VALUE-1) : Int = {
-    start + rnd.nextInt( (end-start) + 1)
-  }
+  private val random = new RandomUtils(scala.util.Random)
 
   private val num_cols = 2
   case class Row(var colA: Int, var colB: Int)
+  case class OptInt(num: Option[Int])
 
   def generateParquets(key: Int => Int, randomValue: Boolean, size: Int = default_size): util.List[Row] = {
     val directory = new Directory(new File(directory_name))
@@ -41,7 +40,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
     val records: util.List[GenericData.Record] = new util.ArrayList[GenericData.Record]()
     0 until size foreach { i =>
       val numA: Int = key(i)
-      val numB: Int = if (randomValue) generateRandomNumber() else i*2 + 1
+      val numB: Int = if (randomValue) random.generateRandomNumber() else i*2 + 1
       table.add(Row(numA, numB))
       records.add(new GenericRecordBuilder(schema).set("numA", numA).set("numB", numB).build())
     }
@@ -94,8 +93,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
       val valOne = row.get(0)
       val valTwo = row.get(num_cols-1)
       (valOne, valTwo) match {
-        case (numOne: Option[Int], numTwo: Option[Int]) =>
-          numOne.exists(one => numTwo.isDefined && numTwo.get.equals( one + 1) )
+        case (numOne: OptInt, numTwo: OptInt) =>
+          numOne.num.exists(one => numTwo.num.isDefined && numTwo.num.get.equals( one + 1) )
         case _ => false
       }
     }))
@@ -110,9 +109,10 @@ class LazyReaderSmallTest extends AnyFunSuite {
     assert(0 until size forall { index =>
       val valOne = colOne.get(index)
       val valTwo = colTwo.get(index)
-      (valOne, valTwo) match {
-        case (numOne: Option[Int], numTwo: Option[Int]) =>
-          numOne.exists(one => numTwo.isDefined && numTwo.get.equals( one + 1) )
+      assert(valOne.isDefined)
+      assert(valTwo.isDefined)
+      (valOne.get, valTwo.get) match {
+        case (numOne: Int, numTwo: Int) => numTwo == numOne + 1
         case _ => false
       }
     })
@@ -130,13 +130,14 @@ class LazyReaderSmallTest extends AnyFunSuite {
     0 until size foreach { index =>
       val valOne = colOne.get(index)
       val valTwo = colTwo.get(index)
-      (valOne, valTwo) match {
-        case (numOne: Option[Int], numTwo: Option[Int]) =>
-          assert(numOne.isDefined)
-          val rowIndex = numOne.get
+      assert(valOne.isDefined)
+      assert(valTwo.isDefined)
+      (valOne.get, valTwo.get) match {
+        case (numOne: Int, numTwo: Int) =>
+          val rowIndex = numOne
           assert( rowIndex >= 0 && rowIndex < size )
           val rowValue = table.get(rowIndex).colB
-          numTwo.exists( num => num.equals(rowValue) )
+          numTwo == rowValue
         case _ => false
       }
     }
@@ -150,10 +151,10 @@ class LazyReaderSmallTest extends AnyFunSuite {
       assert(col.length == size)
       0 until size foreach { rowIndex =>
         val value = col.get(rowIndex)
-        value match {
-          case numValue: Option[Int] =>
-            assert(numValue.isDefined)
-            assertResult(table.get(rowIndex).productElement(colIndex))(numValue.get)
+        assert(value.isDefined)
+        value.get match {
+          case numValue: Int =>
+            assertResult(table.get(rowIndex).productElement(colIndex))(numValue)
         }
       }
     }
@@ -253,7 +254,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
   test("Performing single-column ColumnarSort on a simple, random, Dataset using Lazy Reading") {
     // Generate Dataset
-    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true)
+    val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -279,7 +280,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
   test("Performing ColumnarSort on a simple, semi-random, Dataset using Lazy Reading") {
     // Generate Dataset
-    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = false)
+    val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -303,7 +304,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
   test("Performing ColumnarSort on a simple, random, Dataset using Lazy Reading") {
     // Generate Dataset
-    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true)
+    val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -328,7 +329,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
   test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading") {
     // Generate Dataset
     val size = default_size * 15
-    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true, size = size)
+    val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true, size = size)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 
@@ -355,7 +356,7 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
     // Generate Dataset
     val size = default_size * 15
-    val table = generateParquets(key = _ => generateRandomNumber(0, 10), randomValue = true, size = size)
+    val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true, size = size)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
 

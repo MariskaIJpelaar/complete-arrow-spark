@@ -38,7 +38,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
 
     /** Does not consume batch */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
-      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy()))
+      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy())._1)
       root.get
     }
 

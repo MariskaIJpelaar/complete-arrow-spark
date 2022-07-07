@@ -8,6 +8,7 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
 import java.util
 
+/** Methods that convert an ArrowColumnarBatchRows to another type, and taking care of closing of the input */
 object ArrowColumnarBatchRowConverters {
   /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
   private def appendNodes(codec: NoCompressionCodec, rowCount: Long, vector: FieldVector,
@@ -39,12 +40,7 @@ object ArrowColumnarBatchRowConverters {
       val buffers = new util.ArrayList[ArrowBuf]
       val codec = NoCompressionCodec.INSTANCE
 
-      val rowCount: Int = numRows.getOrElse{
-        if (batch.numRows > Integer.MAX_VALUE)
-          throw new RuntimeException("[ArrowColumnarBatchRowConverter::toArrowRecordBatch] too many rows")
-        batch.numRows.toInt
-      }
-
+      val rowCount: Int = numRows.getOrElse(batch.numRows)
       batch.columns.slice(0, numCols) foreach( column =>
         appendNodes(codec, rowCount, column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
       (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
@@ -54,14 +50,35 @@ object ArrowColumnarBatchRowConverters {
   }
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
+   * Returns the root and the number of rows transferred
    * TODO: Caller should close the root */
-  def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): VectorSchemaRoot = {
+  def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): (VectorSchemaRoot, Int) = {
     try {
-      // TODO: s.thing with numRows
+      val rowCount = numRows.getOrElse(batch.numRows)
       val columns = batch.columns.slice(0, numCols.getOrElse(batch.numFields))
-      VectorSchemaRoot.of(columns.map(column => {
-        column.getValueVector.asInstanceOf[FieldVector]
-      }).toSeq: _*)
+      (VectorSchemaRoot.of(columns.map(column => {
+        val vector = column.getValueVector
+        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowConverters::toRoot", 0, Integer.MAX_VALUE))
+        tp.splitAndTransfer(0, rowCount)
+        tp.getTo.asInstanceOf[FieldVector]
+      }).toSeq: _*), rowCount)
+    } finally {
+      batch.close()
+    }
+  }
+
+  /**
+   * Splits a single batch into two
+   * @param batch ArrowColumnarBatchRow to split and close
+   * @param rowIndex index to split on
+   * @return two ArrowColumnarBatchRows split on rowIndex from batch
+   *         If rowIndex > batch.numRows, returns (original-batch, empty-batch)
+   *         TODO: Caller is responsible for closing the batches
+   */
+  def split(batch: ArrowColumnarBatchRow, rowIndex: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
+    try {
+      val splitPoint = rowIndex.min(batch.numRows)
+      (batch.copy(0 until splitPoint), batch.copy(splitPoint until batch.numRows))
     } finally {
       batch.close()
     }
