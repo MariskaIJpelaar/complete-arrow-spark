@@ -1,13 +1,12 @@
 package org.apache.spark.sql.column.utils
 
 import org.apache.arrow.memory.ArrowBuf
-import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorSchemaRoot}
 import org.apache.arrow.vector.compression.{CompressionUtil, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.message.{ArrowFieldNode, ArrowRecordBatch}
+import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorSchemaRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
 import java.util
-import scala.collection.convert.ImplicitConversions.`iterable AsScalaIterable`
 
 object ArrowColumnarBatchRowConverters {
   /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
