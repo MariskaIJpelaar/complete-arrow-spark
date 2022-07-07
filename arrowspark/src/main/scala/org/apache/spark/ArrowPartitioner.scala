@@ -6,6 +6,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowTransformers
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
@@ -120,11 +121,17 @@ class ArrowRangePartitioner[V](
     // we keep the weights by adding them as an extra column to the batch
     var totalRows = 0
     val batches = candidates map { case (batch, weight) =>
-      val weights = new Float4Vector("weights", allocator)
-      weights.setValueCount(batch.numRows.toInt)
-      0 until batch.numRows.toInt foreach { index => weights.set(index, weight) }
-      totalRows += batch.numRows.toInt
-      batch.appendColumns( Array(new ArrowColumnVector(weights)) )
+      try {
+        // TODO: close weights?
+        val weights = new Float4Vector("weights", allocator)
+        weights.setValueCount(batch.numRows)
+        0 until batch.numRows foreach { index => weights.set(index, weight) }
+        totalRows += batch.numRows
+        // consumes batch
+        ArrowColumnarBatchRowTransformers.appendColumns(batch, Array(new ArrowColumnVector(weights)))
+      } finally {
+        batch.close()
+      }
     }
 
     val grouped: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator)._2, totalRows)

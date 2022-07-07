@@ -111,16 +111,6 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   }
 
   /**
-   * @param cols columns to append
-   * @return a fresh batch with appended columns
-   * Note: we assume the columns have as many rows as the batch
-   *
-   * TODO: Caller is responsible for both closing this batch and the new
-   */
-  def appendColumns(cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow =
-    new ArrowColumnarBatchRow(columns ++ cols, numRows)
-
-  /**
    * Splits the current batch on its columns into two batches
    * @param col column index to split on
    * @return a pair of the two batches containing the split columns from this batch
