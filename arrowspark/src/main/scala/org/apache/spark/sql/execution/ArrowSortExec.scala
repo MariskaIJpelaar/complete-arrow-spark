@@ -12,7 +12,7 @@ import java.util
 import scala.collection.mutable.ArrayBuffer
 
 /** copied and adapted from org.apache.spark.sql.execution.SortExec
- * TODO: Caller is responsible for closing returned batches from this plan */
+ * Caller is responsible for closing returned batches from this plan */
 case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: SparkPlan)
   extends UnaryExecNode with BlockingOperatorWithCodegen {
   override def inputRDDs(): Seq[RDD[InternalRow]] = child.asInstanceOf[CodegenSupport].inputRDDs()

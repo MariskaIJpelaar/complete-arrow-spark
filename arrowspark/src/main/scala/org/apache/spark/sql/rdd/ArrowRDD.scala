@@ -46,6 +46,7 @@ object ArrowRDD {
    * @return array of custom-data and batches
    *         Caller should close the batches in the array
    */
+    // TODO: close whatever is in extraEncoder, extraDecoder, extraTaker
   def collect[T: ClassTag](rdd: RDD[T],
                            extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
                            extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch,

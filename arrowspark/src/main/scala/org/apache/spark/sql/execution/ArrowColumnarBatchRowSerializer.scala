@@ -37,7 +37,8 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private var oos: Option[ObjectOutputStream] = None
     private var writer: Option[ArrowStreamWriter] = None
 
-    /** Does not consume batch */
+    /** Does not consume batch
+     * TODO: Caller should close root */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
       // TODO: close root
       if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy())._1)

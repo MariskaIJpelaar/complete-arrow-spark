@@ -8,10 +8,12 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 import java.io.Closeable
 import scala.collection.immutable.NumericRange
 
-/** Note: closes first  */
+/** Note: closes first
+ * TODO: Caller should close after use */
 class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends Closeable {
   protected var num_bytes = 0L
   protected[column] var size = 0
+  // TODO: close columns
   protected[column] val columns: Array[ArrowColumnVector] = {
     try {
       size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE))

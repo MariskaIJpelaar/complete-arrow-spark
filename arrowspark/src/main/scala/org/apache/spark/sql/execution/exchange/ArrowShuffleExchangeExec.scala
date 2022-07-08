@@ -59,6 +59,7 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
     }
   }
 
+  // TODO: Caller should close
   override def getShuffleRDD(partitionSpecs: Array[ShufflePartitionSpec]): RDD[_] = {
     // TODO: Close
     new ShuffledArrowColumnarBatchRowRDD(shuffleDependency, readMetrics, partitionSpecs)
@@ -89,6 +90,7 @@ object ArrowShuffleExchangeExec {
 
     val RangePartitioning(sortingExpressions, numPartitions) = newPartitioning.asInstanceOf[RangePartitioning]
     // Extract only the columns that matter for sorting
+    // TODO: close
     val rddForSampling = rdd.mapPartitionsInternal { iter =>
       // TODO: close when used
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)

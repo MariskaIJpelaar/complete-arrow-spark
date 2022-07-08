@@ -36,7 +36,7 @@ class ArrowRangePartitioner[V](
 
   /** Note: inspiration from: org.apache.spark.RangePartitioner::sketch
    * Collects and cleans the RDD
-   * TODO: Callers should close returned batch */
+   * Callers should close returned batch */
   private def sketch(rdd: RDD[ArrowColumnarBatchRow], sampleSizePerPartition: Int):
   (Long, Array[(Int, Long, ArrowColumnarBatchRow)]) = {
     try {
@@ -49,7 +49,7 @@ class ArrowRangePartitioner[V](
         Iterator((idx, n, sample))
       }
       try {
-        // TODO: Caller is responsible for closing
+        // Caller is responsible for closing
         val extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = item => {
           // TODO: Close?
           val (idx: Int, n: Long, sample: ArrowColumnarBatchRow) = item
@@ -64,7 +64,7 @@ class ArrowRangePartitioner[V](
           (bos.toByteArray, sample)
         }
 
-        // TODO: Caller is responsible for closing batch
+        // Caller is responsible for closing batch
         val extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (array: Array[Byte], batch: ArrowColumnarBatchRow) => {
           val bis = new ByteArrayInputStream(array)
           val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
@@ -78,7 +78,7 @@ class ArrowRangePartitioner[V](
           (idx, n, batch)
         }
 
-        // TODO: Caller is responsible for closing
+        // Caller is responsible for closing
         val extraTaker: Any => (Any, ArrowColumnarBatchRow) = item => {
           // TODO: Close?
           val (idx: Int, n: Long, sample: ArrowColumnarBatchRow) = item
@@ -108,7 +108,7 @@ class ArrowRangePartitioner[V](
 
   /** Note: inspiration from: org.apache.spark.RangePartitioner::determineBounds
    * Closes candidates
-   * TODO: Caller is responsible for closing returned batches */
+   * Caller is responsible for closing returned batches */
   private def determineBounds(
      candidates: ArrayBuffer[(ArrowColumnarBatchRow, Float)],
      partitions: Int): Array[ArrowColumnarBatchRow] = {
@@ -204,6 +204,7 @@ class ArrowRangePartitioner[V](
       // TODO: close decode, take, create
       ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(iter._1))._2)
     }
+    // TODO: close sketched
     val (numItems, sketched) = sketch(decoded, sampleSizePerPartition)
     if (numItems == 0L) Array.empty
 
@@ -239,6 +240,7 @@ class ArrowRangePartitioner[V](
 
     // determine bounds and encode them
     // since we only provide a single Iterator, we can be sure to return the 'first' item from the generated iterator
+    // TODO: Close bounds
     val bounds = determineBounds(candidates, math.min(partitions, candidates.size))
     candidates foreach (_._1.close())
     ArrowColumnarBatchRowEncoders.encode(bounds.toIterator).toArray.apply(0)

@@ -188,6 +188,7 @@ case class ArrowFileSourceStrategy(spark: SparkSession) extends SparkStrategy wi
         None,
         dataFilters,
         table.map(_.identifier))
+      // TODO: close whatever is gathered from scan
       val scan =
         if (fsRelation.fileFormat.isInstanceOf[ArrowFileFormat])
           ArrowCollectExec(ArrowScanExec(scanExec))

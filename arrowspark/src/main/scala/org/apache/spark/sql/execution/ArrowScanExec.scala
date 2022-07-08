@@ -183,6 +183,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     }
   }
 
+  // TODO: close
   lazy val inputRDD: RDD[InternalRow] = {
     // TODO: close batches in iterator
     val root: PartitionedFile => Iterator[ArrowColumnarBatchRow] = fs.relation.fileFormat.asInstanceOf[ArrowFileFormat].buildArrowReaderWithPartitionValues(
