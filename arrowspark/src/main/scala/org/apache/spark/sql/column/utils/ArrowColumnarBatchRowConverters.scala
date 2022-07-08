@@ -10,26 +10,29 @@ import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorSchemaRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
+import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
+
 import java.util
 
 /** Methods that convert an ArrowColumnarBatchRows to another type, and taking care of closing of the input */
 object ArrowColumnarBatchRowConverters {
-  /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
-  private def appendNodes(codec: NoCompressionCodec, rowCount: Long, vector: FieldVector,
-                          nodes: util.List[ArrowFieldNode], buffers: util.List[ArrowBuf]): Unit = {
-    nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
-    val fieldBuffers = vector.getFieldBuffers
-    val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
-    if (fieldBuffers.size != expectedBufferCount)
-      throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
-    fieldBuffers.forEach( buf =>
-      buffers.add(codec.compress(vector.getAllocator
-        .newChildAllocator("ArrowColumnarBatchRowConverters::appendNodes", 0, Integer.MAX_VALUE), buf))
-    )
-    vector.getChildrenFromFields.forEach( child =>
-      appendNodes(codec, rowCount, child, nodes, buffers)
-    )
-  }
+//  /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
+//  private def appendNodes(codec: NoCompressionCodec, rowCount: Long, vector: FieldVector,
+//                          nodes: util.ArrayList[ArrowFieldNode], buffers: util.List[ArrowBuf]): util.ArrayList[ArrowFieldNode] = {
+//    nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
+//    val fieldBuffers = vector.getFieldBuffers
+//    val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
+//    if (fieldBuffers.size != expectedBufferCount)
+//      throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
+//    fieldBuffers.forEach( buf =>
+//      buffers.add(codec.compress(vector.getAllocator
+//        .newChildAllocator("ArrowColumnarBatchRowConverters::appendNodes", 0, Integer.MAX_VALUE), buf))
+//    )
+//    vector.getChildrenFromFields.forEach( child =>
+//      appendNodes(codec, rowCount, child, nodes, buffers)
+//    )
+//    nodes
+//  }
 
   /**
    * copied from org.apache.arrow.vector.VectorUnloader
@@ -45,9 +48,22 @@ object ArrowColumnarBatchRowConverters {
       val buffers = new util.ArrayList[ArrowBuf]
       val codec = NoCompressionCodec.INSTANCE
 
-      val rowCount: Int = numRows.getOrElse(batch.numRows)
-      batch.columns.slice(0, numCols) foreach( column =>
-        appendNodes(codec, rowCount, column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
+      val rowCount = numRows.getOrElse(batch.numRows)
+
+      /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
+      def appendNodes(vector: FieldVector, nodes: util.List[ArrowFieldNode], buffers: util.List[ArrowBuf]): Unit = {
+        nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
+        val fieldBuffers = vector.getFieldBuffers
+        val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
+        if (fieldBuffers.size != expectedBufferCount)
+          throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
+        for (buf <- fieldBuffers)
+          buffers.add(codec.compress(vector.getAllocator, buf))
+        for (child <- vector.getChildrenFromFields)
+          appendNodes(child, nodes, buffers)
+      }
+
+      batch.columns.slice(0, numCols) foreach( column => appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers) )
       (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
     } finally {
       batch.close()

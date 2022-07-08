@@ -114,7 +114,7 @@ object ArrowColumnarBatchRowEncoders {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         new ObjectInputStream(codec.compressedInputStream(bis))
       }
-      private val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRow::decode", 0, Integer.MAX_VALUE)
+      private val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRowEncoders::decode", 0, Integer.MAX_VALUE)
       private val reader = new ArrowStreamReader(ois, allocator)
 
       override protected def getNext(): Any = {

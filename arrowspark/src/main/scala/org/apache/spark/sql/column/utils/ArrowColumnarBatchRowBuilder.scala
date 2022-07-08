@@ -17,10 +17,9 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     try {
       size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE))
 
-      ArrowColumnarBatchRowConverters.makeFresh(
-        ArrowColumnarBatchRowTransformers.take(
-          ArrowColumnarBatchRowTransformers.projection(first, 0 until numCols.getOrElse(first.numFields)),
-          0 until numRows.getOrElse(first.numRows)))
+      ArrowColumnarBatchRowTransformers.take(
+        ArrowColumnarBatchRowTransformers.projection(first, 0 until numCols.getOrElse(first.numFields)),
+        0 until numRows.getOrElse(first.numRows)).columns
     } finally {
       first.close()
     }

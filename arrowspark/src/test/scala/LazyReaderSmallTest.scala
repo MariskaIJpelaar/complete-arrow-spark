@@ -30,7 +30,6 @@ class LazyReaderSmallTest extends AnyFunSuite {
 
   private val num_cols = 2
   case class Row(var colA: Int, var colB: Int)
-  case class OptInt(num: Option[Int])
 
   def generateParquets(key: Int => Int, randomValue: Boolean, size: Int = default_size): util.List[Row] = {
     val directory = new Directory(new File(directory_name))
@@ -93,8 +92,8 @@ class LazyReaderSmallTest extends AnyFunSuite {
       val valOne = row.get(0)
       val valTwo = row.get(num_cols-1)
       (valOne, valTwo) match {
-        case (numOne: OptInt, numTwo: OptInt) =>
-          numOne.num.exists(one => numTwo.num.isDefined && numTwo.num.get.equals( one + 1) )
+        case (numOne: Option[Int], numTwo: Option[Int]) =>
+          numOne.exists(one => numTwo.isDefined && numTwo.get.equals( one + 1) )
         case _ => false
       }
     }))

@@ -71,7 +71,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
       val allocator = vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::copy", 0, Integer.MAX_VALUE)
       val tp = vector.getTransferPair(allocator)
 
-      tp.splitAndTransfer(range.head, range.last)
+      tp.splitAndTransfer(range.head, range.length)
       new ArrowColumnVector(tp.getTo)
     }, range.length)
   }
