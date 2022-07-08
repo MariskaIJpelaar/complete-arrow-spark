@@ -56,17 +56,17 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
         val codes = exprEvals.zipWithIndex map { case(eval, index) =>
           code"""
                 | ${eval.code}
-                | $array[$index] = ($vectorType)((($columnType)(${eval.value}));
+                | $array[$index] = ($vectorType)(($columnType)(${eval.value}));
                 |""".stripMargin
         }
 
-        val arrayType = classOf[Array[ArrowColumnarArray]].getName
-        val batchType = classOf[Array[ArrowColumnarBatchRow]].getName
-        val numRows = s"($array.length > 0) ? $array[0].getValueVector().getValueCount() : 0;"
+        val arrayType = classOf[ArrowColumnarArray].getName
+        val batchType = classOf[ArrowColumnarBatchRow].getName
+        val numRows = s"($array.length > 0) ? $array[0].getValueVector().getValueCount() : 0"
         val code = code"""
-                         | $arrayType $array = new $arrayType(${codes.length})
+                         | $arrayType[] $array = new $arrayType[${codes.length}];
                          | ${codes.map(_.code).mkString("\n")}
-                         | ${ev.value} = new $batchType($array, $numRows)
+                         | $batchType ${ev.value} = new $batchType($array, $numRows);
                          |""".stripMargin
         ev.copy(code = code)
     }
