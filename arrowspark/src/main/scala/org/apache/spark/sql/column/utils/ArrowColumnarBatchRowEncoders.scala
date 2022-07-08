@@ -64,7 +64,7 @@ object ArrowColumnarBatchRowEncoders {
             left = left.map( numLeft => numLeft-firstLength )
 
             // while we still have some reading to do
-            while (iter.hasNext && (left.isEmpty || left.get > 0)) {
+            while (iter.hasNext && left.forall( _ > 0)) {
               val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
               // consumes batch
               val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
@@ -73,7 +73,7 @@ object ArrowColumnarBatchRowEncoders {
                 new VectorLoader(root).load(recordBatch)
                 writer.writeBatch()
                 root.close()
-                oos.writeLong(batchLength)
+                oos.writeInt(batchLength)
                 oos.writeInt(extra.length)
                 oos.write(extra)
                 left = left.map( numLeft => numLeft-batchLength )

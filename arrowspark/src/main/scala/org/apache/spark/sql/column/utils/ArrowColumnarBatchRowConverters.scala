@@ -16,24 +16,6 @@ import java.util
 
 /** Methods that convert an ArrowColumnarBatchRows to another type, and taking care of closing of the input */
 object ArrowColumnarBatchRowConverters {
-//  /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
-//  private def appendNodes(codec: NoCompressionCodec, rowCount: Long, vector: FieldVector,
-//                          nodes: util.ArrayList[ArrowFieldNode], buffers: util.List[ArrowBuf]): util.ArrayList[ArrowFieldNode] = {
-//    nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
-//    val fieldBuffers = vector.getFieldBuffers
-//    val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
-//    if (fieldBuffers.size != expectedBufferCount)
-//      throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
-//    fieldBuffers.forEach( buf =>
-//      buffers.add(codec.compress(vector.getAllocator
-//        .newChildAllocator("ArrowColumnarBatchRowConverters::appendNodes", 0, Integer.MAX_VALUE), buf))
-//    )
-//    vector.getChildrenFromFields.forEach( child =>
-//      appendNodes(codec, rowCount, child, nodes, buffers)
-//    )
-//    nodes
-//  }
-
   /**
    * copied from org.apache.arrow.vector.VectorUnloader
    * Caller should close the ArrowRecordBatch
