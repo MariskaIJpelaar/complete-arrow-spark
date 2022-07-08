@@ -178,7 +178,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       }
 
       override def close(): Unit = {
-        currentIterator.foreach { case batch: ArrowColumnarBatchRow => batch.close() }
+        currentIterator.foreach { case iter: Iterator[ArrowColumnarBatchRow] => iter.foreach(_.close())  }
         incTaskInputMetricsBytesRead()
         InputFileBlockHolder.unset()
         resetCurrentIterator()

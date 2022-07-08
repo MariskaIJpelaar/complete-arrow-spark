@@ -83,7 +83,6 @@ object ArrowColumnarBatchRowEncoders {
             }
             // clean up and return the singleton-iterator
             oos.flush()
-            Iterator(bos.toByteArray)
           } finally {
             writer.close()
           }
@@ -93,6 +92,7 @@ object ArrowColumnarBatchRowEncoders {
       } finally {
         oos.close()
       }
+      Iterator(bos.toByteArray)
     } finally {
       iter.foreach( extraEncoder(_)._2.close() )
     }
