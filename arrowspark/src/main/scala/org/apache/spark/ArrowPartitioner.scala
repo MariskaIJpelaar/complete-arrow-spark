@@ -6,6 +6,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -41,7 +42,7 @@ class ArrowRangePartitioner[V](
     val shift = rdd.id
     val sketchedRDD = rdd.mapPartitionsWithIndex { (idx, iter) =>
       val seed = byteswap32(idx ^ (shift << 16))
-      val (sample, n) = ArrowColumnarBatchRow.sampleAndCount(iter, sampleSizePerPartition, seed)
+      val (sample, n) = ArrowColumnarBatchRowSamplers.sampleAndCount(iter, sampleSizePerPartition, seed)
       Iterator((idx, n, sample))
     }
 
@@ -135,8 +136,8 @@ class ArrowRangePartitioner[V](
     }
 
     val grouped: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(ArrowColumnarBatchRow.take(batches.toIterator)._2, totalRows)
-    val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRow.multiColumnSort(grouped, orders)
-    val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRow.unique(sorted, orders), grouped.numFields-1)
+    val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRowSorters.multiColumnSort(grouped, orders)
+    val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRowDeduplicators.unique(sorted, orders), grouped.numFields-1)
     try {
       // now we gather our bounds
       assert(weighted.numFields == 1)
@@ -208,7 +209,7 @@ class ArrowRangePartitioner[V](
         val batches = iter.map {
           array => ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(array))._2)
         }
-        val sample = ArrowColumnarBatchRow.sample(batches, fraction, seed)
+        val sample = ArrowColumnarBatchRowSamplers.sample(batches, fraction, seed)
         Iterator(sample)}
       val reSampled = ArrowRDD.collect(reSampledRDD)
       val weight = (1.0 / fraction).toFloat

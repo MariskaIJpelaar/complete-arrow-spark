@@ -5,6 +5,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenerator, CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, SortOrder}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowSorters
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.util
@@ -57,6 +58,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val col = ctx.freshName("col")
 
     val staticBatch = classOf[ArrowColumnarBatchRow].getName + "$.MODULE$"
+    val staticSorter = ArrowColumnarBatchRowSorters.getClass.getName + "$.MODULE$"
 
     val code =
       s"""
@@ -69,9 +71,9 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
        |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());
        |    int $col = $thisPlan.attributeReferenceToCol($order);
-       |    $newBatch = $staticBatch.sort($batch, $col, $order);
+       |    $newBatch = $staticSorter.sort($batch, $col, $order);
        |  } else {
-       |    $newBatch = $staticBatch.multiColumnSort($batch, $orders);
+       |    $newBatch = $staticSorter.multiColumnSort($batch, $orders);
        |  }
        |  references[$sortedIdx] = $newBatch;
        |
@@ -105,9 +107,9 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
       val newBatch: ArrowColumnarBatchRow = {
         if (sortOrder.length == 1) {
           val col = attributeReferenceToCol(sortOrder.head)
-          ArrowColumnarBatchRow.sort(batch, col, sortOrder.head)
+          ArrowColumnarBatchRowSorters.sort(batch, col, sortOrder.head)
         } else {
-          ArrowColumnarBatchRow.multiColumnSort(batch, sortOrder)
+          ArrowColumnarBatchRowSorters.multiColumnSort(batch, sortOrder)
         }
       }
       Iterator(newBatch)

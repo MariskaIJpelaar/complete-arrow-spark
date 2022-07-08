@@ -8,6 +8,7 @@ import org.apache.arrow.vector.types.pojo.ArrowType.Struct
 import org.apache.arrow.vector.types.pojo.FieldType
 import org.apache.arrow.vector.{FieldVector, TypeLayout, VectorSchemaRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.util
 
@@ -147,4 +148,28 @@ object ArrowColumnarBatchRowConverters {
     }
   }
 
+  /**
+   * Creates an array of fresh ArrowColumnVectors with the same type as the given batch
+   * @param batch ArrowColumnarBatchRow to create array from and close
+   * @return An array of fresh ArrowColumnVectors from the provided batch
+   *         TODO: Caller is responsible for closing the vectors in the array
+   */
+  def makeFresh(batch: ArrowColumnarBatchRow): Array[ArrowColumnVector] = {
+    try {
+      Array.tabulate[ArrowColumnVector](batch.numFields) { i =>
+        val vector = batch.columns(i).getValueVector
+        val tp = vector.getTransferPair(vector.getAllocator
+          .newChildAllocator("ArrowColumnarBatchRowConverters::makeFresh", 0, Integer.MAX_VALUE))
+        // we 'copy' the content of the first batch ...
+        tp.splitAndTransfer(0, batch.numRows)
+        // ... and re-use the ValueVector so we do not have to determine vector types :)
+        val new_vec = tp.getTo
+        new_vec.clear()
+        new_vec.allocateNew()
+        new ArrowColumnVector(new_vec)
+      }
+    } finally {
+      batch.close()
+    }
+  }
 }

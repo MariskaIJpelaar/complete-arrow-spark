@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.RandomUtils
+import org.apache.arrow.vector.IntVector
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.random.XORShiftRandom
@@ -80,14 +81,54 @@ object ArrowColumnarBatchRowTransformers {
     }
   }
 
-  // TODO: implement
+  /**
+   * Returns a new batch containing the columns with the given names from the given batch
+   * @param batch batch to get columns from and close
+   * @param names columns to get
+   * @return a fresh batch containing the subset of columns with provided names
+   *         TODO: Caller is responsible for closing the batch
+   */
   def getColumns(batch: ArrowColumnarBatchRow, names: Array[String]): ArrowColumnarBatchRow = {
     try {
-      // TODO: use list.flatten to go from List[Options] to List[defined-stuff]
-      val cols = names.map { name =>
-
+      val cols = names.flatMap { name =>
+        batch.columns.find(vector => vector.getValueVector.getName.equals(name))
       }
       new ArrowColumnarBatchRow(cols, batch.numRows)
+    } finally {
+      batch.close()
+    }
+  }
+
+  /**
+   * Creates a new ArrowColumnarBatchRow from the given ArrowColumnarBatchRow,
+   * with rows in order of the provided indices-vector
+   * @param batch ArrowColumnarBatchRow to create new batch from, and close
+   * @param indices IntVector representing the indices to use
+   * @return a new Batch with permuted (subset) of rows from provided batch
+   *         TODO: Caller is responsible for closing returned batch
+   */
+  def applyIndices(batch: ArrowColumnarBatchRow, indices: IntVector): ArrowColumnarBatchRow = {
+    try {
+      assert(indices.getValueCount > 0)
+
+      new ArrowColumnarBatchRow( batch.columns map { column =>
+        val vector = column.getValueVector
+        assert(indices.getValueCount <= vector.getValueCount)
+
+        // transfer type
+        val tp = vector.getTransferPair(vector.getAllocator
+          .newChildAllocator("ArrowColumnarBatchRowTransformers::applyIndices", 0, Integer.MAX_VALUE))
+        tp.splitAndTransfer(0, indices.getValueCount)
+        val new_vector = tp.getTo
+
+        new_vector.setInitialCapacity(indices.getValueCount)
+        new_vector.allocateNew()
+
+        0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
+        new_vector.setValueCount(indices.getValueCount)
+
+        new ArrowColumnVector(new_vector)
+      }, indices.getValueCount)
     } finally {
       batch.close()
     }
