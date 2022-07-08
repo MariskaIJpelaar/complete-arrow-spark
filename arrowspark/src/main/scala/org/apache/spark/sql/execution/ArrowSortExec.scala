@@ -59,7 +59,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val col = ctx.freshName("col")
 
     val staticBatch = classOf[ArrowColumnarBatchRow].getName + "$.MODULE$"
-    val staticSorter = ArrowColumnarBatchRowSorters.getClass.getName + "$.MODULE$"
+    val staticSorter = ArrowColumnarBatchRowSorters.getClass.getName + ".MODULE$"
 
     val code =
       s"""

@@ -50,7 +50,7 @@ object ArrowRDD {
     val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
       if (!it.hasNext) Array.emptyByteArray else it.next()
     })
-    //  FIXME: For now, we assume we do not return too early when building the buf
+    // FIXME: For now, we assume we do not return too early when building the buf
     val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
     res.foreach(result => {
       val decoded = ArrowColumnarBatchRowEncoders.decode(result, extraDecoder = extraDecoder)

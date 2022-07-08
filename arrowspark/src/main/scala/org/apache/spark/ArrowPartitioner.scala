@@ -82,22 +82,16 @@ class ArrowRangePartitioner[V](
       ((idx, n), sample)
     }
 
-    /** wrapper for case in map */
-    case class extraClass(value: (Int, Long))
-
-    val sketchedIter = ArrowRDD.collect(
+    // FIXME: For now, we assume the map does not go wrong
+    val sketched = ArrowRDD.collect(
       sketchedRDD,
       extraEncoder = extraEncoder,
       extraDecoder = extraDecoder,
-      extraTaker = extraTaker
-    ).toIterator
-    try {
-      val sketched = sketchedIter.map { case (extra: extraClass, batch: ArrowColumnarBatchRow) => (extra.value._1, extra.value._2, batch) }
-      val numItems = sketched.map(_._2).sum
-      (numItems, sketched)
-    } finally {
-      sketchedIter.foreach(_._2.close())
+      extraTaker = extraTaker).map { case (extra: (Int, Long), batch: ArrowColumnarBatchRow) =>
+      (extra._1, extra._2, batch)
     }
+    val numItems = sketched.map(_._2).sum
+    (numItems, sketched.toIterator)
   }
 
   /** Note: inspiration from: org.apache.spark.RangePartitioner::determineBounds
@@ -110,7 +104,7 @@ class ArrowRangePartitioner[V](
       assert(partitions - 1 < Integer.MAX_VALUE)
 
       // Checks if we have non-empty batches
-      if (candidates.length < 1) ArrowColumnarBatchRow.empty
+      if (candidates.length < 1) return Array(ArrowColumnarBatchRow.empty)
       var allocatorOption: Option[BufferAllocator] = None
       var i = 0
       while (allocatorOption.isEmpty && i < candidates.size) {
