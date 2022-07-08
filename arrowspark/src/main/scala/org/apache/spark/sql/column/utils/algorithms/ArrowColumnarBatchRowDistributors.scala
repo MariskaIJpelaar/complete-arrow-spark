@@ -3,7 +3,9 @@ package org.apache.spark.sql.column.utils.algorithms
 import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
+import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
+
+import scala.collection.mutable
 
 object ArrowColumnarBatchRowDistributors {
   /**
@@ -38,6 +40,30 @@ object ArrowColumnarBatchRowDistributors {
     } finally {
       key.close()
       rangeBounds.close()
+    }
+  }
+
+  /**
+   * @param key ArrowColumnarBatchRow to distribute and close
+   * @param partitionIds Array containing which row corresponds to which partition
+   * @return A map from partitionId to its corresponding ArrowColumnarBatchRow
+   *
+   * TODO: Caller should close the batches in the returned map
+   */
+  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
+    try {
+      val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
+
+      partitionIds.zipWithIndex foreach { case (partitionId, index) =>
+        if (distributed.contains(partitionId))
+          distributed(partitionId).append(key.copy(index until index+1))
+        else
+          distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key.copy(index until index+1))
+      }
+
+      distributed.map ( items => (items._1, items._2.build()) ).toMap
+    } finally {
+      key.close()
     }
   }
 }

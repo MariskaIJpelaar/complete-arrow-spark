@@ -1,18 +1,12 @@
 package org.apache.spark.sql.column
 
-import org.apache.arrow.algorithm.search.BucketSearcher
-import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, SparkComparator, SparkUnionComparator}
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector._
-import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
-import org.apache.arrow.vector.types.pojo.ArrowType.Struct
-import org.apache.arrow.vector.types.pojo.FieldType
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.column
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters}
@@ -24,7 +18,6 @@ import org.apache.spark.util.NextIterator
 import java.io._
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
-import scala.collection.mutable
 
 // TODO: at some point, we might have to split up functionalities into more files
 // TODO: memory management
@@ -342,30 +335,6 @@ object ArrowColumnarBatchRow {
         ois.close()
         bis.close()
       }
-    }
-  }
-
-  /**
-   * @param key ArrowColumnarBatchRow to distribute and close
-   * @param partitionIds Array containing which row corresponds to which partition
-   * @return A map from partitionId to its corresponding ArrowColumnarBatchRow
-   *
-   * TODO: Caller should close the batches in the returned map
-   */
-  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
-    try {
-      val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
-
-      partitionIds.zipWithIndex foreach { case (partitionId, index) =>
-        if (distributed.contains(partitionId))
-          distributed(partitionId).append(key.copy(index until index+1))
-        else
-          distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key.copy(index until index+1))
-      }
-
-      distributed.map ( items => (items._1, items._2.build()) ).toMap
-    } finally {
-      key.close()
     }
   }
 }

@@ -10,6 +10,7 @@ import org.apache.spark.shuffle.api.{ShuffleExecutorComponents, ShuffleMapOutput
 import org.apache.spark.shuffle.checksum.ShuffleChecksumSupport
 import org.apache.spark.shuffle.{ShuffleWriteMetricsReporter, ShuffleWriter}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowDistributors
 import org.apache.spark.storage.{BlockManager, DiskBlockObjectWriter, FileSegment}
 import org.apache.spark.util.Utils
 import org.slf4j.LoggerFactory
@@ -150,7 +151,7 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
         (key, value) match {
           // TODO: partition close?
           case (partitionIds: Array[Int], partition: ArrowColumnarBatchRow) =>
-            ArrowColumnarBatchRow.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
+            ArrowColumnarBatchRowDistributors.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
               Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
             }
             partition.close()

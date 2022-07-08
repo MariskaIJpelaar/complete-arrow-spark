@@ -6,7 +6,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
+import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -245,8 +245,10 @@ class ArrowRangePartitioner[V](
 
   override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = {
     val ranges = ArrowColumnarBatchRow.create(ArrowColumnarBatchRow.take(ArrowColumnarBatchRow.decode(rangeBounds))._2)
-    val partitionIds = ArrowColumnarBatchRow.bucketDistributor(key, ranges, orders)
-    ranges.close()
-    partitionIds
+    try {
+      ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
+    } finally {
+      ranges.close()
+    }
   }
 }
