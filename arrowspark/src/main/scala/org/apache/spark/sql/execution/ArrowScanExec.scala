@@ -43,7 +43,6 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
   }
 
   // copied and edited from org/apache/spark/sql/execution/DataSourceScanExec.scala
-  // TODO: should close batch in readFunc
   private def createFileScanArrowRDD(readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
                                      selectedPartitions: Array[PartitionDirectory],
                                      fsRelation: HadoopFsRelation): FileScanArrowRDD = {
@@ -86,7 +85,6 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
   }
 
   // copied and edited from org/apache/spark/sql/execution/DataSourceScanExec.scala
-  // TODO: should close batch in ReadFunc
   private def createBucketFileScanArrowRDD(readFunc: PartitionedFile => Iterator[ArrowColumnarBatchRow],
                                            numBuckets: Int,
                                            selectedPartitions: Array[PartitionDirectory]): FileScanArrowRDD  = {
@@ -182,7 +180,6 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
   }
 
   lazy val inputRDD: RDD[InternalRow] = {
-    // TODO: Should close batch
     val root: PartitionedFile => Iterator[ArrowColumnarBatchRow] = fs.relation.fileFormat.asInstanceOf[ArrowFileFormat].buildArrowReaderWithPartitionValues(
       fs.relation.sparkSession, fs.relation.dataSchema, fs.relation.partitionSchema, fs.requiredSchema, pushedDownFilters,
       fs.relation.options,  fs.relation.sparkSession.sessionState.newHadoopConfWithOptions(fs.relation.options)

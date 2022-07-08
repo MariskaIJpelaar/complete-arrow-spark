@@ -86,7 +86,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     code
   }
 
-  // TODO: close?
   override def doConsume(ctx: CodegenContext, input: Seq[ExprCode], row: ExprCode): String = {
     val temp = ctx.freshName("temp")
 

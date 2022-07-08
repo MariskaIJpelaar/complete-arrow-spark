@@ -25,7 +25,6 @@ import scala.reflect.runtime.universe._
  * @param readFunction function to read in a PartitionedArrowFile and convert it to an Iterator of Array[ValueVector]
  * @param filePartitions the partitions to operate on
  *
- * // TODO: close batch in readFunction
  * TODO: Caller should close batch in RDD
  */
 class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
@@ -38,7 +37,6 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
 
   /** TODO: Caller should close batches in iterator */
   override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
-    // TODO: Close?
     val iterator = new Iterator[ArrowColumnarBatchRow] with AutoCloseable {
       private val inputMetrics = context.taskMetrics().inputMetrics
       private val existingBytesRead = inputMetrics.bytesRead
@@ -99,10 +97,10 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             // The readFunction may read some bytes before consuming the iterator, e.g.,
             // vectorized Parquet reader. Here we use a lazily initialized variable to delay the
             // creation of iterator so that we will throw exception in `getNext`.
-            // TODO: Close
             lazy private val internalIter: Iterator[ArrowColumnarBatchRow] = readCurrentFile()
 
-            override def getNext(): AnyRef = {
+            // TODO: Caller should close
+            override def getNext(): ArrowColumnarBatchRow = {
               try {
                 if (internalIter.hasNext) {
                   internalIter.next()
@@ -117,7 +115,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
                   null
                 // Throw FileNotFoundException even if `ignoreCorruptFiles` is true
                 case e: FileNotFoundException if !ignoreMissingFiles => throw e
-                case e @ (_: RuntimeException | _: IOException) if ignoreCorruptFiles =>
+                case e@(_: RuntimeException | _: IOException) if ignoreCorruptFiles =>
                   logWarning(
                     s"Skipped the rest of the content in the corrupted file: $currentFile", e)
                   finished = true

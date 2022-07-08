@@ -2,6 +2,7 @@ package nl.liacs.mijpelaar.evaluation
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column._
+import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.FileWriter
@@ -10,7 +11,7 @@ import scala.reflect.io.Directory
 
 object EvaluationSuite {
   val isSortedBatch: (ArrowColumnarBatchRow, Range) => Boolean = (answer: ArrowColumnarBatchRow, colNrs: Range) => {
-    val columns: Array[ArrowColumnVector] = ArrowColumnarBatchRow.take(Iterator(answer))._2
+    val columns: Array[ArrowColumnVector] = ArrowColumnarBatchRowUtils.take(Iterator(answer))._2
     try {
       var result = true
       if (columns.length <= 0) result = false

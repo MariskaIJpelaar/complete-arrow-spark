@@ -9,6 +9,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBa
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowEncoders
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
 import org.apache.spark.util.MutablePair
@@ -90,7 +91,7 @@ object ArrowShuffleExchangeExec {
       val mutablePair = new MutablePair[Array[Byte], Null]()
       // TODO: Close?
       iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]].map( row => {
-        val ret = mutablePair.update(ArrowColumnarBatchRow.encode(Iterator(projection(row))).toArray.apply(0), null)
+        val ret = mutablePair.update(ArrowColumnarBatchRowEncoders.encode(Iterator(projection(row))).toArray.apply(0), null)
         row.close()
         ret
       })

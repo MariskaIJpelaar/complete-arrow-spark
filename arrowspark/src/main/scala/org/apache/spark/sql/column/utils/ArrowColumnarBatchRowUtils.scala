@@ -1,9 +1,11 @@
 package org.apache.spark.sql.column.utils
 
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, SparkComparator, SparkUnionComparator}
-import org.apache.arrow.vector.ValueVector
+import org.apache.arrow.vector.{ValueVector, ZeroVector}
 import org.apache.arrow.vector.complex.UnionVector
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 /** Methods that do not fit into the other categories */
 object ArrowColumnarBatchRowUtils {
@@ -25,6 +27,54 @@ object ArrowColumnarBatchRowUtils {
           DefaultVectorComparators.createDefaultComparator(valueVector)))
     }
     new SparkUnionComparator(comparators)
+  }
+
+  /**
+   * Returns the merged arrays from multiple ArrowColumnarBatchRows
+   * @param numCols the number of columns to take
+   * @param batches batches to create array from
+   * @return array of merged columns
+   * Closes the batches from the iterator
+   * WARNING: this is an expensive operation, because it copies all data. Use with care!
+   *
+   * Callers can define their own functions to process custom data:
+   * @param extraTaker split the item from the iterator into (customData, batch)
+   * @param extraCollector collect a new item from custom-data, first parameter is new item, second parameter is
+   *                       the result from previous calls, None if there were no previous calls. Result of this function
+   *                       is passed to other calls of extraCollector.
+   * Note: user should close the batch if it consumes it (does not return it)
+   *
+   * TODO: Caller is responsible for closing returned vectors
+   */
+  def take(batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
+           extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
+           extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None): (Any, Array[ArrowColumnVector]) = {
+    if (!batches.hasNext) {
+      if (numCols.isDefined)
+        return (None, Array.tabulate[ArrowColumnVector](numCols.get)(i => new ArrowColumnVector( new ZeroVector(i.toString) ) ))
+      return (None, new Array[ArrowColumnVector](0))
+    }
+
+    try {
+      // get first batch and its extra
+      val (extra, first) = extraTaker(batches.next())
+      // builder consumes batch
+      val builder = new ArrowColumnarBatchRowBuilder(first, numCols, numRows)
+      try {
+        var extraCollected = extraCollector(extra, None)
+        while (batches.hasNext && numRows.forall( num => builder.length < num)) {
+          val (extra, batch) = extraTaker(batches.next())
+          builder.append(batch) // builder consumes batch
+          extraCollected = extraCollector(extra, Option(extraCollected))
+        }
+        (extraCollected, builder.buildColumns())
+      } finally {
+        builder.close()
+      }
+    } finally {
+      /** clear up the remainder */
+      batches.foreach( extraTaker(_)._2.close() )
+    }
   }
 
 }
