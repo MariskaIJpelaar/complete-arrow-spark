@@ -231,7 +231,7 @@ class ArrowRangePartitioner[V](
     // determine bounds and encode them
     // since we only provide a single Iterator, we can be sure to return the 'first' item from the generated iterator
     val bounds = determineBounds(candidates, math.min(partitions, candidates.size))
-    candidates foreach (_._1.close()) // TODO test
+    candidates foreach (_._1.close())
     ArrowColumnarBatchRowEncoders.encode(bounds.toIterator).toArray.apply(0)
   }
 
