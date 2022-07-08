@@ -17,9 +17,9 @@ import org.apache.spark.{ArrowRangePartitioner, MapOutputStatistics, ShuffleDepe
 
 import scala.concurrent.Future
 
-/** copied and adapted from org.apache.spark.sql.execution.exchange.ShuffleExchangeExec */
+/** copied and adapted from org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
+ * caller should close whatever is gathered from this plan */
 case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitioning, child: SparkPlan, shuffleOrigin: ShuffleOrigin = ENSURE_REQUIREMENTS) extends ShuffleExchangeLike {
-  // TODO: should close whatever is deserialized
   private lazy val serializer: Serializer = new ArrowColumnarBatchRowSerializer(Option(longMetric("dataSize")))
 
   private lazy val writeMetrics =
@@ -59,9 +59,8 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
     }
   }
 
-  // TODO: Caller should close
+  // Caller should close
   override def getShuffleRDD(partitionSpecs: Array[ShufflePartitionSpec]): RDD[_] = {
-    // TODO: Close
     new ShuffledArrowColumnarBatchRowRDD(shuffleDependency, readMetrics, partitionSpecs)
   }
 
@@ -71,7 +70,6 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
     Statistics(dataSize, Some(rowCount))
   }
 
-  // TODO: close
   private lazy val cachedShuffleRDD: ShuffledArrowColumnarBatchRowRDD = new ShuffledArrowColumnarBatchRowRDD(shuffleDependency, readMetrics)
   override protected def doExecute(): RDD[InternalRow] = cachedShuffleRDD.asInstanceOf[RDD[InternalRow]]
 
@@ -90,29 +88,34 @@ object ArrowShuffleExchangeExec {
 
     val RangePartitioning(sortingExpressions, numPartitions) = newPartitioning.asInstanceOf[RangePartitioning]
     // Extract only the columns that matter for sorting
-    // TODO: close
     val rddForSampling = rdd.mapPartitionsInternal { iter =>
-      // TODO: close when used
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val mutablePair = new MutablePair[Array[Byte], Null]()
-      // TODO: Close?
       iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]].map( row => {
-        val ret = mutablePair.update(ArrowColumnarBatchRowEncoders.encode(Iterator(projection(row))).toArray.apply(0), null)
-        row.close()
-        ret
+        try {
+          mutablePair.update(ArrowColumnarBatchRowEncoders.encode(Iterator(projection(row))).toArray.apply(0), null)
+        } finally {
+          row.close()
+        }
       })
     }
     val part = new ArrowRangePartitioner(numPartitions, rddForSampling, sortingExpressions, ascending = true)
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
-      // TODO: Close when used
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)
       iter.map { row =>
-        // TODO: Close?
-        val key = getPartitionKey(row).asInstanceOf[ArrowColumnarBatchRow]
-        val partitionIds = part.getPartitions(key)
-        key.close()
-        (partitionIds, row)
+        try {
+          val key = getPartitionKey(row.copy()).asInstanceOf[ArrowColumnarBatchRow]
+          try {
+            (part.getPartitions(key), row.copy())
+          } finally {
+            key.close()
+          }
+        } finally {
+          row match {
+            case closeable: AutoCloseable => closeable.close()
+          }
+        }
       }
     }, isOrderSensitive = false)
 

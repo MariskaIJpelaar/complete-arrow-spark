@@ -29,7 +29,6 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
           val columns = Array.tabulate[ArrowColumnVector](other.length) { i =>
             other(i).eval(batch).asInstanceOf[ArrowColumnarArray].getData
           }
-          // TODO: close create
           ArrowColumnarBatchRow.create(columns)
       }
     case _ => throw new RuntimeException("[ArrowBoundAttribute::eval] only ArrowColumnarBatches are supported")

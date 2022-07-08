@@ -118,7 +118,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
         if (ours.getValueCount != theirs.getValueCount)
           return false
 
-        0 until numRows.toInt foreach { index =>
+        0 until numRows foreach { index =>
           if (ours.hashCode(index) != theirs.hashCode(index))
             return false
         }
@@ -137,7 +137,6 @@ object ArrowColumnarBatchRow {
    * WARNING: uses 'take', a very expensive operation. Use with care!
    * Caller is responsible for closing generated batch */
   def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
-    // TODO: close take, create
     ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(iter)._2)
   }
 

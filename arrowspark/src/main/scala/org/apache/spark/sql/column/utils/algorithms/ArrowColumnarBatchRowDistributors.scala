@@ -20,13 +20,11 @@ object ArrowColumnarBatchRowDistributors {
         return Array.empty
 
       val names: Array[String] = sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name ).toArray
-      // TODO: close keyUnion
       val keyUnion = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(key.copy(), names)
       )
       try {
         val comparator = ArrowColumnarBatchRowUtils.getComparator(keyUnion, sortOrders)
-        // TODO: close rangeUnion
         val rangeUnion = ArrowColumnarBatchRowConverters.toUnionVector(
           ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copy(), names)
         )
@@ -54,6 +52,7 @@ object ArrowColumnarBatchRowDistributors {
    */
   def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
     try {
+      // TODO: close builder if we return earlier than expected
       val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
 
       partitionIds.zipWithIndex foreach { case (partitionId, index) =>
@@ -63,7 +62,6 @@ object ArrowColumnarBatchRowDistributors {
           distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key.copy(index until index+1))
       }
 
-      // TODO: close .build()
       distributed.map ( items => (items._1, items._2.build()) ).toMap
     } finally {
       key.close()

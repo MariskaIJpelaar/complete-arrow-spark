@@ -5,7 +5,7 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.rdd.ArrowRDD
 
-// TODO: Caller should close whatever is collected from plan
+// Caller should close whatever is collected from plan
 case class ArrowCollectExec(child: SparkPlan) extends UnaryExecNode {
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowCollectExec = copy(child = newChild)
 
@@ -13,28 +13,24 @@ case class ArrowCollectExec(child: SparkPlan) extends UnaryExecNode {
 
   override def output: Seq[Attribute] = child.output
 
+  /** Caller should close batches in local iterator */
   override def executeToIterator(): Iterator[InternalRow] = {
     val rdd = execute()
-    // TODO: Close batches in ArrowRDD
     if (rdd.isInstanceOf[ArrowRDD]) rdd.toLocalIterator
-    // TODO: Close toLocalIterator
     else ArrowRDD.toLocalIterator(rdd.asInstanceOf[RDD[ArrowColumnarBatchRow]])
   }
 
+  /** Caller should close batches in Array */
   override def executeCollect(): Array[InternalRow] = {
     val rdd = execute()
-    // TODO: Close batches in ArrowRDD
-    if (rdd.isInstanceOf[ArrowRDD]) rdd.collect()
-    // TODO: Close collect
-    else ArrowRDD.collect(rdd).map(_._2)
+    if (rdd.isInstanceOf[ArrowRDD]) rdd.collect() else ArrowRDD.collect(rdd).map(_._2)
   }
 
+  /** Caller should close batches in Array */
   override def executeTake(n: Int): Array[InternalRow] = {
     val rdd = execute()
     /** Note: no, we cannot replace this by pattern matching */
-    // TODO: Close batches in ArrowRDD + take
     if (rdd.isInstanceOf[ArrowRDD]) return rdd.asInstanceOf[ArrowRDD].take(n).asInstanceOf[Array[InternalRow]]
-    // TODO: Close take
     ArrowRDD.take(n, rdd.asInstanceOf[RDD[ArrowColumnarBatchRow]]).asInstanceOf[Array[InternalRow]]
   }
 }

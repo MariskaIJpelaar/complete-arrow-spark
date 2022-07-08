@@ -10,7 +10,6 @@ object GenerateArrowColumnarBatchRowProjection extends CodeGenerator[Seq[Express
 
   override protected def create(in: Seq[Expression]): Projection = {
     val ctx = newCodeGenContext()
-    // TODO: close generated value
     val eval = ArrowBoundAttribute(in).genCode(ctx)
 
     val specificClass = "SpecificArrowColumnarBatchRowProjection"

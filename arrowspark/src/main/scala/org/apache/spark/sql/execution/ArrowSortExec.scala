@@ -23,12 +23,12 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     child.output.indexWhere(relRef => relRef.name.equals(order.child.asInstanceOf[AttributeReference].name))
   }
 
-  // TODO: close?
+  // FIXME: For now, we assume that we won't return too early, and that partitions will be consumed by create
   private val partitions: scala.collection.mutable.Buffer[ArrowColumnarBatchRow] = new ArrayBuffer[ArrowColumnarBatchRow]()
   private var partitionsIdx: Int = _
   private var thisPartitions: String = _
+  // FIXME: For now, we assume that we won't return too early, and that sortedBatch will be consumed by caller
   private var sortedIdx: Int = _
-  // TODO: close?
   private val sortedBatch: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(Array.empty[ArrowColumnVector], 0)
   private var thisSorted: String = _
 
@@ -101,20 +101,21 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
   // caller is responsible for cleaning ArrowColumnarBatchRows
   override protected def doExecute(): RDD[InternalRow] = {
-    child.execute().mapPartitionsInternal { iter =>
-      // TODO: close batch/ iter
-      val batch = ArrowColumnarBatchRow.create(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
-      val newBatch: ArrowColumnarBatchRow = {
-        if (sortOrder.length == 1) {
-          val col = attributeReferenceToCol(sortOrder.head)
-          // TODO: close
-          ArrowColumnarBatchRowSorters.sort(batch, col, sortOrder.head)
-        } else {
-          // TODO: close
-          ArrowColumnarBatchRowSorters.multiColumnSort(batch, sortOrder)
+    child.execute().mapPartitionsInternal { case item: Iterator[ArrowColumnarBatchRow] =>
+      val batch = ArrowColumnarBatchRow.create(item)
+      try {
+        val newBatch: ArrowColumnarBatchRow = {
+          if (sortOrder.length == 1) {
+            val col = attributeReferenceToCol(sortOrder.head)
+            ArrowColumnarBatchRowSorters.sort(batch, col, sortOrder.head)
+          } else {
+            ArrowColumnarBatchRowSorters.multiColumnSort(batch, sortOrder)
+          }
         }
+        Iterator(newBatch)
+      } finally {
+        batch.close()
       }
-      Iterator(newBatch)
     }
   }
 

@@ -34,6 +34,7 @@ trait ArrowFileFormat extends FileFormat {
   }
 }
 
+/** Caller should close whatever is gathered from this plan */
 case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with Logging {
   // copied from org/apache/spark/sql/execution/DataSourceScanExec.scala
   @transient
@@ -82,7 +83,6 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     val partitions =
       FilePartition.getFilePartitions(fs.relation.sparkSession, splitFiles, maxSplitBytes)
 
-    // TODO: close batches in RDD
     new FileScanArrowRDD(fsRelation.sparkSession, readFunc, partitions)
   }
 
@@ -128,7 +128,6 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
       }
     }
 
-    // TODO: Close batches in RDD
     new FileScanArrowRDD(fs.relation.sparkSession, readFunc, filePartitions)
   }
 
@@ -183,20 +182,15 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     }
   }
 
-  // TODO: close
   lazy val inputRDD: RDD[InternalRow] = {
-    // TODO: close batches in iterator
-    val root: PartitionedFile => Iterator[ArrowColumnarBatchRow] = fs.relation.fileFormat.asInstanceOf[ArrowFileFormat].buildArrowReaderWithPartitionValues(
+    val readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow] = fs.relation.fileFormat.asInstanceOf[ArrowFileFormat].buildArrowReaderWithPartitionValues(
       fs.relation.sparkSession, fs.relation.dataSchema, fs.relation.partitionSchema, fs.requiredSchema, pushedDownFilters,
       fs.relation.options,  fs.relation.sparkSession.sessionState.newHadoopConfWithOptions(fs.relation.options)
     )
-    if (fs.bucketedScan) {
-      // TODO: close
-      createBucketFileScanArrowRDD(root, fs.relation.bucketSpec.get.numBuckets, dynamicallySelectedPartitions).asInstanceOf[RDD[InternalRow]]
-    } else {
-      // TODO: close
-      createFileScanArrowRDD(root, dynamicallySelectedPartitions, fs.relation).asInstanceOf[RDD[InternalRow]]
-    }
+    if (fs.bucketedScan)
+      createBucketFileScanArrowRDD(readFunction, fs.relation.bucketSpec.get.numBuckets, dynamicallySelectedPartitions).asInstanceOf[RDD[InternalRow]]
+    else
+      createFileScanArrowRDD(readFunction, dynamicallySelectedPartitions, fs.relation).asInstanceOf[RDD[InternalRow]]
   }
 
   override def relation: BaseRelation = fs.relation
@@ -205,8 +199,10 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
 
   override protected def metadata: Map[String, String] = fs.metadata
 
+  /** Caller should close returned InternalRow */
   override def inputRDDs(): Seq[RDD[InternalRow]] = inputRDD :: Nil
 
+  /** Caller should close returned InternalRow */
   override protected def doExecute(): RDD[InternalRow] = inputRDD
 
   override def output: Seq[Attribute] = fs.output

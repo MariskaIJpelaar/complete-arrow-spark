@@ -11,7 +11,6 @@ import scala.reflect.io.Directory
 
 object EvaluationSuite {
   val isSortedBatch: (ArrowColumnarBatchRow, Range) => Boolean = (answer: ArrowColumnarBatchRow, colNrs: Range) => {
-    // TODO: close columns
     val columns: Array[ArrowColumnVector] = ArrowColumnarBatchRowUtils.take(Iterator(answer))._2
     try {
       var result = true
@@ -19,7 +18,7 @@ object EvaluationSuite {
       else if (answer.numRows == 1) result = true
       else if (columns.exists( col => col.getValueVector.getValueCount != answer.numRows )) result = false
       else {
-        1 until answer.numRows.toInt foreach { rowIndex =>
+        1 until answer.numRows foreach { rowIndex =>
           colNrs.takeWhile { colIndex =>
             val numOne = columns(colIndex).getInt(rowIndex - 1)
             val numTwo = columns(colIndex).getInt(rowIndex)

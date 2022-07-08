@@ -24,8 +24,6 @@ case class ArrowBasicOperators(spark: SparkSession) extends ArrowSparkStrategy {
         val distribution = physical.OrderedDistribution(order)
         val numPartitions = distribution.requiredNumPartitions.getOrElse(SQLConf.get.numShufflePartitions)
         val shuffleChild: SparkPlan = ArrowShuffleExchangeExec(distribution.createPartitioning(numPartitions), planLater(child), ENSURE_REQUIREMENTS)
-        // TODO: ArrowCollectExec should close ArrowSortExec
-        // TODO: Close whatever is collected from ArrowCollectExec
         ArrowCollectExec(ArrowSortExec(order, global, shuffleChild)) :: Nil
       case _ => Nil
     }

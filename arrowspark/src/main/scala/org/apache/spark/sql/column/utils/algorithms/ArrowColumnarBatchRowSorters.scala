@@ -29,7 +29,6 @@ object ArrowColumnarBatchRowSorters {
       val indices = new IntVector("indexHolder", indexAllocator)
 
       // UnionVector representing our batch with columns from sortOrder
-      // TODO: close union
       val union = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(batch.copy(),
           sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))

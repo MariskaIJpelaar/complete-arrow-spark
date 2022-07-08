@@ -59,7 +59,6 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       private[this] var currentIterator : Option[Iterator[Object]] = None
 
       private def resetCurrentIterator(): Unit = {
-        // TODO: close
         currentIterator.getOrElse(Nil) match {
           case iter: NextIterator[_] =>
             iter.closeIfNeeded()
@@ -98,7 +97,6 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             // The readFunction may read some bytes before consuming the iterator, e.g.,
             // vectorized Parquet reader. Here we use a lazily initialized variable to delay the
             // creation of iterator so that we will throw exception in `getNext`.
-            // TODO: close
             lazy private val internalIter: Iterator[ArrowColumnarBatchRow] = readCurrentFile()
 
             // Caller should close
@@ -134,7 +132,6 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             }
           })
         } else {
-          // TODO: Close
           currentIterator = Option(readCurrentFile())
         }
 
@@ -168,18 +165,20 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
 
       // Caller should close
       override def next(): ArrowColumnarBatchRow = {
-        // TODO: close nextElement
-        val nextElement = currentIterator.get.next()
-        incTaskInputMetricsBytesRead()
-        nextElement match {
-          // TODO: partition close?
+        currentIterator.get.next() match {
           case partition: ArrowColumnarBatchRow =>
-            inputMetrics.incRecordsRead(partition.numFields)
-            partition
+            try {
+              inputMetrics.incRecordsRead(partition.numFields)
+              incTaskInputMetricsBytesRead()
+              partition.copy()
+            } finally {
+              partition.close()
+            }
         }
       }
 
       override def close(): Unit = {
+        currentIterator.foreach { case batch: ArrowColumnarBatchRow => batch.close() }
         incTaskInputMetricsBytesRead()
         InputFileBlockHolder.unset()
         resetCurrentIterator()

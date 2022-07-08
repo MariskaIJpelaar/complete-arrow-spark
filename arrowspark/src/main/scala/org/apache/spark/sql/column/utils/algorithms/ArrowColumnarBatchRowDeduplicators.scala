@@ -21,7 +21,6 @@ object ArrowColumnarBatchRowDeduplicators {
 
     try {
       // UnionVector representing our batch
-      // TODO: close union
       val union = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(batch.copy(),
           sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray)

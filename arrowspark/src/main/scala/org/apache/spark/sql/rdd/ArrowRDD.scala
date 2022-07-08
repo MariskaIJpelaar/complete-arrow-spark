@@ -25,15 +25,10 @@ object ArrowRDD {
   /** Returns a local iterator for each partition
    * Caller should cose batches in the returned iterator */
   def toLocalIterator(rdd: RDD[ArrowColumnarBatchRow]): Iterator[ArrowColumnarBatchRow] = {
-    try {
-      val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRowEncoders.encode(res))
-      childRDD.toLocalIterator.flatMap( result =>
-        // TODO: close
-        ArrowColumnarBatchRowEncoders.decode(result).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
-      )
-    } finally {
-      rdd.foreach(_.close())
-    }
+    val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRowEncoders.encode(res))
+    childRDD.toLocalIterator.flatMap( result =>
+      ArrowColumnarBatchRowEncoders.decode(result).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
+    )
   }
 
   /**
@@ -46,83 +41,70 @@ object ArrowRDD {
    * @return array of custom-data and batches
    *         Caller should close the batches in the array
    */
-    // TODO: close whatever is in extraEncoder, extraDecoder, extraTaker
   def collect[T: ClassTag](rdd: RDD[T],
                            extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
                            extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch,
                            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]))
                           (implicit ct: ClassTag[T]): Array[(Any, ArrowColumnarBatchRow)] = {
-    try {
-      val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRowEncoders.encode(res, extraEncoder = extraEncoder)}
-      val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
-        if (!it.hasNext) Array.emptyByteArray else it.next()
-      })
-      // TODO: Close!
-      val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
-      res.foreach(result => {
-        // TODO: close decode
-        val decoded = ArrowColumnarBatchRowEncoders.decode(result, extraDecoder = extraDecoder)
-        buf ++= decoded.map( item => extraTaker(item) )
-      })
-      buf.toArray
-    } finally {
-      rdd.foreach(extraTaker(_)._2.close())
-    }
+    val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRowEncoders.encode(res, extraEncoder = extraEncoder)}
+    val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
+      if (!it.hasNext) Array.emptyByteArray else it.next()
+    })
+    //  FIXME: For now, we assume we do not return too early when building the buf
+    val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
+    res.foreach(result => {
+      val decoded = ArrowColumnarBatchRowEncoders.decode(result, extraDecoder = extraDecoder)
+      buf ++= decoded.map( item => extraTaker(item) )
+    })
+    buf.toArray
   }
 
   /** Note: copied and adapted from RDD.scala
    * batches in RDD are consumed (closed)
    * Caller should close returned batches */
   def take(num: Int, rdd: RDD[ArrowColumnarBatchRow]): Array[ArrowColumnarBatchRow] = {
-    try {
-      if (num == 0) new Array[ArrowColumnarBatchRow](0)
+    if (num == 0) new Array[ArrowColumnarBatchRow](0)
 
-      val scaleUpFactor = Math.max(rdd.conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
-      // TODO: Close
-      val buf = new ArrayBuffer[ArrowColumnarBatchRow]
-      val totalParts = rdd.partitions.length
-      var partsScanned = 0
-      // TODO: Close res
-      val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRowEncoders.encode(res, numRows = Option(num)) }
+    val scaleUpFactor = Math.max(rdd.conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
+    // FIXME: For now, we assume we do not return too early
+    val buf = new ArrayBuffer[ArrowColumnarBatchRow]
+    val totalParts = rdd.partitions.length
+    var partsScanned = 0
+    val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRowEncoders.encode(res, numRows = Option(num)) }
 
-      while (buf.size < num && partsScanned < totalParts) {
-        // The number of partitions to try in this iteration. It is ok for this number to be
-        // greater than totalParts because we actually cap it at totalParts in runJob.
-        var numPartsToTry = 1L
-        val left = num - buf.size
-        if (partsScanned > 0) {
-          // If we didn't find any rows after the previous iteration, quadruple and retry.
-          // Otherwise, interpolate the number of partitions we need to try, but overestimate
-          // it by 50%. We also cap the estimation in the end.
-          if (buf.isEmpty) {
-            numPartsToTry = partsScanned * scaleUpFactor
-          } else {
-            // As left > 0, numPartsToTry is always >= 1
-            numPartsToTry = Math.ceil(1.5 * left * partsScanned / buf.size).toInt
-            numPartsToTry = Math.min(numPartsToTry, partsScanned * scaleUpFactor)
-          }
+    while (buf.size < num && partsScanned < totalParts) {
+      // The number of partitions to try in this iteration. It is ok for this number to be
+      // greater than totalParts because we actually cap it at totalParts in runJob.
+      var numPartsToTry = 1L
+      val left = num - buf.size
+      if (partsScanned > 0) {
+        // If we didn't find any rows after the previous iteration, quadruple and retry.
+        // Otherwise, interpolate the number of partitions we need to try, but overestimate
+        // it by 50%. We also cap the estimation in the end.
+        if (buf.isEmpty) {
+          numPartsToTry = partsScanned * scaleUpFactor
+        } else {
+          // As left > 0, numPartsToTry is always >= 1
+          numPartsToTry = Math.ceil(1.5 * left * partsScanned / buf.size).toInt
+          numPartsToTry = Math.min(numPartsToTry, partsScanned * scaleUpFactor)
         }
-
-        val p = partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
-        val res = childRDD.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
-          if (!it.hasNext) Array.emptyByteArray else it.next()
-        }, p)
-
-        res.foreach(result => {
-          // NOTE: we require the 'take', because we do not want more than num numRows
-          // TODO: close create
-          buf += ArrowColumnarBatchRow.create(
-            // TODO: close decode, take
-            ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))._2)
-        })
-
-        partsScanned += p.size
       }
 
-      buf.toArray
-    } finally {
-      rdd.foreach(_.close())
+      val p = partsScanned.until(math.min(partsScanned + numPartsToTry, totalParts).toInt)
+      val res = childRDD.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
+        if (!it.hasNext) Array.emptyByteArray else it.next()
+      }, p)
+
+      res.foreach(result => {
+        // NOTE: we require the 'take', because we do not want more than num numRows
+        buf += ArrowColumnarBatchRow.create(
+          ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))._2)
+      })
+
+      partsScanned += p.size
     }
+
+    buf.toArray
   }
 
 }

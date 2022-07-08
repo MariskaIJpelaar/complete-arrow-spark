@@ -149,13 +149,14 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
         val (key, value) = records.next()
         // In case of ArrowPartition: key = FilePartition, value = ArrowColumnarBatchRow
         (key, value) match {
-          // TODO: partition close?
           case (partitionIds: Array[Int], partition: ArrowColumnarBatchRow) =>
-            // TODO: close
-            ArrowColumnarBatchRowDistributors.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
-              Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
+            try {
+              ArrowColumnarBatchRowDistributors.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
+                Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
+              }
+            } finally {
+              partition.close()
             }
-            partition.close()
           case _ => partitionWriters.get(partitioner.getPartition(key)).write(key, value)
         }
       }

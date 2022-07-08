@@ -50,7 +50,6 @@ object ArrowColumnarBatchRowEncoders {
         // This needs to be done separately as we need the schema for the VectorSchemaRoot
         val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
         // consumes first
-        // TODO: close root
         val (root, firstLength) = ArrowColumnarBatchRowConverters.toRoot(first, numCols, numRows)
         try {
           val writer = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
@@ -68,7 +67,6 @@ object ArrowColumnarBatchRowEncoders {
             while (iter.hasNext && (left.isEmpty || left.get > 0)) {
               val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
               // consumes batch
-              // TODO: close recordBatch
               val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
                 ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
               try {

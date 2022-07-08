@@ -37,10 +37,8 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private var oos: Option[ObjectOutputStream] = None
     private var writer: Option[ArrowStreamWriter] = None
 
-    /** Does not consume batch
-     * TODO: Caller should close root */
+    /** Does not consume batch */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
-      // TODO: close root
       if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy())._1)
       root.get
     }
@@ -59,7 +57,6 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private def getWriter(batch: ArrowColumnarBatchRow): ArrowStreamWriter = {
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
-        // TODO: close recordBatch
         val recordBatch: ArrowRecordBatch =
           ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
         try {
@@ -71,7 +68,6 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
       }
 
-      // TODO: close recordBatch
       val recordBatch: ArrowRecordBatch =
         ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
       try {
@@ -83,13 +79,15 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     }
 
     override def writeValue[T](value: T)(implicit evidence$6: ClassTag[T]): SerializationStream = {
-      // TODO: CLose?
       val batch = value.asInstanceOf[ArrowColumnarBatchRow]
-      dataSize.foreach( metric => metric.add(batch.getSizeInBytes))
+      try {
+        dataSize.foreach( metric => metric.add(batch.getSizeInBytes))
 
-      getWriter(batch).writeBatch()
-      getOos.writeInt(batch.numRows)
-
+        getWriter(batch).writeBatch()
+        getOos.writeInt(batch.numRows)
+      } finally {
+        batch.close()
+      }
       this
     }
     override def writeKey[T](key: T)(implicit evidence$5: ClassTag[T]): SerializationStream = this

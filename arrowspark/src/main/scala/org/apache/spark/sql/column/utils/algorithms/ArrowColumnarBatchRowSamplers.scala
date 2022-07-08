@@ -24,29 +24,37 @@ object ArrowColumnarBatchRowSamplers {
     try {
       // The first batch should be separate, so we can determine the vector-types
       val first = input.next()
-      // TODO: close array
-      val array = ArrowColumnarBatchRowConverters.makeFresh(first.copy())
       val iter = Iterator(first) ++ input
-      val rand = new XORShiftRandom(seed)
-      var i = 0
-      while (iter.hasNext) {
-        val batch = iter.next()
+      try {
+        val array = ArrowColumnarBatchRowConverters.makeFresh(first.copy())
         try {
-          batch.columns.foreach( col => assert(col.getValueVector.getValueCount == batch.numRows) )
+          val rand = new XORShiftRandom(seed)
+          var i = 0
+          while (iter.hasNext) {
+            val batch = iter.next()
+            try {
+              batch.columns.foreach( col => assert(col.getValueVector.getValueCount == batch.numRows) )
 
-          0 until batch.numRows foreach { index =>
-            // do sample
-            if (rand.nextDouble() <= fraction) {
-              array zip batch.columns foreach { case (ours, theirs) => ours.getValueVector.copyFromSafe(index, i, theirs.getValueVector)}
-              i += 1
+              0 until batch.numRows foreach { index =>
+                // do sample
+                if (rand.nextDouble() <= fraction) {
+                  array zip batch.columns foreach { case (ours, theirs) => ours.getValueVector.copyFromSafe(index, i, theirs.getValueVector)}
+                  i += 1
+                }
+              }
+            } finally {
+              batch.close()
             }
           }
+          array foreach ( column => column.getValueVector.setValueCount(i) )
+          // we copy to ensure we can close the array whenever we need to return early
+          new ArrowColumnarBatchRow(array, i).copy()
         } finally {
-          batch.close()
+          array.foreach( _.close() )
         }
+      } finally {
+        iter.foreach( _.close() )
       }
-      array foreach ( column => column.getValueVector.setValueCount(i) )
-      new ArrowColumnarBatchRow(array, i)
     } finally {
       input.foreach( _.close() )
     }
@@ -76,10 +84,8 @@ object ArrowColumnarBatchRowSamplers {
       try {
         while (inputSize < k) {
           // ArrowColumnarBatchRow.create consumes the batches
-          // TODO: close create
           if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
 
-          // TODO: close batches
           val (batchOne, batchTwo): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) =
             ArrowColumnarBatchRowConverters.split(input.next(), (k-inputSize).toInt)
           // consume them
@@ -90,34 +96,36 @@ object ArrowColumnarBatchRowSamplers {
         }
 
         // closes reservoirBuf
-        // TODO: close reservoir
         val reservoir = ArrowColumnarBatchRow.create(reservoirBuf.toIterator)
-        // add our remainder to the iterator, if there is any
-        val iter: Iterator[ArrowColumnarBatchRow] = remainderBatch.fold(input)( Iterator(_) ++ input )
         try {
-          // make sure we do not use this batch anymore
-          remainderBatch = None
+          // add our remainder to the iterator, if there is any
+          val iter: Iterator[ArrowColumnarBatchRow] = remainderBatch.fold(input)( Iterator(_) ++ input )
+          try {
+            // make sure we do not use this batch anymore
+            remainderBatch = None
 
-          // we now have a reservoir with length k, in which we will replace random elements
-          val rand = new RandomUtils(new XORShiftRandom(seed))
+            // we now have a reservoir with length k, in which we will replace random elements
+            val rand = new RandomUtils(new XORShiftRandom(seed))
 
-          while (iter.hasNext) {
-            val sample = ArrowColumnarBatchRowTransformers.sample(iter.next(), seed)
-            try {
-              0 until sample.numRows foreach { index =>
-                reservoir.copyAtIndex(sample, rand.generateRandomNumber(end = k-1), index)
+            while (iter.hasNext) {
+              val sample = ArrowColumnarBatchRowTransformers.sample(iter.next(), seed)
+              try {
+                0 until sample.numRows foreach { index =>
+                  reservoir.copyAtIndex(sample, rand.generateRandomNumber(end = k-1), index)
+                }
+                inputSize += sample.numRows
+              } finally {
+                sample.close()
               }
-              inputSize += sample.numRows
-            } finally {
-              sample.close()
             }
-          }
 
-          // we have to copy since we want to guarantee to always close reservoir
-          (reservoir.copy(), inputSize)
+            // we have to copy since we want to guarantee to always close reservoir
+            (reservoir.copy(), inputSize)
+          } finally {
+            // if we returned earlier than expected, close the batches in the Iterator
+            iter.foreach( _.close() )
+          }
         } finally {
-          // if we returned earlier than expected, close the batches in the Iterator
-          iter.foreach( _.close() )
           reservoir.close()
         }
       } finally {
