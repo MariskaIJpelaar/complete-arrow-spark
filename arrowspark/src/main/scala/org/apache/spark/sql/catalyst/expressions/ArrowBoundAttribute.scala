@@ -19,7 +19,7 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
   private case class BoundReferenceSeq(value: Seq[BoundReference])
 
   /** Note: consumes input
-   * TODO: Caller should close returned batch */
+   * Caller should close returned batch */
   override def eval(input: InternalRow): ArrowColumnarBatchRow = input match {
     case batch: ArrowColumnarBatchRow =>
       expressions match {
@@ -29,13 +29,14 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
           val columns = Array.tabulate[ArrowColumnVector](other.length) { i =>
             other(i).eval(batch).asInstanceOf[ArrowColumnarArray].getData
           }
+          // TODO: close create
           ArrowColumnarBatchRow.create(columns)
       }
     case _ => throw new RuntimeException("[ArrowBoundAttribute::eval] only ArrowColumnarBatches are supported")
   }
 
   /** Note: closes input
-   * TODO: Caller is responsible for closing ev.value */
+   * Caller is responsible for closing ev.value */
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
     expressions match {
       case references: BoundReferenceSeq =>

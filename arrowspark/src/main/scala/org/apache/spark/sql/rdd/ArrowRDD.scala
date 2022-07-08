@@ -8,54 +8,70 @@ import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowCo
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
-// TODO: Caller should close shit here!
+// Caller should close batches in RDD
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
-  override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this).map(_._2) // TODO: Caller close
-  override def take(num: Int): Array[ArrowColumnarBatchRow] = ArrowRDD.take(num, this) // TODO: Caller Close
-  override def toLocalIterator: Iterator[ArrowColumnarBatchRow] = ArrowRDD.toLocalIterator(this) // TODO: Caller Close
+  // Caller should close returned batches
+  // Closes the batches in the RDD
+  override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this).map(_._2)
+  // Caller should close returned batches
+  // Closes the batches in the RDD
+  override def take(num: Int): Array[ArrowColumnarBatchRow] = ArrowRDD.take(num, this)
+  // Caller should close returned batches
+  // Closes the batches in the RDD
+  override def toLocalIterator: Iterator[ArrowColumnarBatchRow] = ArrowRDD.toLocalIterator(this)
 }
 
 object ArrowRDD {
-  /** Returns a local iterator for each partition */
-    // TODO: Caller should close
-  def toLocalIterator[T](rdd: RDD[T]): Iterator[T] = {
-    val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRowEncoders.encode(res))
-    childRDD.toLocalIterator.flatMap( result =>
-      ArrowColumnarBatchRowEncoders.decode(result).asInstanceOf[Iterator[T]]
-    )
+  /** Returns a local iterator for each partition
+   * Caller should cose batches in the returned iterator */
+  def toLocalIterator(rdd: RDD[ArrowColumnarBatchRow]): Iterator[ArrowColumnarBatchRow] = {
+    try {
+      val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRowEncoders.encode(res))
+      childRDD.toLocalIterator.flatMap( result =>
+        // TODO: close
+        ArrowColumnarBatchRowEncoders.decode(result).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
+      )
+    } finally {
+      rdd.foreach(_.close())
+    }
   }
 
   /**
-   * TODO: Caller should close
    * Collect utility for rdds that contain ArrowColumnarBatchRows. Users can pass optional functions to process data
    * if the rdd has more complex data than only ArrowColumnarBatchRows
-   * @param rdd rdd with the batches
+   * @param rdd rdd with the batches, which is also closed
    * @param extraEncoder (optional) split item into encoded custom-data and a batch
    * @param extraDecoder (optional) decode an array of bytes to custom-data and a batch to a single instance
    * @param extraTaker (optional) split the item from the iterator into (customData, batch)
    * @return array of custom-data and batches
+   *         Caller should close the batches in the array
    */
   def collect[T: ClassTag](rdd: RDD[T],
                            extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
                            extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch,
                            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]))
                           (implicit ct: ClassTag[T]): Array[(Any, ArrowColumnarBatchRow)] = {
-    val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRowEncoders.encode(res, extraEncoder = extraEncoder)}
-    val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
-      if (!it.hasNext) Array.emptyByteArray else it.next()
-    })
-    // TODO: Close!
-    val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
-    res.foreach(result => {
-      val decoded = ArrowColumnarBatchRowEncoders.decode(result, extraDecoder = extraDecoder)
-      buf ++= decoded.map( item => extraTaker(item) )
-    })
-    buf.toArray
+    try {
+      val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRowEncoders.encode(res, extraEncoder = extraEncoder)}
+      val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
+        if (!it.hasNext) Array.emptyByteArray else it.next()
+      })
+      // TODO: Close!
+      val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
+      res.foreach(result => {
+        // TODO: close decode
+        val decoded = ArrowColumnarBatchRowEncoders.decode(result, extraDecoder = extraDecoder)
+        buf ++= decoded.map( item => extraTaker(item) )
+      })
+      buf.toArray
+    } finally {
+      rdd.foreach(extraTaker(_)._2.close())
+    }
   }
 
   /** Note: copied and adapted from RDD.scala
    * batches in RDD are consumed (closed)
-   * TODO: Caller should close */
+   * Caller should close returned batches */
   def take(num: Int, rdd: RDD[ArrowColumnarBatchRow]): Array[ArrowColumnarBatchRow] = {
     try {
       if (num == 0) new Array[ArrowColumnarBatchRow](0)
@@ -93,7 +109,9 @@ object ArrowRDD {
 
         res.foreach(result => {
           // NOTE: we require the 'take', because we do not want more than num numRows
+          // TODO: close create
           buf += ArrowColumnarBatchRow.create(
+            // TODO: close decode, take
             ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))._2)
         })
 

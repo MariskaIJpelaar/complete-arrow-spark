@@ -25,7 +25,7 @@ import scala.reflect.runtime.universe._
  * @param readFunction function to read in a PartitionedArrowFile and convert it to an Iterator of Array[ValueVector]
  * @param filePartitions the partitions to operate on
  *
- * TODO: Caller should close batch in RDD
+ * Caller should close batch in RDD
  */
 class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
                                      readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow],
@@ -35,7 +35,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
 
-  /** TODO: Caller should close batches in iterator */
+  /** Caller should close batches in iterator */
   override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
     val iterator = new Iterator[ArrowColumnarBatchRow] with AutoCloseable {
       private val inputMetrics = context.taskMetrics().inputMetrics
@@ -59,6 +59,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       private[this] var currentIterator : Option[Iterator[Object]] = None
 
       private def resetCurrentIterator(): Unit = {
+        // TODO: close
         currentIterator.getOrElse(Nil) match {
           case iter: NextIterator[_] =>
             iter.closeIfNeeded()
@@ -69,7 +70,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
         currentIterator = None
       }
 
-      // TODO: Caller should close
+      // Caller should close
       private def readCurrentFile(): Iterator[ArrowColumnarBatchRow] = {
         try {
           readFunction(currentFile.get)
@@ -97,9 +98,10 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             // The readFunction may read some bytes before consuming the iterator, e.g.,
             // vectorized Parquet reader. Here we use a lazily initialized variable to delay the
             // creation of iterator so that we will throw exception in `getNext`.
+            // TODO: close
             lazy private val internalIter: Iterator[ArrowColumnarBatchRow] = readCurrentFile()
 
-            // TODO: Caller should close
+            // Caller should close
             override def getNext(): ArrowColumnarBatchRow = {
               try {
                 if (internalIter.hasNext) {
@@ -132,6 +134,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             }
           })
         } else {
+          // TODO: Close
           currentIterator = Option(readCurrentFile())
         }
 
@@ -163,8 +166,9 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
         (currentIterator.isDefined && currentIterator.get.hasNext) || nextIterator()
       }
 
-      // TODO: Caller should close
+      // Caller should close
       override def next(): ArrowColumnarBatchRow = {
+        // TODO: close nextElement
         val nextElement = currentIterator.get.next()
         incTaskInputMetricsBytesRead()
         nextElement match {

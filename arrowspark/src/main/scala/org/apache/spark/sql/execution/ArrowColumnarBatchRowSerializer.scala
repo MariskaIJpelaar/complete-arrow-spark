@@ -24,6 +24,7 @@ import scala.reflect.ClassTag
  * Also note: getting this right took quite some effort, if you want to improve/ change it,
  * please know what you are doing :) */
 class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extends Serializer with Serializable {
+  // Caller should close whatever is deserialized
   override def newInstance(): SerializerInstance = new ArrowColumnarBatchRowSerializerInstance(dataSize)
   override def supportsRelocationOfSerializedObjects: Boolean = true
 }
@@ -38,6 +39,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
 
     /** Does not consume batch */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
+      // TODO: close root
       if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy())._1)
       root.get
     }
@@ -56,6 +58,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private def getWriter(batch: ArrowColumnarBatchRow): ArrowStreamWriter = {
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
+        // TODO: close recordBatch
         val recordBatch: ArrowRecordBatch =
           ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
         try {
@@ -67,6 +70,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
       }
 
+      // TODO: close recordBatch
       val recordBatch: ArrowRecordBatch =
         ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
       try {
@@ -115,8 +119,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     }
 
 
-    /** TODO: Closes items in provided iterator
-     * TODO: Caller should close batches in iterator */
+    /** Caller should close batches in iterator */
     override def asKeyValueIterator: Iterator[(Int, ArrowColumnarBatchRow)] = new NextIterator[(Int, ArrowColumnarBatchRow)] {
       private val bis = new ByteArrayInputStream(all.toArray)
       private val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
@@ -145,7 +148,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
 
       initReader()
 
-      // TODO: Caller should close
+      // Caller should close
       override protected def getNext(): (Int, ArrowColumnarBatchRow) = {
         if (reader.isEmpty) {
           finished = true

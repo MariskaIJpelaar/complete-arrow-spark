@@ -11,7 +11,8 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 import java.util
 import scala.collection.mutable.ArrayBuffer
 
-/** copied and adapted from org.apache.spark.sql.execution.SortExec */
+/** copied and adapted from org.apache.spark.sql.execution.SortExec
+ * TODO: Caller is responsible for closing returned batches from this plan */
 case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: SparkPlan)
   extends UnaryExecNode with BlockingOperatorWithCodegen {
   override def inputRDDs(): Seq[RDD[InternalRow]] = child.asInstanceOf[CodegenSupport].inputRDDs()
@@ -98,16 +99,18 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     code
   }
 
-  // TODO: caller is responsible for cleaning ArrowColumnarBatchRows
+  // caller is responsible for cleaning ArrowColumnarBatchRows
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitionsInternal { iter =>
-      // TODO: close batch/ iter?
+      // TODO: close batch/ iter
       val batch = ArrowColumnarBatchRow.create(iter.asInstanceOf[Iterator[ArrowColumnarBatchRow]])
       val newBatch: ArrowColumnarBatchRow = {
         if (sortOrder.length == 1) {
           val col = attributeReferenceToCol(sortOrder.head)
+          // TODO: close
           ArrowColumnarBatchRowSorters.sort(batch, col, sortOrder.head)
         } else {
+          // TODO: close
           ArrowColumnarBatchRowSorters.multiColumnSort(batch, sortOrder)
         }
       }
@@ -117,5 +120,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
   override def output: Seq[Attribute] = child.output
 
+  // Caller should close
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowSortExec = copy(child = newChild)
 }

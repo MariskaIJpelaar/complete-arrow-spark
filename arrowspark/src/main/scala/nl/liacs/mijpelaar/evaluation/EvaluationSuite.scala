@@ -11,6 +11,7 @@ import scala.reflect.io.Directory
 
 object EvaluationSuite {
   val isSortedBatch: (ArrowColumnarBatchRow, Range) => Boolean = (answer: ArrowColumnarBatchRow, colNrs: Range) => {
+    // TODO: close columns
     val columns: Array[ArrowColumnVector] = ArrowColumnarBatchRowUtils.take(Iterator(answer))._2
     try {
       var result = true

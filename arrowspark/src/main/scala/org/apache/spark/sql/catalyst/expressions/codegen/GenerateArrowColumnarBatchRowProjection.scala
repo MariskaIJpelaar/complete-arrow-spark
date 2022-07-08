@@ -5,11 +5,12 @@ import org.apache.spark.sql.catalyst.expressions.{ArrowBoundAttribute, Attribute
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 
 /** Note: closes input
- * TODO: Caller should close generated projection */
+ * Caller should close generated projection */
 object GenerateArrowColumnarBatchRowProjection extends CodeGenerator[Seq[Expression], Projection] {
 
   override protected def create(in: Seq[Expression]): Projection = {
     val ctx = newCodeGenContext()
+    // TODO: close generated value
     val eval = ArrowBoundAttribute(in).genCode(ctx)
 
     val specificClass = "SpecificArrowColumnarBatchRowProjection"

@@ -16,7 +16,7 @@ object ArrowColumnarBatchRowSamplers {
    * @param seed a seed for the "random"-generator
    * @return a fresh batch with the sampled rows
    *
-   * TODO: Caller is responsible for closing returned batch
+   * Caller is responsible for closing returned batch
    */
   def sample(input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
     if (!input.hasNext) ArrowColumnarBatchRow.empty
@@ -24,6 +24,7 @@ object ArrowColumnarBatchRowSamplers {
     try {
       // The first batch should be separate, so we can determine the vector-types
       val first = input.next()
+      // TODO: close array
       val array = ArrowColumnarBatchRowConverters.makeFresh(first.copy())
       val iter = Iterator(first) ++ input
       val rand = new XORShiftRandom(seed)
@@ -60,7 +61,7 @@ object ArrowColumnarBatchRowSamplers {
    * @return array of sampled batches and size of the input
    * Note: closes the batches in the iterator
    *
-   * TODO: Caller is responsible for closing the returned batch
+   * Caller is responsible for closing the returned batch
    */
   def sampleAndCount(input: Iterator[ArrowColumnarBatchRow], k: Int, seed: Long = Random.nextLong()):
   (ArrowColumnarBatchRow, Long) = {
@@ -75,8 +76,10 @@ object ArrowColumnarBatchRowSamplers {
       try {
         while (inputSize < k) {
           // ArrowColumnarBatchRow.create consumes the batches
+          // TODO: close create
           if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
 
+          // TODO: close batches
           val (batchOne, batchTwo): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) =
             ArrowColumnarBatchRowConverters.split(input.next(), (k-inputSize).toInt)
           // consume them
@@ -87,6 +90,7 @@ object ArrowColumnarBatchRowSamplers {
         }
 
         // closes reservoirBuf
+        // TODO: close reservoir
         val reservoir = ArrowColumnarBatchRow.create(reservoirBuf.toIterator)
         // add our remainder to the iterator, if there is any
         val iter: Iterator[ArrowColumnarBatchRow] = remainderBatch.fold(input)( Iterator(_) ++ input )

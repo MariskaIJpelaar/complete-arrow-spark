@@ -16,6 +16,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     try {
       size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE))
 
+      // TODO: close Fresh
       ArrowColumnarBatchRowConverters.makeFresh(
         ArrowColumnarBatchRowTransformers.take(
           ArrowColumnarBatchRowTransformers.projection(first, 0 until numCols.getOrElse(first.numFields)),
@@ -102,7 +103,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
   }
 
   /** Note: invalidates the Builder
-   * TODO: Caller is responsible for closing the vector */
+   * Caller is responsible for closing the vector */
   def build(): ArrowColumnarBatchRow = {
     // transfer ownership to new ArrowColumnarBatchRow
     val transferred = buildColumns()

@@ -135,13 +135,14 @@ object ArrowColumnarBatchRow {
   /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows
    * Closes the batches in the provided iterator
    * WARNING: uses 'take', a very expensive operation. Use with care!
-   * TODO: Caller is responsible for closing generated batch */
+   * Caller is responsible for closing generated batch */
   def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
+    // TODO: close take, create
     ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(iter)._2)
   }
 
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors
-   * TODO: Caller is responsible for closing the generated batch */
+   * Caller is responsible for closing the generated batch */
   def create(cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
     val length = if (cols.length > 0) cols(0).getValueVector.getValueCount else 0
     new ArrowColumnarBatchRow(cols, length)

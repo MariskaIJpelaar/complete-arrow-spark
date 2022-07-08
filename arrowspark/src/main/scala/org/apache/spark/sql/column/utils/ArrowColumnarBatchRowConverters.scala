@@ -33,7 +33,7 @@ object ArrowColumnarBatchRowConverters {
 
   /**
    * copied from org.apache.arrow.vector.VectorUnloader
-   * TODO: Caller should close the ArrowRecordBatch
+   * Caller should close the ArrowRecordBatch
    * @param batch batch to convert and close
    * @param numCols (optional) number of columns to convert
    * @param numRows (optional) number of rows to convert
@@ -56,7 +56,7 @@ object ArrowColumnarBatchRowConverters {
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
    * Returns the root and the number of rows transferred
-   * TODO: Caller should close the root */
+   * Caller should close the root */
   def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): (VectorSchemaRoot, Int) = {
     try {
       val rowCount = numRows.getOrElse(batch.numRows)
@@ -78,7 +78,7 @@ object ArrowColumnarBatchRowConverters {
    * @param rowIndex index to split on
    * @return two ArrowColumnarBatchRows split on rowIndex from batch
    *         If rowIndex > batch.numRows, returns (original-batch, empty-batch)
-   *         TODO: Caller is responsible for closing the batches
+   *         Caller is responsible for closing the batches
    */
   def split(batch: ArrowColumnarBatchRow, rowIndex: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     try {
@@ -91,18 +91,10 @@ object ArrowColumnarBatchRowConverters {
 
   /**
    * Splits the current batch on its columns into two batches
-   * @param col column index to split on
-   * @return a pair of the two batches containing the split columns from this batch
-   *
-   * TODO: Caller is responsible for closing all batches (also this one)
-   */
-
-  /**
-   * Splits the current batch on its columns into two batches
    * @param batch batch to split and close
    * @param col column index to split on, we assume col < batch.numFields
    * @return a pair of two of the batches containing the split columns from this batch
-   *         TODO: Caller is responsible for closing the two returned batches
+   *         Caller is responsible for closing the two returned batches
    */
   def splitColumns(batch: ArrowColumnarBatchRow, col: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     try {
@@ -117,7 +109,7 @@ object ArrowColumnarBatchRowConverters {
    * Creates an UnionVector from the provided batch
    * @param batch batch to convert and close
    * @return a fresh UnionVector
-   *         TODO: Caller is responsible for closing the UnionVector
+   *         Caller is responsible for closing the UnionVector
    */
   def toUnionVector(batch: ArrowColumnarBatchRow): UnionVector = {
     try {
@@ -152,7 +144,7 @@ object ArrowColumnarBatchRowConverters {
    * Creates an array of fresh ArrowColumnVectors with the same type as the given batch
    * @param batch ArrowColumnarBatchRow to create array from and close
    * @return An array of fresh ArrowColumnVectors from the provided batch
-   *         TODO: Caller is responsible for closing the vectors in the array
+   *         Caller is responsible for closing the vectors in the array
    */
   def makeFresh(batch: ArrowColumnarBatchRow): Array[ArrowColumnVector] = {
     try {

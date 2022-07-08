@@ -9,7 +9,7 @@ import org.apache.spark.sql.execution.metric.{SQLMetric, SQLShuffleReadMetricsRe
 import org.apache.spark.sql.internal.SQLConf
 
 /** Note: copied functionalities from org.apache.spark.rdd.ShuffledRowRDD
- * TODO: Caller is responsible for closing rdd output */
+ * Caller is responsible for closing rdd output */
 class ShuffledArrowColumnarBatchRowRDD(
       var dependency: ShuffleDependency[Array[Int], InternalRow, InternalRow],
       metrics: Map[String, SQLMetric],
@@ -60,7 +60,7 @@ class ShuffledArrowColumnarBatchRowRDD(
     }
   }
 
-  // TODO: Caller is responsible for closing batches in iterator
+  // Caller is responsible for closing batches in iterator
   override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
     val tempMetrics = context.taskMetrics().createTempShuffleReadMetrics()
     // `SQLShuffleReadMetricsReporter` will update its own metrics for SQL exchange operator,

@@ -50,6 +50,7 @@ object ArrowColumnarBatchRowEncoders {
         // This needs to be done separately as we need the schema for the VectorSchemaRoot
         val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
         // consumes first
+        // TODO: close root
         val (root, firstLength) = ArrowColumnarBatchRowConverters.toRoot(first, numCols, numRows)
         try {
           val writer = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
@@ -67,6 +68,7 @@ object ArrowColumnarBatchRowEncoders {
             while (iter.hasNext && (left.isEmpty || left.get > 0)) {
               val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
               // consumes batch
+              // TODO: close recordBatch
               val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
                 ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
               try {
@@ -103,7 +105,7 @@ object ArrowColumnarBatchRowEncoders {
    * Callers may add additional decoding by providing the 'extraDecoder' function. They are responsible for
    * closing the provided ArrowColumnarBatch if they consume it (do not return it)
    *
-   * TODO: Callers are responsible for closing the returned 'Any' containing the batch */
+   * Callers are responsible for closing the returned 'Any' containing the batch */
   def decode(bytes: Array[Byte],
              extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch): Iterator[Any] = {
     if (bytes.length == 0)

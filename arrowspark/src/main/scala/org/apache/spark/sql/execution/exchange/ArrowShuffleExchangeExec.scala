@@ -19,6 +19,7 @@ import scala.concurrent.Future
 
 /** copied and adapted from org.apache.spark.sql.execution.exchange.ShuffleExchangeExec */
 case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitioning, child: SparkPlan, shuffleOrigin: ShuffleOrigin = ENSURE_REQUIREMENTS) extends ShuffleExchangeLike {
+  // TODO: should close whatever is deserialized
   private lazy val serializer: Serializer = new ArrowColumnarBatchRowSerializer(Option(longMetric("dataSize")))
 
   private lazy val writeMetrics =
@@ -59,6 +60,7 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
   }
 
   override def getShuffleRDD(partitionSpecs: Array[ShufflePartitionSpec]): RDD[_] = {
+    // TODO: Close
     new ShuffledArrowColumnarBatchRowRDD(shuffleDependency, readMetrics, partitionSpecs)
   }
 
@@ -68,6 +70,7 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
     Statistics(dataSize, Some(rowCount))
   }
 
+  // TODO: close
   private lazy val cachedShuffleRDD: ShuffledArrowColumnarBatchRowRDD = new ShuffledArrowColumnarBatchRowRDD(shuffleDependency, readMetrics)
   override protected def doExecute(): RDD[InternalRow] = cachedShuffleRDD.asInstanceOf[RDD[InternalRow]]
 
@@ -87,6 +90,7 @@ object ArrowShuffleExchangeExec {
     val RangePartitioning(sortingExpressions, numPartitions) = newPartitioning.asInstanceOf[RangePartitioning]
     // Extract only the columns that matter for sorting
     val rddForSampling = rdd.mapPartitionsInternal { iter =>
+      // TODO: close when used
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val mutablePair = new MutablePair[Array[Byte], Null]()
       // TODO: Close?
@@ -98,6 +102,7 @@ object ArrowShuffleExchangeExec {
     }
     val part = new ArrowRangePartitioner(numPartitions, rddForSampling, sortingExpressions, ascending = true)
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
+      // TODO: Close when used
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)
       iter.map { row =>

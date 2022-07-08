@@ -7,7 +7,7 @@ import org.apache.arrow.vector.{IntVector, ValueVector}
 object VectorDeduplicator {
   // returns the indices required to create de-duplicated vector from the original
   // does not close the provided vector
-  // TODO: Caller is responsible for closing returned IntVector
+  // Caller is responsible for closing returned IntVector
   def uniqueIndices[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): IntVector = {
     val indices = new IntVector("indices", vector.getAllocator.newChildAllocator("VectorDeduplicator::indices", 0, Integer.MAX_VALUE))
 
@@ -32,7 +32,7 @@ object VectorDeduplicator {
 
   // returns the original vector with duplicates removed
   // closes the passed vector
-  // TODO: Caller is responsible for closing returned vector
+  // Caller is responsible for closing returned vector
   def unique[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): V = {
     val original = {
       val tp = vector.getTransferPair(vector.getAllocator

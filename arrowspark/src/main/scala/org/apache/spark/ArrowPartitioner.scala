@@ -44,6 +44,7 @@ class ArrowRangePartitioner[V](
       // TODO: close
       val sketchedRDD = rdd.mapPartitionsWithIndex { (idx, iter) =>
         val seed = byteswap32(idx ^ (shift << 16))
+        // TODO: close
         val (sample, n) = ArrowColumnarBatchRowSamplers.sampleAndCount(iter, sampleSizePerPartition, seed)
         Iterator((idx, n, sample))
       }
@@ -88,6 +89,7 @@ class ArrowRangePartitioner[V](
         case class extraClass(value: (Int, Long))
 
         // TODO: in map(...), close?
+        // TODO: close sketched
         val sketched = ArrowRDD.collect(
           sketchedRDD,
           extraEncoder = extraEncoder,
@@ -144,8 +146,11 @@ class ArrowRangePartitioner[V](
         }
       }
 
+      // TODO: close grouped
       val grouped: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(ArrowColumnarBatchRowUtils.take(batches.toIterator)._2, totalRows)
+      // TODO: close sorted
       val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRowSorters.multiColumnSort(grouped, orders)
+      // TODO: close unique, weighted
       val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRowDeduplicators.unique(sorted, orders), grouped.numFields-1)
       try {
         // now we gather our bounds
@@ -196,6 +201,7 @@ class ArrowRangePartitioner[V](
     // 'sketch' the distribution from a sample
     // TODO: Close?
     val decoded: RDD[ArrowColumnarBatchRow] = rdd.map { iter =>
+      // TODO: close decode, take, create
       ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(iter._1))._2)
     }
     val (numItems, sketched) = sketch(decoded, sampleSizePerPartition)
@@ -219,10 +225,13 @@ class ArrowRangePartitioner[V](
       val seed = byteswap32(-rdd.id -1)
       val reSampledRDD = imbalanced.mapPartitionsInternal{ iter =>
         val batches = iter.map {
+              // TODO: close decode, take, array
           array => ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(array))._2)
         }
+        // TODO: close
         val sample = ArrowColumnarBatchRowSamplers.sample(batches, fraction, seed)
         Iterator(sample)}
+      // TODO: close reSampled
       val reSampled = ArrowRDD.collect(reSampledRDD)
       val weight = (1.0 / fraction).toFloat
       candidates ++= reSampled.map( x => (x._2, weight))
@@ -256,6 +265,7 @@ class ArrowRangePartitioner[V](
   }
 
   override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = {
+    // TODO: close decode, take, create
     val ranges = ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rangeBounds))._2)
     try {
       ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)

@@ -44,7 +44,7 @@ object ArrowColumnarBatchRowUtils {
    *                       is passed to other calls of extraCollector.
    * Note: user should close the batch if it consumes it (does not return it)
    *
-   * TODO: Caller is responsible for closing returned vectors
+   * Caller is responsible for closing returned vectors
    */
   def take(batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),

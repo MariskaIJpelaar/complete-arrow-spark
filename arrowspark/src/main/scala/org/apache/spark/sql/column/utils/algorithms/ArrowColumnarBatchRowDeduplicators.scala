@@ -13,7 +13,7 @@ object ArrowColumnarBatchRowDeduplicators {
    * @return a fresh batch with the unique values from the previous
    *
    * Closes the passed batch
-   * TODO: Caller is responsible for closing the new batch
+   * Caller is responsible for closing the new batch
    */
   def unique(batch: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): ArrowColumnarBatchRow = {
     if (batch.numFields < 1)
@@ -21,6 +21,7 @@ object ArrowColumnarBatchRowDeduplicators {
 
     try {
       // UnionVector representing our batch
+      // TODO: close union
       val union = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(batch.copy(),
           sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray)

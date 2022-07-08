@@ -15,7 +15,7 @@ object ArrowColumnarBatchRowSorters {
    * @return a new, sorted, batch
    *
    * Closes the passed batch
-   * TODO: Caller is responsible for closing returned batch
+   * Caller is responsible for closing returned batch
    */
   def multiColumnSort(batch: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): ArrowColumnarBatchRow = {
     if (batch.numFields < 1)
@@ -29,6 +29,7 @@ object ArrowColumnarBatchRowSorters {
       val indices = new IntVector("indexHolder", indexAllocator)
 
       // UnionVector representing our batch with columns from sortOrder
+      // TODO: close union
       val union = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(batch.copy(),
           sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))
@@ -76,7 +77,7 @@ object ArrowColumnarBatchRowSorters {
    *         Note: if col is out of range, returns the batch
    *
    * Closes the passed batch
-   * TODO: Caller is responsible for closing returned batch
+   * Caller is responsible for closing returned batch
    */
   def sort(batch: ArrowColumnarBatchRow, col: Int, sortOrder: SortOrder): ArrowColumnarBatchRow = {
     if (col < 0 || col > batch.numFields)
