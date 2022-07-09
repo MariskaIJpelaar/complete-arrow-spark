@@ -119,14 +119,12 @@ class ArrowRangePartitioner[V](
 
       // we start by sorting the batches, and making the rows unique
       // we keep the weights by adding them as an extra column to the batch
-      var totalRows = 0
       val batches = candidates map { case (batch, weight) =>
         try {
           val weights = new Float4Vector("weights", allocator)
           try {
             weights.setValueCount(batch.numRows)
             0 until batch.numRows foreach { index => weights.set(index, weight) }
-            totalRows += batch.numRows
             // consumes batch and weight
             ArrowColumnarBatchRowTransformers.appendColumns(batch, Array(new ArrowColumnVector(weights)))
           } finally {
@@ -137,7 +135,7 @@ class ArrowRangePartitioner[V](
         }
       }
 
-      val grouped: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(ArrowColumnarBatchRowUtils.take(batches.toIterator)._2, totalRows)
+      val grouped: ArrowColumnarBatchRow = ArrowColumnarBatchRow.create(batches.toIterator)
       val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRowSorters.multiColumnSort(grouped, orders)
       val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRowDeduplicators.unique(sorted, orders), grouped.numFields-1)
       try {

@@ -96,8 +96,8 @@ object ArrowColumnarBatchRowConverters {
    */
   def splitColumns(batch: ArrowColumnarBatchRow, col: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     try {
-      (new ArrowColumnarBatchRow(batch.columns.slice(0, col), batch.numRows),
-        new ArrowColumnarBatchRow(batch.columns.slice(col, batch.numFields), batch.numRows))
+      (new ArrowColumnarBatchRow(batch.copy().columns.slice(0, col), batch.numRows),
+        new ArrowColumnarBatchRow(batch.copy().columns.slice(col, batch.numFields), batch.numRows))
     } finally {
       batch.close()
     }

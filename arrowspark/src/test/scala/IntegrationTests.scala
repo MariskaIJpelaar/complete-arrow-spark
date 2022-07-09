@@ -21,7 +21,7 @@ import scala.reflect.io.Directory
 
 // TODO: There exists a org.apache.spark.util.Utils.tryWithSafeFinally ... :)
 
-class LazyReaderSmallTest extends AnyFunSuite {
+class IntegrationTests extends AnyFunSuite {
   private val default_size = 100 * 1000 // 100k
   private val num_files = 10
   private val directory_name = "data/numbers"

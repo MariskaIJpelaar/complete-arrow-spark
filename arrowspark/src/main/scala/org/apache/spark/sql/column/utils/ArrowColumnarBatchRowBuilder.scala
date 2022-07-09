@@ -11,7 +11,6 @@ import scala.collection.immutable.NumericRange
 /** Note: closes first
  * Caller should close after use */
 class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends Closeable {
-  protected var num_bytes = 0L
   protected[column] var size = 0
   protected[column] val columns: Array[ArrowColumnVector] = {
     try {
@@ -23,6 +22,10 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     } finally {
       first.close()
     }
+  }
+  protected var num_bytes: Long = {
+    if (columns.isEmpty) 0
+    else columns.map( column => column.getValueVector.getDataBuffer.readableBytes()).max
   }
 
   def length: Int = size
@@ -59,7 +62,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
   }
 
   /** Note: closes batch */
-  def append(batch: ArrowColumnarBatchRow): Unit = {
+  def append(batch: ArrowColumnarBatchRow): ArrowColumnarBatchRowBuilder = {
     try {
       var readableBytes = 0L
       var current_size = 0
@@ -82,6 +85,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       }
       num_bytes += readableBytes
       size += current_size
+      this
     } finally {
       batch.close()
     }

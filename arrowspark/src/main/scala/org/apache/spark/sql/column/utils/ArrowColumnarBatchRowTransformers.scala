@@ -68,14 +68,15 @@ object ArrowColumnarBatchRowTransformers {
 
   /**
    * Appends an Array of columns to the provided batch and closes the original batch
-    * @param batch batch to append columns to
+   * @param batch batch to append columns to
    * @param cols columns to append to batch
    * @return a fresh batch with the columns of the original-batch and the provided columns
-   *         TODO: Caller is responsible for closing the batch
+   *         Caller is responsible for closing the batch
    */
   def appendColumns(batch: ArrowColumnarBatchRow, cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
     try {
-      new ArrowColumnarBatchRow(batch.columns ++ cols, batch.numRows)
+      // FIXME: better?
+      new ArrowColumnarBatchRow(batch.copy().columns ++ new ArrowColumnarBatchRow(cols, batch.numRows).copy().columns, batch.numRows)
     } finally {
       batch.close()
     }
