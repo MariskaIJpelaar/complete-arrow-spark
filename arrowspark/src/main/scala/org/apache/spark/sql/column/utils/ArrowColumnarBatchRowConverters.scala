@@ -81,7 +81,8 @@ object ArrowColumnarBatchRowConverters {
   def split(batch: ArrowColumnarBatchRow, rowIndex: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     try {
       val splitPoint = rowIndex.min(batch.numRows)
-      (batch.copy(0 until splitPoint), batch.copy(splitPoint until batch.numRows))
+      (batch.copy(0 until splitPoint, allocatorHint = "ArrowColumnarBatchRowConverters::split::first"),
+        batch.copy(splitPoint until batch.numRows, allocatorHint = "ArrowColumnarBatchRowConverters::split::second"))
     } finally {
       batch.close()
     }
@@ -96,8 +97,10 @@ object ArrowColumnarBatchRowConverters {
    */
   def splitColumns(batch: ArrowColumnarBatchRow, col: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     try {
-      (new ArrowColumnarBatchRow(batch.copy().columns.slice(0, col), batch.numRows),
-        new ArrowColumnarBatchRow(batch.copy().columns.slice(col, batch.numFields), batch.numRows))
+      (new ArrowColumnarBatchRow(batch.copy(allocatorHint = "ArrowColumnarBatchRowConverters::splitColumns::first")
+        .columns.slice(0, col), batch.numRows),
+        new ArrowColumnarBatchRow(batch.copy(allocatorHint = "ArrowColumnarBatchRowConverters::splitColumns::second")
+          .columns.slice(col, batch.numFields), batch.numRows))
     } finally {
       batch.close()
     }

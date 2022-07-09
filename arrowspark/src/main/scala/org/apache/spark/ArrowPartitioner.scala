@@ -7,7 +7,7 @@ import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
-import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
+import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
@@ -56,7 +56,7 @@ class ArrowRangePartitioner[V](
         oos.writeLong(n)
         oos.flush()
         oos.close()
-        (bos.toByteArray, sample.copy())
+        (bos.toByteArray, sample.copy(allocatorHint = "ArrowPartitioner::extraEncoder"))
       } finally {
         sample.close()
       }
@@ -99,12 +99,12 @@ class ArrowRangePartitioner[V](
    * Caller is responsible for closing returned batches */
   private def determineBounds(
      candidates: ArrayBuffer[(ArrowColumnarBatchRow, Float)],
-     partitions: Int): Array[ArrowColumnarBatchRow] = {
+     partitions: Int): ArrowColumnarBatchRow = {
     try {
       assert(partitions - 1 < Integer.MAX_VALUE)
 
       // Checks if we have non-empty batches
-      if (candidates.length < 1) return Array(ArrowColumnarBatchRow.empty)
+      if (candidates.length < 1) return ArrowColumnarBatchRow.empty
       var allocatorOption: Option[BufferAllocator] = None
       var i = 0
       while (allocatorOption.isEmpty && i < candidates.size) {
@@ -147,11 +147,14 @@ class ArrowRangePartitioner[V](
         var cumSize = 0
         var target = step
         // FIXME: For now, we assume we do not return too early when creating the bounds
-        val bounds =  new Array[ArrowColumnarBatchRow](partitions -1)
+        var boundBuilder: Option[ArrowColumnarBatchRowBuilder] = None
         0 until unique.numRows takeWhile { index =>
           cumWeight += weights.getFloat(index)
           if (cumWeight >= target) {
-            bounds(cumSize) = unique.copy(index until index +1)
+//            bounds(cumSize) = unique.copy(index until index +1)
+            boundBuilder = Some(boundBuilder.fold
+            ( new ArrowColumnarBatchRowBuilder(unique.copy(index until index +1, allocatorHint = "ArrowPartitioner::boundBuilder::first")) )
+            ( builder => builder.append(unique.copy(index until index +1, allocatorHint = "ArrowPartitioner::boundBuilder"))))
             cumSize += 1
             target += step
           }
@@ -160,7 +163,7 @@ class ArrowRangePartitioner[V](
         }
 
         rangeBoundsLength = Option(cumSize)
-        bounds
+        boundBuilder.map( _.build() ).getOrElse(ArrowColumnarBatchRow.empty)
       } finally {
         unique.close()
         weighted.close()
@@ -204,7 +207,7 @@ class ArrowRangePartitioner[V](
               imbalancedPartitions += idx
             } else {
               val weight = (n.toDouble / sample.length).toFloat
-              candidates += ((sample.copy(), weight))
+              candidates += ((sample.copy(allocatorHint = "ArrowPartitioner::candidatesBuilder"), weight))
             }
           } finally {
             sample.close()
@@ -225,7 +228,7 @@ class ArrowRangePartitioner[V](
 
         // determine bounds and encode them
         val bounds = determineBounds(candidates, math.min(partitions, candidates.size))
-        ArrowColumnarBatchRowEncoders.encode(bounds.toIterator).toArray.flatten
+        ArrowColumnarBatchRowEncoders.encode(Iterator(bounds)).toArray.apply(0)
       } finally {
         candidates.foreach(_._1.close())
       }

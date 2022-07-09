@@ -58,20 +58,19 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
   /** Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
-  override def copy(): ArrowColumnarBatchRow = {
-    copy(0 until numRows)
-  }
+  override def copy(): ArrowColumnarBatchRow = copy(0 until numRows)
 
   /** Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
-  def copy(range: Range = 0 until numRows): ArrowColumnarBatchRow = {
+  def copy(range: Range = 0 until numRows, allocatorHint: String = ""): ArrowColumnarBatchRow = {
     if (range.isEmpty)
       return ArrowColumnarBatchRow.empty
 
     new ArrowColumnarBatchRow(columns map { v =>
       val vector = v.getValueVector
-      val allocator = vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::copy", 0, Integer.MAX_VALUE)
+      val allocator = vector.getAllocator
+        .newChildAllocator(s"ArrowColumnarBatchRow::copy::$allocatorHint", 0, Integer.MAX_VALUE)
       val tp = vector.getTransferPair(allocator)
 
       tp.splitAndTransfer(range.head, range.length)

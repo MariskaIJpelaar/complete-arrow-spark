@@ -22,7 +22,7 @@ object ArrowColumnarBatchRowDeduplicators {
     try {
       // UnionVector representing our batch
       val union = ArrowColumnarBatchRowConverters.toUnionVector(
-        ArrowColumnarBatchRowTransformers.getColumns(batch.copy(),
+        ArrowColumnarBatchRowTransformers.getColumns(batch.copy(allocatorHint = "ArrowColumnarBatchRowDeduplicators::unique"),
           sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray)
       )
       try {

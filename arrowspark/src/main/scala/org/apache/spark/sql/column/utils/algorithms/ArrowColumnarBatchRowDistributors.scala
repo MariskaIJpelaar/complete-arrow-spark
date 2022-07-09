@@ -21,12 +21,12 @@ object ArrowColumnarBatchRowDistributors {
 
       val names: Array[String] = sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name ).toArray
       val keyUnion = ArrowColumnarBatchRowConverters.toUnionVector(
-        ArrowColumnarBatchRowTransformers.getColumns(key.copy(), names)
+        ArrowColumnarBatchRowTransformers.getColumns(key.copy(allocatorHint = "ArrowColumnarBatchRowDistributors::bucketDistributor::keyUnion"), names)
       )
       try {
         val comparator = ArrowColumnarBatchRowUtils.getComparator(keyUnion, sortOrders)
         val rangeUnion = ArrowColumnarBatchRowConverters.toUnionVector(
-          ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copy(), names)
+          ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copy(allocatorHint = "ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion"), names)
         )
         try {
           // find partition-ids
@@ -57,9 +57,11 @@ object ArrowColumnarBatchRowDistributors {
 
       partitionIds.zipWithIndex foreach { case (partitionId, index) =>
         if (distributed.contains(partitionId))
-          distributed(partitionId).append(key.copy(index until index+1))
+          distributed(partitionId).append(key.copy(index until index+1,
+            allocatorHint = "ArrowColumnarBatchRowDistributors::distribute"))
         else
-          distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key.copy(index until index+1))
+          distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key.copy(index until index+1,
+            allocatorHint = "ArrowColumnarBatchRowDistributors::distribute::first"))
       }
 
       distributed.map ( items => (items._1, items._2.build()) ).toMap

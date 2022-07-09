@@ -227,6 +227,28 @@ class IntegrationTests extends AnyFunSuite {
     directory.deleteRecursively()
   }
 
+  test("Performing local ColumnarSort on a simple, very small, non-random, Dataset using lazy Reading") {
+    val size = 10
+    val table = generateParquets(key = i => i*2, randomValue = false, size = size)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+
+    // Construct DataFrame
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+
+    // Perform ColumnarSort
+    val new_df = df.sortWithinPartitions("numA", "numB")
+    new_df.explain(true)
+
+    new_df.collect()
+
+    column.resetRootAllocator()
+
+    directory.deleteRecursively()
+  }
+
   test("Performing ColumnarSort on a simple, very small, non-random, Dataset using lazy Reading") {
     val size = 10
     val table = generateParquets(key = i => i*2, randomValue = false, size = size)

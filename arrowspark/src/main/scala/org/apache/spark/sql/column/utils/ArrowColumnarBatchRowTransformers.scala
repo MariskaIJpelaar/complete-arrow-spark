@@ -13,13 +13,13 @@ object ArrowColumnarBatchRowTransformers {
    * @param batch batch to project and close
    * @param indices the sequence of indices which define the projection
    * @return a fresh batch projected from the current batch
-   *         TODO: Caller is responsible for closing returned batch
+   *         Caller is responsible for closing returned batch
    */
   def projection(batch: ArrowColumnarBatchRow, indices: Seq[Int]): ArrowColumnarBatchRow = {
     try {
       new ArrowColumnarBatchRow( indices.toArray map ( index => {
         val vector = batch.columns(index).getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::projection", 0, Integer.MAX_VALUE))
+        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowTransformers::projection", 0, Integer.MAX_VALUE))
         tp.splitAndTransfer(0, batch.numRows)
         new ArrowColumnVector(tp.getTo)
       }), batch.numRows)
@@ -33,7 +33,7 @@ object ArrowColumnarBatchRowTransformers {
    * @param batch batch to take rows from and close
    * @param range the range to take, assumes: 0 <= range < batch.numRows
    * @return a fresh batch
-   *         TODO: Caller is responsible for closing returned batch
+   *         Caller is responsible for closing returned batch
    */
   def take(batch: ArrowColumnarBatchRow, range: Range): ArrowColumnarBatchRow = {
     try {
@@ -53,7 +53,7 @@ object ArrowColumnarBatchRowTransformers {
    * @param batch batch to sample from and close
    * @param seed (optional) seed to generate random numbers with
    * @return a fresh random-subset of batch
-   *         TODO: Callers should close returned batch
+   *        Callers should close returned batch
    */
   def sample(batch: ArrowColumnarBatchRow, seed: Long = System.nanoTime()): ArrowColumnarBatchRow = {
     try {
@@ -76,7 +76,9 @@ object ArrowColumnarBatchRowTransformers {
   def appendColumns(batch: ArrowColumnarBatchRow, cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
     try {
       // FIXME: better?
-      new ArrowColumnarBatchRow(batch.copy().columns ++ new ArrowColumnarBatchRow(cols, batch.numRows).copy().columns, batch.numRows)
+      new ArrowColumnarBatchRow(batch.copy(allocatorHint = "ArrowColumnarBatchRowTransformers::appendColumns::first").columns
+        ++ new ArrowColumnarBatchRow(cols, batch.numRows)
+        .copy(allocatorHint = "ArrowColumnarBatchRowTransformers::appendColumns::second").columns, batch.numRows)
     } finally {
       batch.close()
     }
@@ -87,14 +89,14 @@ object ArrowColumnarBatchRowTransformers {
    * @param batch batch to get columns from and close
    * @param names columns to get
    * @return a fresh batch containing the subset of columns with provided names
-   *         TODO: Caller is responsible for closing the batch
+   *         Caller is responsible for closing the batch
    */
   def getColumns(batch: ArrowColumnarBatchRow, names: Array[String]): ArrowColumnarBatchRow = {
     try {
       val cols = names.flatMap { name =>
         batch.columns.find(vector => vector.getValueVector.getName.equals(name))
       }
-      new ArrowColumnarBatchRow(cols, batch.numRows)
+      new ArrowColumnarBatchRow(cols, batch.numRows).copy(allocatorHint = "ArrowColumnarBatchRowTransformers::getColumns")
     } finally {
       batch.close()
     }
@@ -106,7 +108,7 @@ object ArrowColumnarBatchRowTransformers {
    * @param batch ArrowColumnarBatchRow to create new batch from, and close
    * @param indices IntVector representing the indices to use
    * @return a new Batch with permuted (subset) of rows from provided batch
-   *         TODO: Caller is responsible for closing returned batch
+   *         Caller is responsible for closing returned batch
    */
   def applyIndices(batch: ArrowColumnarBatchRow, indices: IntVector): ArrowColumnarBatchRow = {
     try {

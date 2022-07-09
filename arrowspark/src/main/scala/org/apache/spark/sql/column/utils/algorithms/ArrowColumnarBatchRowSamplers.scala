@@ -26,7 +26,7 @@ object ArrowColumnarBatchRowSamplers {
       val first = input.next()
       val iter = Iterator(first) ++ input
       try {
-        val array = ArrowColumnarBatchRowConverters.makeFresh(first.copy())
+        val array = ArrowColumnarBatchRowConverters.makeFresh(first.copy(allocatorHint = "ArrowColumnarBatchRowSampler::sample::array"))
         try {
           val rand = new XORShiftRandom(seed)
           var i = 0
@@ -48,7 +48,7 @@ object ArrowColumnarBatchRowSamplers {
           }
           array foreach ( column => column.getValueVector.setValueCount(i) )
           // we copy to ensure we can close the array whenever we need to return early
-          new ArrowColumnarBatchRow(array, i).copy()
+          new ArrowColumnarBatchRow(array, i).copy(allocatorHint = "ArrowColumnarBatchRowSampler::sample::return")
         } finally {
           array.foreach( _.close() )
         }
@@ -120,7 +120,7 @@ object ArrowColumnarBatchRowSamplers {
             }
 
             // we have to copy since we want to guarantee to always close reservoir
-            (reservoir.copy(), inputSize)
+            (reservoir.copy(allocatorHint = "ArrowColumnarBatchRowSampler::sampleAndCount::return"), inputSize)
           } finally {
             // if we returned earlier than expected, close the batches in the Iterator
             iter.foreach( _.close() )

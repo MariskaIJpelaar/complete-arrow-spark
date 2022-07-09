@@ -170,7 +170,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
             try {
               inputMetrics.incRecordsRead(partition.numFields)
               incTaskInputMetricsBytesRead()
-              partition.copy()
+              partition.copy(allocatorHint = "FileScanArrowRDD::next()")
             } finally {
               partition.close()
             }

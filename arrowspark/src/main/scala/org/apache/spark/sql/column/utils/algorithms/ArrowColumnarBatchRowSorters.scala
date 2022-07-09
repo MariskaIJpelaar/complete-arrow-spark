@@ -30,7 +30,7 @@ object ArrowColumnarBatchRowSorters {
 
       // UnionVector representing our batch with columns from sortOrder
       val union = ArrowColumnarBatchRowConverters.toUnionVector(
-        ArrowColumnarBatchRowTransformers.getColumns(batch.copy(),
+        ArrowColumnarBatchRowTransformers.getColumns(batch.copy(allocatorHint = "ArrowColumnarBatchRowSorters::multiColumnSort::union"),
           sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))
 
       try {

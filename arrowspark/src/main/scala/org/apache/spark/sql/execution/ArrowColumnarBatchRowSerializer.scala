@@ -39,7 +39,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
 
     /** Does not consume batch */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
-      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy())._1)
+      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy(allocatorHint = "ArrowColumnarBatchRowSerializer::getRoot"))._1)
       root.get
     }
 
@@ -58,7 +58,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
         val recordBatch: ArrowRecordBatch =
-          ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
+          ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(allocatorHint = "ArrowColumnarBatchRowSerializer::getWriter"), batch.numFields)._1
         try {
           new VectorLoader(root.get).load(recordBatch)
           writer.get.start()
@@ -69,7 +69,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       }
 
       val recordBatch: ArrowRecordBatch =
-        ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(), batch.numFields)._1
+        ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch.copy(allocatorHint = "ArrowColumnarBatchRowSerializer::getWriter::recordBatch"), batch.numFields)._1
       try {
         new VectorLoader(root.get).load(recordBatch)
         writer.get
