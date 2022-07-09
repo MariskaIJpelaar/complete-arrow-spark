@@ -1,17 +1,14 @@
-import io.netty.util.internal.PlatformDependent
+import _root_.utils.ParquetWriter
 import nl.liacs.mijpelaar.utils.RandomUtils
-import org.apache.arrow.memory.DefaultAllocationManagerOption
-import org.apache.arrow.memory.DefaultAllocationManagerOption.AllocationManagerType
 import org.apache.avro.SchemaBuilder
 import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, ColumnBatch, ColumnDataFrame, ColumnDataFrameReader, TColumn}
+import org.apache.spark.sql.column._
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.apache.spark.sql.{SparkSession, column}
 import org.scalatest.funsuite.AnyFunSuite
-import utils.ParquetWriter
 
 import java.io.File
 import java.util
@@ -163,8 +160,6 @@ class IntegrationTests extends AnyFunSuite {
 
 
   test("Lazy read first row of simple Dataset with ascending numbers through the RDD") {
-    System.setProperty(DefaultAllocationManagerOption.ALLOCATION_MANAGER_TYPE_PROPERTY_NAME, AllocationManagerType.Netty.name())
-
     generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
@@ -322,6 +317,8 @@ class IntegrationTests extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect())
 
+    column.resetRootAllocator()
+
     directory.deleteRecursively()
   }
 
@@ -345,6 +342,8 @@ class IntegrationTests extends AnyFunSuite {
 
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect())
+
+    column.resetRootAllocator()
 
     directory.deleteRecursively()
   }
@@ -371,12 +370,12 @@ class IntegrationTests extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect(), size = size)
 
+    column.resetRootAllocator()
+
     directory.deleteRecursively()
   }
 
   test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading, on-partition check") {
-    System.setProperty(DefaultAllocationManagerOption.ALLOCATION_MANAGER_TYPE_PROPERTY_NAME, AllocationManagerType.Netty.name())
-
     // Generate Dataset
     val size = default_size * 15
     val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true, size = size)
@@ -392,13 +391,11 @@ class IntegrationTests extends AnyFunSuite {
     val new_df = df.sort("numA", "numB")
     new_df.explain(true)
 
-    println(PlatformDependent.usedDirectMemory())
-
     val rdd = new_df.queryExecution.executedPlan.execute()
     rdd.count()
     rdd.foreach( batch => batch.asInstanceOf[ArrowColumnarBatchRow].close())
 
-    println(PlatformDependent.usedDirectMemory())
+    column.resetRootAllocator()
 
     directory.deleteRecursively()
   }

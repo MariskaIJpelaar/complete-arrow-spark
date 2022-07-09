@@ -25,8 +25,17 @@ class ArrowColumnarArray(private val columnar: ColumnarArray) extends ArrayData 
     }
   }
 
+  override def copy(): ArrayData = {
+    val vector = getData.getValueVector
+    val allocator = vector.getAllocator
+      .newChildAllocator(s"ArrowColumnarArray::copy::", 0, Integer.MAX_VALUE)
+    val tp = vector.getTransferPair(allocator)
+
+    tp.splitAndTransfer(0, vector.getValueCount)
+    new ArrowColumnarArray(new ColumnarArray(new ArrowColumnVector(tp.getTo), 0, vector.getValueCount))
+  }
+
   override def numElements(): Int = columnar.numElements()
-  override def copy(): ArrayData = columnar.copy()
   override def array: Array[Any] = columnar.array().asInstanceOf[Array[Any]]
   override def setNullAt(i: Int): Unit = columnar.setNullAt(i)
   override def update(i: Int, value: Any): Unit = columnar.update(i, value)
