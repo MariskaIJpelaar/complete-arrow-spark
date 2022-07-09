@@ -71,45 +71,47 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
       parquetSchema, reader.getFileMetaData.getCreatedBy)
 
     val vectorSchemaRoot = VectorSchemaRoot.create(schema, allocator)
-    val vectors = vectorSchemaRoot.getFieldVectors
+    try {
+      val vectors = vectorSchemaRoot.getFieldVectors
 
-    if (pageReadStore.getRowCount > Integer.MAX_VALUE)
-      throw new RuntimeException(s"[ParquetReaderIterator] file '${file.filePath}' has too many rows" )
+      if (pageReadStore.getRowCount > Integer.MAX_VALUE)
+        throw new RuntimeException(s"[ParquetReaderIterator] file '${file.filePath}' has too many rows" )
 
-    val rows = pageReadStore.getRowCount.toInt
+      val rows = pageReadStore.getRowCount.toInt
 
-    0 until colDesc.size() foreach { i =>
-      val col = colDesc.get(i)
-      val cr = colReader.getColumnReader(col)
-      val dmax = col.getMaxDefinitionLevel
-      if (col.getPrimitiveType.getPrimitiveTypeName != PrimitiveTypeName.INT32)
-        throw new RuntimeException("[IntegerParquetReaderIterator] may only consist of INT32 types")
+      0 until colDesc.size() foreach { i =>
+        val col = colDesc.get(i)
+        val cr = colReader.getColumnReader(col)
+        val dmax = col.getMaxDefinitionLevel
+        if (col.getPrimitiveType.getPrimitiveTypeName != PrimitiveTypeName.INT32)
+          throw new RuntimeException("[IntegerParquetReaderIterator] may only consist of INT32 types")
 
-      val vector = vectors.get(i).asInstanceOf[IntVector]
-      vector.setInitialCapacity(rows)
-      vector.allocateNew()// required after allocateNew()?
-      0 until rows foreach { row =>
-        if (cr.getCurrentDefinitionLevel == dmax) vector.setSafe(row, cr.getInteger)
-        else vector.setNull(row)
-        cr.consume()
+        val vector = vectors.get(i).asInstanceOf[IntVector]
+        vector.setInitialCapacity(rows)
+        vector.allocateNew()// required after allocateNew()?
+        0 until rows foreach { row =>
+          if (cr.getCurrentDefinitionLevel == dmax) vector.setSafe(row, cr.getInteger)
+          else vector.setNull(row)
+          cr.consume()
+        }
+        vector.setValueCount(rows)
       }
-      vector.setValueCount(rows)
-    }
-    pageReadStore = reader.readNextRowGroup()
+      pageReadStore = reader.readNextRowGroup()
 
-    vectorSchemaRoot.setRowCount(rows)
-    val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
-    /** transfer ownership */
-    val transferred = data.map { vector =>
-      val tp = vector.getTransferPair(vector.getAllocator
-        .newChildAllocator(s"ParquetReaderIterator::transfer::$j::${vector.getName}", 0, Integer.MAX_VALUE))
-      tp.transfer()
-      new ArrowColumnVector(tp.getTo)
+      vectorSchemaRoot.setRowCount(rows)
+      val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
+      /** transfer ownership */
+      val transferred = data.map { vector =>
+        val tp = vector.getTransferPair(vector.getAllocator
+          .newChildAllocator(s"ParquetReaderIterator::transfer::$j::${vector.getName}", 0, Integer.MAX_VALUE))
+        tp.transfer()
+        new ArrowColumnVector(tp.getTo)
+      }
+      j += 1
+      new ArrowColumnarBatchRow(transferred, rows)
+    } finally {
+      vectorSchemaRoot.close()
     }
-    val batch = new ArrowColumnarBatchRow(transferred, rows)
-    vectorSchemaRoot.close()
-    j += 1
-    batch
   }
 }
 

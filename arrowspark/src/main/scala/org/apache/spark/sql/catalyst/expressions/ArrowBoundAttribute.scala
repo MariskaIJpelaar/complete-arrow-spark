@@ -22,14 +22,18 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
    * Caller should close returned batch */
   override def eval(input: InternalRow): ArrowColumnarBatchRow = input match {
     case batch: ArrowColumnarBatchRow =>
-      expressions match {
-        case references: BoundReferenceSeq =>
-          ArrowColumnarBatchRowTransformers.projection(batch, references.value.map(_.ordinal))
-        case other =>
-          val columns = Array.tabulate[ArrowColumnVector](other.length) { i =>
-            other(i).eval(batch).asInstanceOf[ArrowColumnarArray].getData
-          }
-          ArrowColumnarBatchRow.create(columns)
+      try {
+        expressions match {
+          case references: BoundReferenceSeq =>
+            ArrowColumnarBatchRowTransformers.projection(batch, references.value.map(_.ordinal))
+          case other =>
+            val columns = Array.tabulate[ArrowColumnVector](other.length) { i =>
+              other(i).eval(batch).asInstanceOf[ArrowColumnarArray].getData
+            }
+            ArrowColumnarBatchRow.create(columns)
+        }
+      } finally {
+        batch.close()
       }
     case _ => throw new RuntimeException("[ArrowBoundAttribute::eval] only ArrowColumnarBatches are supported")
   }
@@ -44,7 +48,11 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
         val batchClass = classOf[ArrowColumnarBatchRow].getName
         val transformerClass = ArrowColumnarBatchRowTransformers.getClass.getName + "$.MODULE$"
         val code = code"""
-                         | $batchClass ${ev.value} = $transformerClass.projection(($batchClass)${ctx.INPUT_ROW}, $projections);
+                         | try {
+                         |  $batchClass ${ev.value} = $transformerClass.projection(($batchClass)${ctx.INPUT_ROW}, $projections);
+                         | } finally {
+                         |  (($batchClass)${ctx.INPUT_ROW}).close();
+                         | }
                          |""".stripMargin
         ev.copy(code = code)
       case _ =>

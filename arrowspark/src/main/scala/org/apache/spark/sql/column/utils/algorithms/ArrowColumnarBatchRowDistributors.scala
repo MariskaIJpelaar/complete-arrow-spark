@@ -52,7 +52,7 @@ object ArrowColumnarBatchRowDistributors {
    */
   def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
     try {
-      // TODO: close builder if we return earlier than expected
+      // FIXME: close builder if we return earlier than expected
       val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
 
       partitionIds.zipWithIndex foreach { case (partitionId, index) =>

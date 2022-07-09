@@ -106,7 +106,7 @@ object ArrowColumnarBatchRowTransformers {
    * Creates a new ArrowColumnarBatchRow from the given ArrowColumnarBatchRow,
    * with rows in order of the provided indices-vector
    * @param batch ArrowColumnarBatchRow to create new batch from, and close
-   * @param indices IntVector representing the indices to use
+   * @param indices IntVector representing the indices to use, and close
    * @return a new Batch with permuted (subset) of rows from provided batch
    *         Caller is responsible for closing returned batch
    */
@@ -134,6 +134,7 @@ object ArrowColumnarBatchRowTransformers {
       }, indices.getValueCount)
     } finally {
       batch.close()
+      indices.close()
     }
   }
 

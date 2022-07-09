@@ -40,8 +40,8 @@ object GenerateArrowColumnarBatchRowProjection extends CodeGenerator[Seq[Express
          |  }
          |
          |  public $batchClass apply($batchClass ${ctx.INPUT_ROW}) {
-         |    ${eval.code}
-         |    return ${eval.value};
+         |     ${eval.code}
+         |     return ${eval.value};
          |  }
          |
          |  ${ctx.declareAddedFunctions()}

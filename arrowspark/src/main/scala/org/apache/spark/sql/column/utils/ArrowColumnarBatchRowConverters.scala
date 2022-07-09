@@ -97,10 +97,9 @@ object ArrowColumnarBatchRowConverters {
    */
   def splitColumns(batch: ArrowColumnarBatchRow, col: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     try {
-      (new ArrowColumnarBatchRow(batch.copy(allocatorHint = "ArrowColumnarBatchRowConverters::splitColumns::first")
-        .columns.slice(0, col), batch.numRows),
-        new ArrowColumnarBatchRow(batch.copy(allocatorHint = "ArrowColumnarBatchRowConverters::splitColumns::second")
-          .columns.slice(col, batch.numFields), batch.numRows))
+      val copy = batch.copy(allocatorHint =  "ArrowColumnarBatchRowConverters::splitColumns")
+      (new ArrowColumnarBatchRow(copy.columns.slice(0, col), batch.numRows),
+        new ArrowColumnarBatchRow(copy.columns.slice(col, batch.numFields), batch.numRows))
     } finally {
       batch.close()
     }
