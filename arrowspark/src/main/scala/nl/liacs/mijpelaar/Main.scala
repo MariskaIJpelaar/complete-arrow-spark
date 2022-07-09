@@ -61,11 +61,11 @@ class Main extends Callable[Unit] {
 
     try {
       val start: Long = System.nanoTime()
-      val builder = SparkSession.builder().appName("LazyReaderSmallTest")
-//        .config("spark.memory.offHeap.enabled", "true")
-//        .config("spark.memory.offHeap.size", "10g")
+      val builder = SparkSession.builder().appName("Evaluator")
+        .config("spark.memory.offHeap.enabled", "true")
+        .config("spark.memory.offHeap.size", "10g")
 //        .config("spark.local.dir", sparkLocalDir)
-//        .config("spark.eventLog.enabled", "true")
+        .config("spark.eventLog.enabled", "true")
         .withExtensions(ArrowSparkExtensionWrapper.injectAll)
       if (local)
         builder.master("local[4]")

@@ -1,9 +1,10 @@
 package nl.liacs.mijpelaar.evaluation
 
-import org.apache.spark.sql.{SparkSession, column}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column._
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.vectorized.ArrowColumnVector
+import org.apache.spark.sql.{SparkSession, column}
 
 import java.io.FileWriter
 import java.nio.file.Paths
@@ -91,7 +92,8 @@ object EvaluationSuite {
     val sorted_df = if (cols.length == 1) df.sort(cols(0)) else df.sort(cols(0), cols(1))
     val vanilla_start = System.nanoTime()
     val rdd = sorted_df.queryExecution.executedPlan.execute()
-    rdd.map { _ => 1 }.sum()
+    val func: Iterator[InternalRow] => Int = { iter => iter.length }
+    spark.sparkContext.runJob(rdd, func).sum
     val vanilla_stop = System.nanoTime()
     fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
     fw.flush()
@@ -104,13 +106,16 @@ object EvaluationSuite {
     val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
     val cas_start = System.nanoTime()
     val arrowRDD = sorted_cdf.queryExecution.executedPlan.execute()
-    arrowRDD.map { case batch: ArrowColumnarBatchRow =>
-      try {
-        batch.numRows
-      } finally {
-        batch.close()
-      }
+    val arrowFunc: Iterator[InternalRow] => Int = { case iter: Iterator[ArrowColumnarBatchRow] =>
+      iter.map { batch =>
+        try {
+          batch.numRows
+        } finally {
+          batch.close()
+        }
+      }.sum
     }
+    spark.sparkContext.runJob(arrowRDD, arrowFunc).sum
     val cas_stop = System.nanoTime()
     fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()
@@ -128,7 +133,8 @@ object EvaluationSuite {
     val sorted_df = if (cols.length == 1) df.sort(cols(0)) else df.sort(cols(0), cols(1))
     val vanilla_start = System.nanoTime()
     val rdd = sorted_df.queryExecution.executedPlan.execute()
-    rdd.map { _ => 1 }.sum()
+    val func: Iterator[InternalRow] => Int = { iter => iter.length }
+    spark.sparkContext.runJob(rdd, func).sum
     val vanilla_stop = System.nanoTime()
     fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
     fw.flush()
@@ -141,13 +147,16 @@ object EvaluationSuite {
     val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
     val cas_start = System.nanoTime()
     val arrowRDD = sorted_cdf.queryExecution.executedPlan.execute()
-    arrowRDD.map { case batch: ArrowColumnarBatchRow =>
-      try {
-        batch.numRows
-      } finally {
-        batch.close()
-      }
+    val arrowFunc: Iterator[InternalRow] => Int = { case iter: Iterator[ArrowColumnarBatchRow] =>
+      iter.map { batch =>
+        try {
+          batch.numRows
+        } finally {
+          batch.close()
+        }
+      }.sum
     }
+    spark.sparkContext.runJob(arrowRDD, arrowFunc).sum
     val cas_stop = System.nanoTime()
     fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()

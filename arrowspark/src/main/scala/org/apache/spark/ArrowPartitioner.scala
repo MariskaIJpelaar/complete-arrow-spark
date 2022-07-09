@@ -36,6 +36,7 @@ class ArrowRangePartitioner[V](
 
   /** Note: inspiration from: org.apache.spark.RangePartitioner::sketch
    * Callers should close returned batch */
+    // TODO: time
   private def sketch(rdd: RDD[ArrowColumnarBatchRow], sampleSizePerPartition: Int):
   (Long, Iterator[(Int, Long, ArrowColumnarBatchRow)]) = {
     val shift = rdd.id

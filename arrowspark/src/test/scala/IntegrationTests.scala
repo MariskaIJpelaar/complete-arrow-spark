@@ -5,6 +5,7 @@ import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.util.HadoopOutputFile
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column._
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import org.apache.spark.sql.{SparkSession, column}
@@ -392,14 +393,16 @@ class IntegrationTests extends AnyFunSuite {
     new_df.explain(true)
 
     val rdd = new_df.queryExecution.executedPlan.execute()
-    rdd.map { case batch: ArrowColumnarBatchRow =>
-      try {
-        batch.numRows
-      } finally {
-        batch.close()
-      }
+    val func: Iterator[InternalRow] => Int = { case iter: Iterator[ArrowColumnarBatchRow] =>
+      iter.map { batch =>
+          try {
+            batch.numRows
+          } finally {
+            batch.close()
+          }
+      }.sum
     }
-
+    spark.sparkContext.runJob(rdd, func).sum
     column.resetRootAllocator()
 
     directory.deleteRecursively()
