@@ -375,7 +375,7 @@ class IntegrationTests extends AnyFunSuite {
     directory.deleteRecursively()
   }
 
-  test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading, on-partition check") {
+  test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading, memory-aware") {
     // Generate Dataset
     val size = default_size * 15
     val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true, size = size)
@@ -392,8 +392,13 @@ class IntegrationTests extends AnyFunSuite {
     new_df.explain(true)
 
     val rdd = new_df.queryExecution.executedPlan.execute()
-    rdd.count()
-    rdd.foreach( batch => batch.asInstanceOf[ArrowColumnarBatchRow].close())
+    rdd.map { case batch: ArrowColumnarBatchRow =>
+      try {
+        batch.numRows
+      } finally {
+        batch.close()
+      }
+    }
 
     column.resetRootAllocator()
 
