@@ -61,7 +61,7 @@ object ArrowColumnarBatchRowConverters {
       val columns = batch.columns.slice(0, numCols.getOrElse(batch.numFields))
       (VectorSchemaRoot.of(columns.map(column => {
         val vector = column.getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowConverters::toRoot", 0, Integer.MAX_VALUE))
+        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowConverters::toRoot", 0, org.apache.spark.sql.column.perAllocatorSize))
         tp.splitAndTransfer(0, rowCount)
         tp.getTo.asInstanceOf[FieldVector]
       }).toSeq: _*), rowCount)
@@ -115,13 +115,13 @@ object ArrowColumnarBatchRowConverters {
     try {
       val allocator = batch.getFirstAllocator
         .getOrElse( throw new RuntimeException("[ArrowColumnarBatchRowConverters::toUnionVector] cannot get allocator"))
-        .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector", 0, Integer.MAX_VALUE)
+        .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector", 0, org.apache.spark.sql.column.perAllocatorSize)
       val union = new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)
       try {
         batch.columns foreach { column =>
           val vector = column.getValueVector
           val tp = vector.getTransferPair(allocator
-            .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector::transfer", 0, Integer.MAX_VALUE))
+            .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector::transfer", 0, org.apache.spark.sql.column.perAllocatorSize))
           tp.transfer()
           union.addVector(tp.getTo.asInstanceOf[FieldVector])
         }
@@ -129,7 +129,7 @@ object ArrowColumnarBatchRowConverters {
 
         // make a copy and assume nothing can go wrong within transfer :)
         val ret = new UnionVector("UnionReturned", allocator
-          .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector::return", 0, Integer.MAX_VALUE), FieldType.nullable(Struct.INSTANCE), null)
+          .newChildAllocator("ArrowColumnarBatchRowConverters::toUnionVector::return", 0, org.apache.spark.sql.column.perAllocatorSize), FieldType.nullable(Struct.INSTANCE), null)
         union.makeTransferPair(ret).transfer()
         ret
       } finally {
@@ -151,7 +151,7 @@ object ArrowColumnarBatchRowConverters {
       Array.tabulate[ArrowColumnVector](batch.numFields) { i =>
         val vector = batch.columns(i).getValueVector
         val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRowConverters::makeFresh", 0, Integer.MAX_VALUE))
+          .newChildAllocator("ArrowColumnarBatchRowConverters::makeFresh", 0, org.apache.spark.sql.column.perAllocatorSize))
         // we 'copy' the content of the first batch ...
         tp.splitAndTransfer(0, batch.numRows)
         // ... and re-use the ValueVector so we do not have to determine vector types :)

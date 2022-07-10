@@ -9,7 +9,7 @@ object VectorDeduplicator {
   // does not close the provided vector
   // Caller is responsible for closing returned IntVector
   def uniqueIndices[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): IntVector = {
-    val indices = new IntVector("indices", vector.getAllocator.newChildAllocator("VectorDeduplicator::indices", 0, Integer.MAX_VALUE))
+    val indices = new IntVector("indices", vector.getAllocator.newChildAllocator("VectorDeduplicator::indices", 0, org.apache.spark.sql.column.perAllocatorSize))
 
     comparator.attachVector(vector)
     // the first one won't be a duplicate :)
@@ -36,7 +36,7 @@ object VectorDeduplicator {
   def unique[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): V = {
     val original = {
       val tp = vector.getTransferPair(vector.getAllocator
-        .newChildAllocator("VectorDeduplicator::unique::transfer", vector.getBufferSize, Integer.MAX_VALUE))
+        .newChildAllocator("VectorDeduplicator::unique::transfer", vector.getBufferSize, org.apache.spark.sql.column.perAllocatorSize))
       tp.transfer()
       tp.getTo
     }

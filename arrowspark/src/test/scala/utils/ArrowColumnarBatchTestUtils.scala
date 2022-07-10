@@ -11,7 +11,7 @@ object ArrowColumnarBatchTestUtils {
       val nums = table(index)
       maxSize = maxSize.max(nums.size)
       new ArrowColumnVector(utils.IntVectorUtils.fromSeq(nums,
-        allocator.newChildAllocator(s"Sequence $index", 0, Integer.MAX_VALUE),
+        allocator.newChildAllocator(s"Sequence $index", 0, org.apache.spark.sql.column.perAllocatorSize),
         name=s"IntVector $index"))
     }
     new ArrowColumnarBatchRow(array, maxSize)

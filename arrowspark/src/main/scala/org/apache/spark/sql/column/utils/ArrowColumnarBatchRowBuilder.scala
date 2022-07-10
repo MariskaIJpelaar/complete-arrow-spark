@@ -99,7 +99,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       val vector = column.getValueVector
       vector.setValueCount(size)
       val tp = vector.getTransferPair(vector.getAllocator
-        .newChildAllocator("ArrowColumnarBatchRowBuilder::buildColumns", 0, Integer.MAX_VALUE))
+        .newChildAllocator("ArrowColumnarBatchRowBuilder::buildColumns", 0, org.apache.spark.sql.column.perAllocatorSize))
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
     })

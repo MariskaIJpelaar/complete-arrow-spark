@@ -88,7 +88,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
 
         val vector = vectors.get(i).asInstanceOf[IntVector]
         vector.setInitialCapacity(rows)
-        vector.allocateNew()// required after allocateNew()?
+        vector.allocateNew()
         0 until rows foreach { row =>
           if (cr.getCurrentDefinitionLevel == dmax) vector.setSafe(row, cr.getInteger)
           else vector.setNull(row)
@@ -103,7 +103,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
       /** transfer ownership */
       val transferred = data.map { vector =>
         val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator(s"ParquetReaderIterator::transfer::$j::${vector.getName}", 0, Integer.MAX_VALUE))
+          .newChildAllocator(s"ParquetReaderIterator::transfer::$j::${vector.getName}", 0, org.apache.spark.sql.column.perAllocatorSize))
         tp.transfer()
         new ArrowColumnVector(tp.getTo)
       }

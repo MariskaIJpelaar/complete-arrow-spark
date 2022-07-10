@@ -19,7 +19,7 @@ object ArrowColumnarBatchRowTransformers {
     try {
       new ArrowColumnarBatchRow( indices.toArray map ( index => {
         val vector = batch.columns(index).getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowTransformers::projection", 0, Integer.MAX_VALUE))
+        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowTransformers::projection", 0, org.apache.spark.sql.column.perAllocatorSize))
         tp.splitAndTransfer(0, batch.numRows)
         new ArrowColumnVector(tp.getTo)
       }), batch.numRows)
@@ -39,7 +39,7 @@ object ArrowColumnarBatchRowTransformers {
     try {
       new ArrowColumnarBatchRow( batch.columns map ( column => {
         val vector = column.getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowTransformers::take()", 0, Integer.MAX_VALUE))
+        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowTransformers::take()", 0, org.apache.spark.sql.column.perAllocatorSize))
         tp.splitAndTransfer(range.head, range.length)
         new ArrowColumnVector(tp.getTo)
       }), range.length)
@@ -120,7 +120,7 @@ object ArrowColumnarBatchRowTransformers {
 
         // transfer type
         val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRowTransformers::applyIndices", 0, Integer.MAX_VALUE))
+          .newChildAllocator("ArrowColumnarBatchRowTransformers::applyIndices", 0, org.apache.spark.sql.column.perAllocatorSize))
         tp.splitAndTransfer(0, indices.getValueCount)
         val new_vector = tp.getTo
 

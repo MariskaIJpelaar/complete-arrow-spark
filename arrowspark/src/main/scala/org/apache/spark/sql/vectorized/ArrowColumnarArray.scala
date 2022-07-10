@@ -28,7 +28,7 @@ class ArrowColumnarArray(private val columnar: ColumnarArray) extends ArrayData 
   override def copy(): ArrayData = {
     val vector = getData.getValueVector
     val allocator = vector.getAllocator
-      .newChildAllocator(s"ArrowColumnarArray::copy::", 0, Integer.MAX_VALUE)
+      .newChildAllocator(s"ArrowColumnarArray::copy::", 0, org.apache.spark.sql.column.perAllocatorSize)
     val tp = vector.getTransferPair(allocator)
 
     tp.splitAndTransfer(0, vector.getValueCount)

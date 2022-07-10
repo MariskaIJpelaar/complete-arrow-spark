@@ -70,7 +70,7 @@ class ArrowColumnarBatchRow(@transient protected[column] val columns: Array[Arro
     new ArrowColumnarBatchRow(columns map { v =>
       val vector = v.getValueVector
       val allocator = vector.getAllocator
-        .newChildAllocator(s"ArrowColumnarBatchRow::copy::$allocatorHint", 0, Integer.MAX_VALUE)
+        .newChildAllocator(s"ArrowColumnarBatchRow::copy::$allocatorHint", 0, org.apache.spark.sql.column.perAllocatorSize)
       val tp = vector.getTransferPair(allocator)
 
       tp.splitAndTransfer(range.head, range.length)

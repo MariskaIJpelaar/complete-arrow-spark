@@ -25,7 +25,7 @@ object ArrowColumnarBatchRowSorters {
       // Indices for permutations
       val indexAllocator = batch.getFirstAllocator
         .getOrElse( throw new RuntimeException("[ArrowColumnarBatchRowSorters::multiColumnSort::indices] cannot get allocator"))
-        .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::indices", 0, Integer.MAX_VALUE)
+        .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::indices", 0, org.apache.spark.sql.column.perAllocatorSize)
       val indices = new IntVector("indexHolder", indexAllocator)
 
       // UnionVector representing our batch with columns from sortOrder
@@ -86,7 +86,7 @@ object ArrowColumnarBatchRowSorters {
       val vector = batch.columns(col).getValueVector
       val indices =
         new IntVector("indexHolder", vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRow::sort::indices", 0, Integer.MAX_VALUE))
+          .newChildAllocator("ArrowColumnarBatchRow::sort::indices", 0, org.apache.spark.sql.column.perAllocatorSize))
       assert(vector.getValueCount > 0)
 
       try {

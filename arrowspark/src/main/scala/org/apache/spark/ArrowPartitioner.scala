@@ -116,7 +116,7 @@ class ArrowRangePartitioner[V](
 
       val allocator = allocatorOption
         .getOrElse(throw new RuntimeException("[ArrowPartitioner::determineBounds] cannot get allocator"))
-        .newChildAllocator("ArrowPartitioner::determineBounds", 0, Integer.MAX_VALUE)
+        .newChildAllocator("ArrowPartitioner::determineBounds", 0, org.apache.spark.sql.column.perAllocatorSize)
 
       // we start by sorting the batches, and making the rows unique
       // we keep the weights by adding them as an extra column to the batch

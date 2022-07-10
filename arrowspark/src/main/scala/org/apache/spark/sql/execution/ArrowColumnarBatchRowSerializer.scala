@@ -138,7 +138,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
         ois = Option(new ObjectInputStream(cis))
       }
-      private lazy val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRowSerializer", 0, Integer.MAX_VALUE)
+      private lazy val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRowSerializer", 0, org.apache.spark.sql.column.perAllocatorSize)
       private var reader: Option[ArrowStreamReader] = None
       private def initReader(): Unit = {
         initOis()
@@ -169,7 +169,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         val length = ois.get.readInt()
         (0, new ArrowColumnarBatchRow((columns map { vector =>
           val allocator = vector.getAllocator
-            .newChildAllocator("ArrowColumnarBatchRowSerializer::getNext", 0, Integer.MAX_VALUE)
+            .newChildAllocator("ArrowColumnarBatchRowSerializer::getNext", 0, org.apache.spark.sql.column.perAllocatorSize)
           val tp = vector.getTransferPair(allocator)
 
           tp.transfer()
