@@ -1,5 +1,6 @@
 package org.apache.arrow.util.vector.read
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.types.pojo.Schema
 import org.apache.arrow.vector.{IntVector, ValueVector, VectorSchemaRoot}
@@ -13,7 +14,7 @@ import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.parquet.io.api.{GroupConverter, PrimitiveConverter}
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.execution.datasources.PartitionedFile
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
@@ -59,7 +60,6 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
     converter.fromParquet(parquetSchema).getArrowSchema
   }
   private lazy val colDesc = parquetSchema.getColumns
-  var j = 0
 
   override def hasNext: Boolean = pageReadStore != null
 
@@ -70,8 +70,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
     val colReader = new ColumnReadStoreImpl(pageReadStore, new DumpGroupConverter(),
       parquetSchema, reader.getFileMetaData.getCreatedBy)
 
-    val vectorSchemaRoot = VectorSchemaRoot.create(schema, allocator)
-    try {
+    Resources.autoCloseTryGet(VectorSchemaRoot.create(schema, allocator)) { vectorSchemaRoot =>
       val vectors = vectorSchemaRoot.getFieldVectors
 
       if (pageReadStore.getRowCount > Integer.MAX_VALUE)
@@ -100,17 +99,15 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
 
       vectorSchemaRoot.setRowCount(rows)
       val data = vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray
+      // FIXME: possible leak if transfer fails before batch is returned
+      val batchAllocator = createAllocator("ParquetReaderIterator::transfer")
       /** transfer ownership */
       val transferred = data.map { vector =>
-        val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator(s"ParquetReaderIterator::transfer::$j::${vector.getName}", 0, org.apache.spark.sql.column.perAllocatorSize))
+        val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
         tp.transfer()
         new ArrowColumnVector(tp.getTo)
       }
-      j += 1
-      new ArrowColumnarBatchRow(transferred, rows)
-    } finally {
-      vectorSchemaRoot.close()
+      new ArrowColumnarBatchRow(batchAllocator, transferred, rows)
     }
   }
 }

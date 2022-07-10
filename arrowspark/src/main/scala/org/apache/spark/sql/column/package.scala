@@ -11,6 +11,7 @@ package object column {
 
   /** Listener to make sure that allocators are automatically cleaned up if all its children are closed
    * and no memory is allocated anymore */
+    // TODO: use when required
   private val ourListener = new AllocationListener {
     override def onChildRemoved(parentAllocator: BufferAllocator, childAllocator: BufferAllocator): Unit = {
       super.onChildRemoved(parentAllocator, childAllocator)
@@ -23,14 +24,37 @@ package object column {
 
   val totalSize: Long = 16L * 1024L * 1024L * 1024L // 16 GB
   val perAllocatorSize: Long = totalSize
-  var rootAllocator = new RootAllocator(ourListener, totalSize)
+  var rootAllocator = new RootAllocator(totalSize)
 //  private def closeAllocator(allocator: BufferAllocator): Unit = {
 //    allocator.getChildAllocators.forEach(closeAllocator(_))
 //    allocator.close()
 //  }
+
+  /**
+   * Resets the rootAllocator to check if we released all memory
+   */
   def resetRootAllocator(): Unit = {
 //    closeAllocator(rootAllocator)
     rootAllocator.close()
-    rootAllocator = new RootAllocator(ourListener, totalSize)
+    rootAllocator = new RootAllocator(totalSize)
+  }
+
+  /**
+   * Creates a new [[BufferAllocator]] as child from the rootAllocator
+   * @param name name of the newly created allocator
+   * @return the newly created allocator
+   */
+  def createAllocator(name: String): BufferAllocator = {
+    rootAllocator.newChildAllocator(name, 0, perAllocatorSize)
+  }
+
+  /**
+   * Creates a new [[BufferAllocator]] as a child from the given allocator
+   * @param parentAllocator [[BufferAllocator]] as parent for the new child
+   * @param name name to give to the child
+   * @return the newly created child
+   */
+  def createAllocator(parentAllocator: BufferAllocator, name: String) = {
+    parentAllocator.newChildAllocator(name, 0, perAllocatorSize)
   }
 }
