@@ -1,7 +1,7 @@
 package utils
 
 import org.apache.arrow.memory.BufferAllocator
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 object ArrowColumnarBatchTestUtils {
@@ -10,10 +10,9 @@ object ArrowColumnarBatchTestUtils {
     val array: Array[ArrowColumnVector] = Array.tabulate(table.length) { index =>
       val nums = table(index)
       maxSize = maxSize.max(nums.size)
-      new ArrowColumnVector(utils.IntVectorUtils.fromSeq(nums,
-        allocator.newChildAllocator(s"Sequence $index", 0, org.apache.spark.sql.column.perAllocatorSize),
+      new ArrowColumnVector(utils.IntVectorUtils.fromSeq(nums, createAllocator(allocator, s"Sequence $index"),
         name=s"IntVector $index"))
     }
-    new ArrowColumnarBatchRow(array, maxSize)
+    new ArrowColumnarBatchRow(allocator, array, maxSize)
   }
 }

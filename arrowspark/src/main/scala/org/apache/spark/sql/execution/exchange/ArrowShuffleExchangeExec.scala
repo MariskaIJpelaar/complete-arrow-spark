@@ -1,5 +1,6 @@
 package org.apache.spark.sql.execution.exchange
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.{ArrowShuffleWriteProcessor, ShuffleWriteMetricsReporter}
@@ -8,7 +9,7 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBatchRowProjection
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowSerializer}
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
@@ -105,17 +106,11 @@ object ArrowShuffleExchangeExec {
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)
       iter.map {
-        case batch: ArrowColumnarBatchRow =>
-          try {
-            val key = getPartitionKey(batch.copy(allocatorHint = "ArrowShuffleExchangeExec::getKey")).asInstanceOf[ArrowColumnarBatchRow]
-            try {
-              (part.getPartitions(key), batch.copy(allocatorHint = "ArrowShuffleExchangeExec::return"))
-            } finally {
-              key.close()
-            }
-          } finally {
-            batch.close()
+        case batch: ArrowColumnarBatchRow => Resources.autoCloseTryGet(batch) { batch =>
+          Resources.autoCloseTryGet(getPartitionKey(batch.copy(createAllocator("ArrowShuffleExchangeExec::getKey"))).asInstanceOf[ArrowColumnarBatchRow]) { key =>
+            (part.getPartitions(key), batch.copy(createAllocator("ArrowShuffleExchangeExec::return")))
           }
+        }
       }
     }, isOrderSensitive = false)
 

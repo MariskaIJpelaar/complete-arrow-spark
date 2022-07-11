@@ -155,7 +155,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
             throw new RuntimeException("[ArrowColumnarBatchRowSerializer] Corrupted Stream")
         }
 
-        Resources.autoCloseTryGet(reader.get.getVectorSchemaRoot.getFieldVectors) { columns =>
+        Resources.autoCloseTraversableTryGet(reader.get.getVectorSchemaRoot.getFieldVectors.toIterator) { columns =>
           val batchAllocator = createAllocator("ArrowColumnarBatchRowSerializer::getNext")
           val length = ois.get.readInt()
           (0, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>

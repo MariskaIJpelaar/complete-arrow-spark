@@ -1,5 +1,6 @@
 package org.apache.spark.sql.execution.datasources
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
@@ -167,12 +168,10 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       override def next(): ArrowColumnarBatchRow = {
         currentIterator.get.next() match {
           case partition: ArrowColumnarBatchRow =>
-            try {
+            Resources.closeOnFailGet(partition) { partition =>
               inputMetrics.incRecordsRead(partition.numFields)
               incTaskInputMetricsBytesRead()
-              partition.copy(allocatorHint = "FileScanArrowRDD::next()")
-            } finally {
-              partition.close()
+              partition
             }
         }
       }

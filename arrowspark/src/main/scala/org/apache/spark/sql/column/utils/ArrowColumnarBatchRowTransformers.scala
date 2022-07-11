@@ -71,7 +71,7 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing the batch
    */
   def appendColumns(batch: ArrowColumnarBatchRow, cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
-    Resources.autoCloseTryGet(cols)( cols => Resources.autoCloseTryGet(batch) { batch =>
+    Resources.autoCloseTraversableTryGet(cols.toIterator)( cols => Resources.autoCloseTryGet(batch) { batch =>
       val allocator = createAllocator("ArrowColumnarBatchRowTransformers::appendColumns")
       // FIXME: cleanup if exception is thrown during map
       val new_cols = cols.map { column =>

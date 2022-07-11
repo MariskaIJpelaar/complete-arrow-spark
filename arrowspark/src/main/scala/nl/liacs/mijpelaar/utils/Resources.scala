@@ -60,6 +60,35 @@ object Resources {
     autoCloseTraversableTry(traversable)(fun).fold( throwable => throw throwable, item => item)
   }
 
+
+  /** Same as autoCloseTry, but for arrays
+   * Note that we possible close multiple times through this function */
+  def autoCloseableArrayTry[A <: AutoCloseable, B](array: Array[A])(fun: Array[A] => B): Try[B] = {
+    var t: Option[Throwable] = None
+    try {
+      Success(fun(array))
+    } catch {
+      case funT: Throwable =>
+        t = Option(funT)
+        assert(t.isDefined)
+        Failure(t.get)
+    } finally {
+      var u: Option[Throwable] = None
+      array.foreach { item =>
+        try {
+          item.close()
+        } catch {
+          case closeT: Throwable => u.fold[Unit]( (u = Option(closeT)) ) ( throwable => throwable.addSuppressed(closeT))
+        }
+      }
+      t.fold( u.foreach( throwable => throw throwable ) )( throwable => u.foreach(throwable.addSuppressed))
+    }
+  }
+
+  def autoCloseArrayTryGet[A <: AutoCloseable, B](array: Array[A])(fun: Array[A] => B): B = {
+    autoCloseableArrayTry(array)(fun).fold( throwable => throw throwable, item => item)
+  }
+
   /** Same as autoCloseTry, but with Option-type */
   def autoCloseOptionTry[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): Try[B] = {
     var t: Option[Throwable] = None
@@ -110,6 +139,10 @@ object Resources {
     }
   }
 
+  def closeOnFailGet[A <: AutoCloseable, B](closeable: A)(fun: A => B): B = {
+    closeOnFail(closeable)(fun).fold( throwable => throw throwable, item => item)
+  }
+
   /** Same as other closeOnFail, but for traversables of closeables */
   def closeTraversableOnFail[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): Try[B] = {
     var t: Option[Throwable] = None
@@ -135,6 +168,34 @@ object Resources {
 
   def closeTraversableOnFailGet[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): B = {
     closeTraversableOnFail(traversable)(fun).fold( throwable => throw throwable, item => item)
+  }
+
+  /** Same as other closeOnFail, but for arrays
+   * Note: we could close the items multiple times because of this */
+  def closeArrayOnFail[A <: AutoCloseable, B](array: Array[A])(fun: Array[A] => B): Try[B] = {
+    var t: Option[Throwable] = None
+    try {
+      Success(fun(array))
+    } catch {
+      case funT: Throwable =>
+        t = Option(funT)
+        assert(t.isDefined)
+        Failure(t.get)
+    } finally {
+      t foreach { throwable =>
+        array.foreach { item =>
+          try {
+            item.close()
+          } catch {
+            case closeT: Throwable => throwable.addSuppressed(closeT)
+          }
+        }
+      }
+    }
+  }
+
+  def closeArrayOnFailGet[A <: AutoCloseable, B](array: Array[A])(fun: Array[A] => B): B = {
+    closeArrayOnFail(array)(fun).fold( throwable => throw throwable, item => item)
   }
 }
 

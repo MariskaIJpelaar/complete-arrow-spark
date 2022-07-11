@@ -116,7 +116,7 @@ object ArrowColumnarBatchRowEncoders {
           return null
         }
 
-        Resources.autoCloseTryGet(reader.getVectorSchemaRoot.getFieldVectors) { columns =>
+        Resources.autoCloseTraversableTryGet(reader.getVectorSchemaRoot.getFieldVectors.toIterator) { columns =>
           val batchAllocator = createAllocator("ArrowColumnarBatchRowEncoders::decode")
           val length = ois.readInt()
           val arr_length = ois.readInt()

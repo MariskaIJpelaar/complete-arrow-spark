@@ -2,7 +2,7 @@ package org.apache.spark.sql.catalyst.expressions
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.Block.BlockHelper
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowTransformers
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataType, StructField, StructType}
@@ -30,7 +30,7 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
             val columns = Array.tabulate[ArrowColumnVector](other.length) { i =>
               other(i).eval(batch).asInstanceOf[ArrowColumnarArray].getData
             }
-            ArrowColumnarBatchRow.create(columns)
+            ArrowColumnarBatchRow.create(createAllocator("ArrowBoundAttribute::eval"), columns)
         }
       } finally {
         batch.close()

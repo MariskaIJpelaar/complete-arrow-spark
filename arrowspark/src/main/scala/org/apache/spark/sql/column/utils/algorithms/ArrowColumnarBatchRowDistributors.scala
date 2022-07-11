@@ -53,7 +53,8 @@ object ArrowColumnarBatchRowDistributors {
             createAllocator("ArrowColumnarBatchRowDistributors::distribute::first"), index until index+1))
       }
 
-      distributed.map ( items => (items._1, items._2.build()) ).toMap
+      distributed.map ( items =>
+        (items._1, items._2.build(createAllocator("ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
     }
   }
 }

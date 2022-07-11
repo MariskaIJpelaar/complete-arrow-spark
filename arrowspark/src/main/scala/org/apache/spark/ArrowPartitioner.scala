@@ -131,7 +131,7 @@ class ArrowRangePartitioner[V](
         var cumSize = 0
         var target = step
         var boundBuilder: Option[ArrowColumnarBatchRowBuilder] = None
-        Resources.autoCloseTryGet(boundBuilder) { _ =>
+        Resources.autoCloseOptionTryGet(boundBuilder) { _ =>
           0 until unique.numRows takeWhile { index =>
             cumWeight += weights.getFloat(index)
             if (cumWeight >= target) {
