@@ -13,9 +13,7 @@ import java.io._
 // TODO: memory management
 // TODO: Do not use childAllocators for everything anymore: each batch get a childAllocator named after the function it is created from, FROM THE ROOTALLOCATOR, and has childAllocators for its columns
 //        Whenever a batch is closed, its allocator is also closed
-// TODO: Every creation of ArrowColumnarBatchRow should either be closed in the same function (Resources.autoCloseTry), or the function acts as a constructor (Resources.closeOnFail),
-//        in which case the parent is responsible for closing or should pass this responsibility to its parent
-//       A receiver of a batch has no responsibility of closing it!
+// TODO: When you pass a batch to a function, you should assume it is invalidated unless otherwise noted. If you want to use it afterwards, you should copy it
 
 /**
  * ArrowColumnarBatchRow as a wrapper around [[ArrowColumnVector]]s to be used as an [[InternalRow]]
@@ -67,13 +65,12 @@ class ArrowColumnarBatchRow(val allocator: BufferAllocator, @transient protected
   /** Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
-  override def copy(): ArrowColumnarBatchRow = copy(0 until numRows,
-    createAllocator("ArrowColumnarBatchRow::copy"))
+  override def copy(): ArrowColumnarBatchRow = copy(createAllocator("ArrowColumnarBatchRow::copy"))
 
   /** Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
-  def copy(range: Range = 0 until numRows, newAllocator: BufferAllocator): ArrowColumnarBatchRow = {
+  def copy(newAllocator: BufferAllocator, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
     if (range.isEmpty)
       return ArrowColumnarBatchRow.empty
 
