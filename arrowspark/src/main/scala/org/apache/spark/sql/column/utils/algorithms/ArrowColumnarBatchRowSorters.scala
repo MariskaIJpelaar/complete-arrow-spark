@@ -1,12 +1,12 @@
 package org.apache.spark.sql.column.utils.algorithms
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator}
 import org.apache.arrow.vector.IntVector
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
-// TODO: check memory management
 object ArrowColumnarBatchRowSorters {
 
   /**
@@ -22,37 +22,28 @@ object ArrowColumnarBatchRowSorters {
     if (batch.numFields < 1)
       return batch
 
-    try {
+    Resources.autoCloseTryGet(batch) { batch =>
       // Indices for permutations
-      val indexAllocator = batch.getFirstAllocator
-        .getOrElse( throw new RuntimeException("[ArrowColumnarBatchRowSorters::multiColumnSort::indices] cannot get allocator"))
-        .newChildAllocator("ArrowColumnarBatchRow::multiColumnSort::indices", 0, org.apache.spark.sql.column.perAllocatorSize)
-      val indices = new IntVector("indexHolder", indexAllocator)
+      Resources.autoCloseTryGet(new IntVector("indexHolder",
+        createAllocator("ArrowColumnarBatchRowSorters::multiColumnSort::indices"))) { indices =>
+        // UnionVector representing our batch with columns from sortOrder
+        Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toUnionVector(
+          ArrowColumnarBatchRowTransformers.getColumns(batch.copy(
+            createAllocator("ArrowColumnarBatchRowSorters::multiColumnSort::union")),
+            sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))) { union =>
+          val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
 
-      // UnionVector representing our batch with columns from sortOrder
-      val union = ArrowColumnarBatchRowConverters.toUnionVector(
-        ArrowColumnarBatchRowTransformers.getColumns(batch.copy(allocatorHint = "ArrowColumnarBatchRowSorters::multiColumnSort::union"),
-          sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))
+          // prepare indices
+          indices.allocateNew(batch.numRows)
+          indices.setValueCount(batch.numRows)
 
-      try {
-        // prepare comparator
-        val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
+          // compute the index-vector
+          (new IndexSorter).sort(union, indices, comparator)
 
-        // prepare indices
-        indices.allocateNew(batch.numRows)
-        indices.setValueCount(batch.numRows)
-
-        // compute the index-vector
-        (new IndexSorter).sort(union, indices, comparator)
-
-        /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
-        ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
-      } finally {
-        union.close()
-        indices.close()
+          /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
+          ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
+        }
       }
-    } finally {
-      batch.close()
     }
   }
 
@@ -83,14 +74,12 @@ object ArrowColumnarBatchRowSorters {
     if (col < 0 || col > batch.numFields)
       return batch
 
-    try {
+    Resources.autoCloseTryGet(batch) { batch =>
       val vector = batch.columns(col).getValueVector
-      val indices =
-        new IntVector("indexHolder", vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRow::sort::indices", 0, org.apache.spark.sql.column.perAllocatorSize))
-      assert(vector.getValueCount > 0)
+      Resources.autoCloseTryGet(new IntVector("indexHolder",
+        createAllocator("ArrowColumnarBatchRow::sort::indices"))) { indices =>
+        assert(vector.getValueCount > 0)
 
-      try {
         indices.allocateNew(vector.getValueCount)
         indices.setValueCount(vector.getValueCount)
         val comparator = new SparkComparator(sortOrder, DefaultVectorComparators.createDefaultComparator(vector))
@@ -99,13 +88,7 @@ object ArrowColumnarBatchRowSorters {
         // sort by permutation
         /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
         ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
-      } finally {
-        indices.close()
       }
-    } finally {
-      batch.close()
     }
   }
-
-
 }

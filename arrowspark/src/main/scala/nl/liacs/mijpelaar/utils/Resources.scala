@@ -1,5 +1,6 @@
 package nl.liacs.mijpelaar.utils
 
+import scala.language.higherKinds
 import scala.util.{Failure, Success, Try}
 
 
@@ -29,7 +30,61 @@ object Resources {
 
   /** Same as autoCloseTry, but either retrieves the result or throws the throwable */
   def autoCloseTryGet[A <: AutoCloseable, B](closeable: A)(fun: A => B): B = {
-    autoCloseTry(closeable)(fun).fold( throwable => throw throwable, batch => batch)
+    autoCloseTry(closeable)(fun).fold( throwable => throw throwable, item => item)
+  }
+
+  /** Same as autoCloseTry, but for traversables */
+  def autoCloseTry[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): Try[B] = {
+    var t: Option[Throwable] = None
+    try {
+      Success(fun(traversable))
+    } catch {
+      case funT: Throwable =>
+        t = Option(funT)
+        assert(t.isDefined)
+        Failure(t.get)
+    } finally {
+      var u: Option[Throwable] = None
+      traversable.foreach { item =>
+        try {
+          item.close()
+        } catch {
+          case closeT: Throwable => u.fold[Unit]( (u = Option(closeT)) ) ( throwable => throwable.addSuppressed(closeT))
+        }
+      }
+      t.fold( u.foreach( throwable => throw throwable ) )( throwable => u.foreach(throwable.addSuppressed))
+    }
+  }
+
+  def autoCloseTryGet[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): B = {
+    autoCloseTry(traversable)(fun).fold( throwable => throw throwable, item => item)
+  }
+
+  /** Same as autoCloseTry, but with Option-type */
+  def autoCloseTry[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): Try[B] = {
+    var t: Option[Throwable] = None
+    try {
+      Success(fun(optional))
+    } catch {
+      case funT: Throwable =>
+        t = Option(funT)
+        assert(t.isDefined)
+        Failure(t.get)
+    } finally {
+      t.fold(optional.foreach(_.close())) { throwable =>
+          try {
+            optional.foreach(_.close())
+          } catch {
+            case closeT: Throwable =>
+              throwable.addSuppressed(closeT)
+              Failure(throwable)
+          }
+      }
+    }
+  }
+
+  def autoCloseTryGet[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): B = {
+    autoCloseTry(optional)(fun).fold( throwable => throw throwable, item => item)
   }
 
   /** Same as autoCloseTry, but only closes on failure */
@@ -53,6 +108,33 @@ object Resources {
         }
       }
     }
+  }
+
+  /** Same as other closeOnFail, but for traversables of closeables */
+  def closeOnFail[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): Try[B] = {
+    var t: Option[Throwable] = None
+    try {
+      Success(fun(traversable))
+    } catch {
+      case funT: Throwable =>
+        t = Option(funT)
+        assert(t.isDefined)
+        Failure(t.get)
+    } finally {
+      t foreach { throwable =>
+        traversable.foreach { item =>
+          try {
+           item.close()
+          } catch {
+            case closeT: Throwable => throwable.addSuppressed(closeT)
+          }
+        }
+      }
+    }
+  }
+
+  def closeOnFailGet[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): B = {
+    closeOnFail(traversable)(fun).fold( throwable => throw throwable, item => item)
   }
 }
 
