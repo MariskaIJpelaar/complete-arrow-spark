@@ -8,6 +8,7 @@ import org.apache.spark.util.random.XORShiftRandom
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
+// TODO: check memory management
 object ArrowColumnarBatchRowSamplers {
   /**
    * Sample rows from batches where the sample-size is determined by probability

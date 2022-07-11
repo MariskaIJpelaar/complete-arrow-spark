@@ -14,6 +14,7 @@ import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 import java.util
 
+// TODO: check memory management
 /** Methods that convert an ArrowColumnarBatchRows to another type, and taking care of closing of the input */
 object ArrowColumnarBatchRowConverters {
   /**

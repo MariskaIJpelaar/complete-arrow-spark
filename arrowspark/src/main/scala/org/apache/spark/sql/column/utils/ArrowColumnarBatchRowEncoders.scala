@@ -14,6 +14,7 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, 
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
+// TODO: check memory management
 object ArrowColumnarBatchRowEncoders {
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
    * Encodes the first numRows rows of the first numCols columns of a series of ArrowColumnarBatchRows

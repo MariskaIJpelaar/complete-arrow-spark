@@ -6,6 +6,7 @@ import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
+// TODO: check memory management
 object ArrowColumnarBatchRowSorters {
 
   /**

@@ -8,6 +8,7 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLShuffleReadMetricsReporter}
 import org.apache.spark.sql.internal.SQLConf
 
+// TODO: check memory management
 /** Note: copied functionalities from org.apache.spark.rdd.ShuffledRowRDD
  * Caller is responsible for closing rdd output */
 class ShuffledArrowColumnarBatchRowRDD(

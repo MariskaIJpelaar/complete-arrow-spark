@@ -9,7 +9,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBa
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowEncoders
+import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowSerializer}
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
 import org.apache.spark.util.MutablePair

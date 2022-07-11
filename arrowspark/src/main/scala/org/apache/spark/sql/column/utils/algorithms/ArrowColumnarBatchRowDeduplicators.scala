@@ -1,5 +1,6 @@
 package org.apache.spark.sql.column.utils.algorithms
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -12,27 +13,20 @@ object ArrowColumnarBatchRowDeduplicators {
    * @param sortOrders order to define unique-ness
    * @return a fresh batch with the unique values from the previous
    *
-   * Closes the passed batch
    * Caller is responsible for closing the new batch
+   * TODO: do we invalidate batch?
    */
   def unique(batch: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): ArrowColumnarBatchRow = {
     if (batch.numFields < 1)
       return batch
 
-    try {
-      // UnionVector representing our batch
-      val union = ArrowColumnarBatchRowConverters.toUnionVector(
-        ArrowColumnarBatchRowTransformers.getColumns(batch.copy(allocatorHint = "ArrowColumnarBatchRowDeduplicators::unique"),
-          sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray)
-      )
-      try {
-        val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
-        ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(comparator, union))
-      } finally {
-        union.close()
-      }
-    } finally {
-      batch.close()
+    // UnionVector representing our batch
+    Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toUnionVector(
+      ArrowColumnarBatchRowTransformers.getColumns(batch,
+        sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray)
+    )) { union =>
+      val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
+      ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(comparator, union))
     }
   }
 

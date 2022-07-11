@@ -1,4 +1,4 @@
-package org.apache.spark.sql.execution
+package org.apache.spark.sql.column.utils
 
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
@@ -8,7 +8,6 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
 import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowConverters
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
@@ -20,6 +19,7 @@ import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
+// TODO: check memory managment
 /** Note: copied and adapted from org.apache.spark.sql.execution.UnsafeRowSerializer
  * Also note: getting this right took quite some effort, if you want to improve/ change it,
  * please know what you are doing :) */

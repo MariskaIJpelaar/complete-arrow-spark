@@ -11,6 +11,7 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 import java.util
 import scala.collection.mutable.ArrayBuffer
 
+// TODO: check memory management
 /** copied and adapted from org.apache.spark.sql.execution.SortExec
  * Caller is responsible for closing returned batches from this plan */
 case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: SparkPlan)

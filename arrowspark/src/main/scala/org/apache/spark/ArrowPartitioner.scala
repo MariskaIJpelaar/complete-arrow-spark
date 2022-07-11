@@ -16,6 +16,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.hashing.byteswap32
 
+// TODO: check memory management
 abstract class ArrowPartitioner extends Partitioner {
   override def getPartition(key: Any): Int = throw new UnsupportedOperationException()
   def getPartitions(key: ArrowColumnarBatchRow): Array[Int]

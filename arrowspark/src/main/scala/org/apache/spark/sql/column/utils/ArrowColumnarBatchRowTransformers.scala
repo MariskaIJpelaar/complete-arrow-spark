@@ -6,6 +6,7 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.random.XORShiftRandom
 
+// TODO: check memory management
 /** Methods mapping an ArrowColumnarBatchRow to another ArrowColumnarBatchRow, also taking care of closing of the input */
 object ArrowColumnarBatchRowTransformers {
   /**

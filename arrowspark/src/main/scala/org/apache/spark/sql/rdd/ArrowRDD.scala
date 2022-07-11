@@ -8,6 +8,7 @@ import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowCo
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
+// TODO: check memory management
 // Caller should close batches in RDD
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
   // Caller should close returned batches
