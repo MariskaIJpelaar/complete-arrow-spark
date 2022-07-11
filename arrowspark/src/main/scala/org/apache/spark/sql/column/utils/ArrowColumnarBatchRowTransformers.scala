@@ -1,12 +1,12 @@
 package org.apache.spark.sql.column.utils
 
-import nl.liacs.mijpelaar.utils.RandomUtils
+import nl.liacs.mijpelaar.utils.{RandomUtils, Resources}
 import org.apache.arrow.vector.IntVector
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.random.XORShiftRandom
 
-// TODO: check memory management
+
 /** Methods mapping an ArrowColumnarBatchRow to another ArrowColumnarBatchRow, also taking care of closing of the input */
 object ArrowColumnarBatchRowTransformers {
   /**
@@ -17,15 +17,14 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing returned batch
    */
   def projection(batch: ArrowColumnarBatchRow, indices: Seq[Int]): ArrowColumnarBatchRow = {
-    try {
-      new ArrowColumnarBatchRow( indices.toArray map ( index => {
+    Resources.autoCloseTryGet(batch) { batch =>
+      val batchAllocator = createAllocator("ArrowColumnarBatchRowTransformers::projection")
+      new ArrowColumnarBatchRow(batchAllocator, indices.toArray map ( index => {
         val vector = batch.columns(index).getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowTransformers::projection", 0, org.apache.spark.sql.column.perAllocatorSize))
-        tp.splitAndTransfer(0, batch.numRows)
+        val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
+        tp.transfer()
         new ArrowColumnVector(tp.getTo)
       }), batch.numRows)
-    } finally {
-      batch.close()
     }
   }
 
@@ -37,15 +36,14 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing returned batch
    */
   def take(batch: ArrowColumnarBatchRow, range: Range): ArrowColumnarBatchRow = {
-    try {
-      new ArrowColumnarBatchRow( batch.columns map ( column => {
+    Resources.autoCloseTryGet(batch) { batch =>
+      val batchAllocator = createAllocator("ArrowColumnarBatchRowTransformers::take()")
+      new ArrowColumnarBatchRow(batchAllocator, batch.columns map ( column => {
         val vector = column.getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowTransformers::take()", 0, org.apache.spark.sql.column.perAllocatorSize))
+        val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
         tp.splitAndTransfer(range.head, range.length)
         new ArrowColumnVector(tp.getTo)
       }), range.length)
-    } finally {
-      batch.close()
     }
   }
 
@@ -57,32 +55,33 @@ object ArrowColumnarBatchRowTransformers {
    *        Callers should close returned batch
    */
   def sample(batch: ArrowColumnarBatchRow, seed: Long = System.nanoTime()): ArrowColumnarBatchRow = {
-    try {
+    Resources.autoCloseTryGet(batch) { batch =>
       val rand = new RandomUtils(new XORShiftRandom(seed))
       val start: Int = rand.generateRandomNumber(end = batch.numRows-1)
       val end = rand.generateRandomNumber(start, batch.numRows)
       take(batch, start until end)
-    } finally {
-      batch.close()
     }
   }
 
   /**
    * Appends an Array of columns to the provided batch and closes the original batch
-   * @param batch batch to append columns to
-   * @param cols columns to append to batch
+   * @param batch batch to append columns to, and close
+   * @param cols columns to append to batch, and close
    * @return a fresh batch with the columns of the original-batch and the provided columns
    *         Caller is responsible for closing the batch
    */
   def appendColumns(batch: ArrowColumnarBatchRow, cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
-    try {
-      // FIXME: better?
-      new ArrowColumnarBatchRow(batch.copy(allocatorHint = "ArrowColumnarBatchRowTransformers::appendColumns::first").columns
-        ++ new ArrowColumnarBatchRow(cols, batch.numRows)
-        .copy(allocatorHint = "ArrowColumnarBatchRowTransformers::appendColumns::second").columns, batch.numRows)
-    } finally {
-      batch.close()
-    }
+    Resources.autoCloseTryGet(cols)( cols => Resources.autoCloseTryGet(batch) { batch =>
+      val allocator = createAllocator("ArrowColumnarBatchRowTransformers::appendColumns")
+      // FIXME: cleanup if exception is thrown during map
+      val new_cols = cols.map { column =>
+        val vector = column.getValueVector
+        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+        tp.transfer()
+        new ArrowColumnVector(tp.getTo)
+      }
+      new ArrowColumnarBatchRow(allocator, batch.copy(allocator).columns ++ new_cols, batch.numRows)
+    })
   }
 
   /**
@@ -93,13 +92,17 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing the batch
    */
   def getColumns(batch: ArrowColumnarBatchRow, names: Array[String]): ArrowColumnarBatchRow = {
-    try {
+    Resources.autoCloseTryGet(batch) { batch =>
+      val allocator = createAllocator("ArrowColumnarBatchRowTransformers::getColumns")
       val cols = names.flatMap { name =>
         batch.columns.find(vector => vector.getValueVector.getName.equals(name))
+      }.map { column =>
+        val vector = column.getValueVector
+        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+        tp.transfer()
+        new ArrowColumnVector(tp.getTo)
       }
-      new ArrowColumnarBatchRow(cols, batch.numRows).copy(allocatorHint = "ArrowColumnarBatchRowTransformers::getColumns")
-    } finally {
-      batch.close()
+      new ArrowColumnarBatchRow(allocator, cols, batch.numRows)
     }
   }
 
@@ -112,16 +115,17 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing returned batch
    */
   def applyIndices(batch: ArrowColumnarBatchRow, indices: IntVector): ArrowColumnarBatchRow = {
-    try {
+    Resources.autoCloseTryGet(batch) (batch => Resources.autoCloseTryGet(indices) { indices =>
       assert(indices.getValueCount > 0)
 
-      new ArrowColumnarBatchRow( batch.columns map { column =>
+      // FIXME: clean up if exception is thrown within map
+      val allocator = createAllocator("ArrowColumnarBatchRowTransformers::applyIndices")
+      new ArrowColumnarBatchRow(allocator, batch.columns map { column =>
         val vector = column.getValueVector
         assert(indices.getValueCount <= vector.getValueCount)
 
         // transfer type
-        val tp = vector.getTransferPair(vector.getAllocator
-          .newChildAllocator("ArrowColumnarBatchRowTransformers::applyIndices", 0, org.apache.spark.sql.column.perAllocatorSize))
+        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
         tp.splitAndTransfer(0, indices.getValueCount)
         val new_vector = tp.getTo
 
@@ -133,10 +137,6 @@ object ArrowColumnarBatchRowTransformers {
 
         new ArrowColumnVector(new_vector)
       }, indices.getValueCount)
-    } finally {
-      batch.close()
-      indices.close()
-    }
+    })
   }
-
 }

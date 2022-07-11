@@ -2,13 +2,12 @@ package org.apache.spark.sql.rdd
 
 import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowUtils}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
-// TODO: check memory management
 // Caller should close batches in RDD
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
   // Caller should close returned batches
@@ -98,7 +97,8 @@ object ArrowRDD {
 
       res.foreach(result => {
         // NOTE: we require the 'take', because we do not want more than num numRows
-        buf += ArrowColumnarBatchRow.create(
+        val allocator = createAllocator("ArrowRDD::take")
+        buf += ArrowColumnarBatchRow.create(allocator,
           ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))._2)
       })
 

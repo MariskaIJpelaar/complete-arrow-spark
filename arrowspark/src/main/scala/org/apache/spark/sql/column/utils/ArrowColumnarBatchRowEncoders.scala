@@ -1,12 +1,12 @@
 package org.apache.spark.sql.column.utils
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.vector.VectorLoader
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.sql.column
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
 
@@ -14,7 +14,6 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, 
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
-// TODO: check memory management
 object ArrowColumnarBatchRowEncoders {
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
    * Encodes the first numRows rows of the first numCols columns of a series of ArrowColumnarBatchRows
@@ -27,7 +26,8 @@ object ArrowColumnarBatchRowEncoders {
    *
    * Users may add additional encoding by providing the 'extraEncoder' function
    *
-   * Closes the batches found in the iterator */
+   * Closes the batches found in the iterator
+   */
   def encode(iter: Iterator[Any],
              numCols: Option[Int] = None,
              numRows: Option[Int] = None,
@@ -36,6 +36,7 @@ object ArrowColumnarBatchRowEncoders {
     if (!iter.hasNext)
       return Iterator(Array.emptyByteArray)
 
+    // FIXME: make iter an Iterator of Closeables?
     try {
       // how many rows are left to read?
       var left = numRows
@@ -46,31 +47,30 @@ object ArrowColumnarBatchRowEncoders {
         new ObjectOutputStream(codec.compressedOutputStream(bos))
       }
 
-      try {
+      Resources.autoCloseTryGet(oos) { oos =>
         // Prepare first batch
         // This needs to be done separately as we need the schema for the VectorSchemaRoot
         val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
         // consumes first
         val (root, firstLength) = ArrowColumnarBatchRowConverters.toRoot(first, numCols, numRows)
-        try {
-          val writer = new ArrowStreamWriter(root, null, Channels.newChannel(oos))
-          try {
-            // write first batch
-            writer.start()
-            writer.writeBatch()
-            root.close()
-            oos.writeInt(firstLength)
-            oos.writeInt(extra.length)
-            oos.write(extra)
-            left = left.map( numLeft => numLeft-firstLength )
+        Resources.autoCloseTryGet(root) ( root => Resources.autoCloseTryGet(new ArrowStreamWriter(root, null, Channels.newChannel(oos))) { writer =>
+          // write first batch
+          writer.start()
+          writer.writeBatch()
+          root.close()
+          oos.writeInt(firstLength)
+          oos.writeInt(extra.length)
+          oos.write(extra)
+          left = left.map( numLeft => numLeft-firstLength )
 
-            // while we still have some reading to do
-            while (iter.hasNext && left.forall( _ > 0)) {
-              val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
+          // while we still have some reading to do
+          while (iter.hasNext && left.forall( _ > 0)) {
+            val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
+            Resources.autoCloseTryGet(batch){ batch =>
               // consumes batch
               val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
                 ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
-              try {
+              Resources.autoCloseTryGet(recordBatch) { recordBatch =>
                 new VectorLoader(root).load(recordBatch)
                 writer.writeBatch()
                 root.close()
@@ -78,20 +78,11 @@ object ArrowColumnarBatchRowEncoders {
                 oos.writeInt(extra.length)
                 oos.write(extra)
                 left = left.map( numLeft => numLeft-batchLength )
-              } finally {
-                recordBatch.close()
               }
             }
-            // clean up and return the singleton-iterator
-            oos.flush()
-          } finally {
-            writer.close()
           }
-        } finally {
-          root.close()
-        }
-      } finally {
-        oos.close()
+          oos.flush()
+        })
       }
       Iterator(bos.toByteArray)
     } finally {
@@ -104,7 +95,8 @@ object ArrowColumnarBatchRowEncoders {
    * Callers may add additional decoding by providing the 'extraDecoder' function. They are responsible for
    * closing the provided ArrowColumnarBatch if they consume it (do not return it)
    *
-   * Callers are responsible for closing the returned 'Any' containing the batch */
+   * Callers are responsible for closing the returned 'Any' containing the batch
+   */
   def decode(bytes: Array[Byte],
              extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch): Iterator[Any] = {
     if (bytes.length == 0)
@@ -115,7 +107,7 @@ object ArrowColumnarBatchRowEncoders {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         new ObjectInputStream(codec.compressedInputStream(bis))
       }
-      private val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRowEncoders::decode", 0, org.apache.spark.sql.column.perAllocatorSize)
+      private val allocator = createAllocator("ArrowColumnarBatchRowEncoders::decode::reader")
       private val reader = new ArrowStreamReader(ois, allocator)
 
       override protected def getNext(): Any = {
@@ -124,24 +116,25 @@ object ArrowColumnarBatchRowEncoders {
           return null
         }
 
-        val columns = reader.getVectorSchemaRoot.getFieldVectors
-        val length = ois.readInt()
-        val arr_length = ois.readInt()
-        val array = new Array[Byte](arr_length)
-        ois.readFully(array)
+        Resources.autoCloseTryGet(reader.getVectorSchemaRoot.getFieldVectors) { columns =>
+          val batchAllocator = createAllocator("ArrowColumnarBatchRowEncoders::decode")
+          val length = ois.readInt()
+          val arr_length = ois.readInt()
+          val array = new Array[Byte](arr_length)
+          ois.readFully(array)
 
-        // Note: vector is transferred and is thus implicitly closed
-        extraDecoder(array, new ArrowColumnarBatchRow((columns map { vector =>
-          val allocator = vector.getAllocator.newChildAllocator("ArrowColumnarBatchRow::decode::extraDecoder", 0, org.apache.spark.sql.column.perAllocatorSize)
-          val tp = vector.getTransferPair(allocator)
-
-          tp.transfer()
-          new ArrowColumnVector(tp.getTo)
-        }).toArray, length))
+          // Note: vector is transferred and is thus implicitly closed
+          extraDecoder(array, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
+            val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
+            tp.transfer()
+            new ArrowColumnVector(tp.getTo)
+          }).toArray, length))
+        }
       }
 
       override protected def close(): Unit = {
         reader.close()
+        allocator.close()
         ois.close()
         bis.close()
       }

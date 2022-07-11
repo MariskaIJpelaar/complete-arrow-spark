@@ -16,7 +16,6 @@ import org.apache.spark.sql.types.{ArrayType, StructType}
 import scala.collection.mutable
 
 
-// TODO: check memory management
 trait ArrowFileFormat extends FileFormat {
   protected lazy val allocator: BufferAllocator = column.rootAllocator.newChildAllocator("SimpleParquetArrowFileFormat", 0, org.apache.spark.sql.column.perAllocatorSize)
 

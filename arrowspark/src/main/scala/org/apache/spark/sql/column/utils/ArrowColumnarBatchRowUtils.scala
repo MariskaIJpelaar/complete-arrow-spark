@@ -1,13 +1,13 @@
 package org.apache.spark.sql.column.utils
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, SparkComparator, SparkUnionComparator}
 import org.apache.arrow.vector.{ValueVector, ZeroVector}
 import org.apache.arrow.vector.complex.UnionVector
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
-// TODO: check memory management
 /** Methods that do not fit into the other categories */
 object ArrowColumnarBatchRowUtils {
 
@@ -56,22 +56,21 @@ object ArrowColumnarBatchRowUtils {
       return (None, new Array[ArrowColumnVector](0))
     }
 
+    // FIXME: Resource releaser with custom close function?
     try {
       // get first batch and its extra
       val (extra, first) = extraTaker(batches.next())
-      // builder consumes batch
-      val builder = new ArrowColumnarBatchRowBuilder(first, numCols, numRows)
-      try {
+      Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(new ArrowColumnarBatchRowBuilder(first, numCols, numRows)) { builder =>
+
         var extraCollected = extraCollector(extra, None)
         while (batches.hasNext && numRows.forall( num => builder.length < num)) {
           val (extra, batch) = extraTaker(batches.next())
-          builder.append(batch) // builder consumes batch
+          Resources.autoCloseTryGet(batch)(batch => builder.append(batch))
           extraCollected = extraCollector(extra, Option(extraCollected))
         }
-        (extraCollected, builder.buildColumns())
-      } finally {
-        builder.close()
-      }
+        val allocator = createAllocator("ArrowColumnarBatchRowUtils::take")
+        (extraCollected, builder.buildColumns(allocator))
+      })
     } finally {
       /** clear up the remainder */
       batches.foreach( extraTaker(_)._2.close() )

@@ -5,7 +5,6 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.rdd.ArrowRDD
 
-// TODO: check memory management
 // Caller should close whatever is collected from plan
 case class ArrowCollectExec(child: SparkPlan) extends UnaryExecNode {
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowCollectExec = copy(child = newChild)

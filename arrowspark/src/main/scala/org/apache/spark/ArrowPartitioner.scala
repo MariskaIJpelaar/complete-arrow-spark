@@ -1,11 +1,12 @@
 package org.apache.spark
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 import org.apache.spark.sql.rdd.ArrowRDD
@@ -49,7 +50,7 @@ class ArrowRangePartitioner[V](
     // Caller is responsible for closing
     val extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = item => {
       val (idx: Int, n: Long, sample: ArrowColumnarBatchRow) = item
-      try {
+      Resources.closeOnFailGet(sample) { sample =>
         val bos = new ByteArrayOutputStream()
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         val oos = new ObjectOutputStream(codec.compressedOutputStream(bos))
@@ -58,9 +59,7 @@ class ArrowRangePartitioner[V](
         oos.writeLong(n)
         oos.flush()
         oos.close()
-        (bos.toByteArray, sample.copy(allocatorHint = "ArrowPartitioner::extraEncoder"))
-      } finally {
-        sample.close()
+        (bos.toByteArray, sample)
       }
     }
 
@@ -260,15 +259,10 @@ class ArrowRangePartitioner[V](
   }
 
   override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = {
-    try {
-      val ranges = ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rangeBounds))._2)
-      try {
-        ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
-      } finally {
-        ranges.close()
-      }
-    } finally {
-      key.close()
-    }
+    Resources.autoCloseTryGet(key) ( key => Resources.autoCloseTryGet(
+      ArrowColumnarBatchRow.create(createAllocator("ArrowPartitioner::getPartitions"),
+        ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rangeBounds))._2)) { ranges =>
+      ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
+    })
   }
 }

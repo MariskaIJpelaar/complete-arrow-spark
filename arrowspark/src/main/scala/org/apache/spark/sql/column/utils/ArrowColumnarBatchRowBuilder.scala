@@ -1,8 +1,9 @@
 package org.apache.spark.sql.column.utils
 
-import org.apache.arrow.memory.ArrowBuf
+import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.{ArrowBuf, BufferAllocator}
 import org.apache.arrow.vector.BitVectorHelper
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.Closeable
@@ -15,14 +16,12 @@ import scala.collection.immutable.NumericRange
 class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends Closeable {
   protected[column] var size = 0
   protected[column] val columns: Array[ArrowColumnVector] = {
-    try {
+    Resources.autoCloseTryGet(first) { first =>
       size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE))
 
       ArrowColumnarBatchRowTransformers.take(
         ArrowColumnarBatchRowTransformers.projection(first, 0 until numCols.getOrElse(first.numFields)),
         0 until numRows.getOrElse(first.numRows)).columns
-    } finally {
-      first.close()
     }
   }
   protected var num_bytes: Long = {
@@ -65,7 +64,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
 
   /** Note: closes batch */
   def append(batch: ArrowColumnarBatchRow): ArrowColumnarBatchRowBuilder = {
-    try {
+    Resources.autoCloseTryGet(batch) { batch =>
       var readableBytes = 0L
       var current_size = 0
       // the columns we want
@@ -88,20 +87,18 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       num_bytes += readableBytes
       size += current_size
       this
-    } finally {
-      batch.close()
     }
   }
 
   /** Note: invalidates the Builder
    * Caller is responsible for closing the vectors */
-  def buildColumns(): Array[ArrowColumnVector] = {
+  def buildColumns(parentAllocator: BufferAllocator): Array[ArrowColumnVector] = {
     // transfer ownership to new Array
     columns.map( column => {
       val vector = column.getValueVector
       vector.setValueCount(size)
-      val tp = vector.getTransferPair(vector.getAllocator
-        .newChildAllocator("ArrowColumnarBatchRowBuilder::buildColumns", 0, org.apache.spark.sql.column.perAllocatorSize))
+      val tp = vector.getTransferPair(
+        createAllocator(parentAllocator,"ArrowColumnarBatchRowBuilder::buildColumns"))
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
     })
@@ -109,10 +106,10 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
 
   /** Note: invalidates the Builder
    * Caller is responsible for closing the vector */
-  def build(): ArrowColumnarBatchRow = {
+  def build(batchAllocator: BufferAllocator): ArrowColumnarBatchRow = {
     // transfer ownership to new ArrowColumnarBatchRow
-    val transferred = buildColumns()
-    new ArrowColumnarBatchRow(transferred, size)
+    val transferred = buildColumns(batchAllocator)
+    new ArrowColumnarBatchRow(batchAllocator, transferred, size)
   }
 
   override def close(): Unit = columns.foreach( _.close() )

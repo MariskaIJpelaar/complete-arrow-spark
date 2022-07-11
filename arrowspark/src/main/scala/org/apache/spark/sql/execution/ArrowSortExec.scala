@@ -1,17 +1,16 @@
 package org.apache.spark.sql.execution
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenerator, CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, SortOrder}
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowSorters
-import org.apache.spark.sql.vectorized.ArrowColumnVector
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 
 import java.util
 import scala.collection.mutable.ArrayBuffer
 
-// TODO: check memory management
 /** copied and adapted from org.apache.spark.sql.execution.SortExec
  * Caller is responsible for closing returned batches from this plan */
 case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: SparkPlan)
@@ -30,7 +29,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   private var thisPartitions: String = _
   // FIXME: For now, we assume that we won't return too early, and that sortedBatch will be consumed by caller
   private var sortedIdx: Int = _
-  private val sortedBatch: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(Array.empty[ArrowColumnVector], 0)
+  private val sortedBatch: ArrowColumnarBatchRow = ArrowColumnarBatchRow.empty
   private var thisSorted: String = _
 
   override protected def doProduce(ctx: CodegenContext): String = {
@@ -103,8 +102,8 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   // caller is responsible for cleaning ArrowColumnarBatchRows
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitionsInternal { case item: Iterator[ArrowColumnarBatchRow] =>
-      val batch = ArrowColumnarBatchRow.create(item)
-      try {
+      val allocator = createAllocator("ArrowSortExec::doExecute")
+      Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(allocator, item)) { batch =>
         val newBatch: ArrowColumnarBatchRow = {
           if (sortOrder.length == 1) {
             val col = attributeReferenceToCol(sortOrder.head)
@@ -114,8 +113,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
           }
         }
         Iterator(newBatch)
-      } finally {
-        batch.close()
       }
     }
   }

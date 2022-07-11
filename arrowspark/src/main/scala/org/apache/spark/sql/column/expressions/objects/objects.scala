@@ -10,7 +10,7 @@ import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.types.{DataType, ObjectType}
 
 case class CreateExternalColumn(child: Expression) extends UnaryExpression with NonSQLExpression {
-  // TODO: better
+  // FIXME: better
   override def toString(): String = "CreateExternalColumn"
 
   override def nullable: Boolean = false
@@ -60,7 +60,7 @@ case class CreateExternalColumn(child: Expression) extends UnaryExpression with 
 /** Constructs a new external column, using the result of evaluating the specified
  * expressions as content */
 case class CreateExternalColumnBatch(children: Seq[Expression]) extends Expression with NonSQLExpression {
-  // TODO: better
+  // FIXME: better
   override def toString(): String = "CreateExternalColumnBatch"
 
   override def nullable: Boolean = false
