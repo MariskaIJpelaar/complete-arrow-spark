@@ -97,8 +97,7 @@ object ArrowRDD {
 
       res.foreach(result => {
         // NOTE: we require the 'take', because we do not want more than num numRows
-        val allocator = createAllocator("ArrowRDD::take")
-        buf += ArrowColumnarBatchRow.create(allocator,
+        buf += ArrowColumnarBatchRow.create(createAllocator("ArrowRDD::take"),
           ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))._2)
       })
 

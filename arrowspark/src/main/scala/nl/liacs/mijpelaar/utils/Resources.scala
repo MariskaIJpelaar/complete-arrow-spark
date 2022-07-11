@@ -34,7 +34,7 @@ object Resources {
   }
 
   /** Same as autoCloseTry, but for traversables */
-  def autoCloseTry[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): Try[B] = {
+  def autoCloseTraversableTry[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): Try[B] = {
     var t: Option[Throwable] = None
     try {
       Success(fun(traversable))
@@ -56,12 +56,12 @@ object Resources {
     }
   }
 
-  def autoCloseTryGet[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): B = {
-    autoCloseTry(traversable)(fun).fold( throwable => throw throwable, item => item)
+  def autoCloseTraversableTryGet[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): B = {
+    autoCloseTraversableTry(traversable)(fun).fold( throwable => throw throwable, item => item)
   }
 
   /** Same as autoCloseTry, but with Option-type */
-  def autoCloseTry[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): Try[B] = {
+  def autoCloseOptionTry[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): Try[B] = {
     var t: Option[Throwable] = None
     try {
       Success(fun(optional))
@@ -83,8 +83,8 @@ object Resources {
     }
   }
 
-  def autoCloseTryGet[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): B = {
-    autoCloseTry(optional)(fun).fold( throwable => throw throwable, item => item)
+  def autoCloseOptionTryGet[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): B = {
+    autoCloseOptionTry(optional)(fun).fold( throwable => throw throwable, item => item)
   }
 
   /** Same as autoCloseTry, but only closes on failure */
@@ -111,7 +111,7 @@ object Resources {
   }
 
   /** Same as other closeOnFail, but for traversables of closeables */
-  def closeOnFail[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): Try[B] = {
+  def closeTraversableOnFail[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): Try[B] = {
     var t: Option[Throwable] = None
     try {
       Success(fun(traversable))
@@ -133,8 +133,8 @@ object Resources {
     }
   }
 
-  def closeOnFailGet[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): B = {
-    closeOnFail(traversable)(fun).fold( throwable => throw throwable, item => item)
+  def closeTraversableOnFailGet[T <: TraversableOnce[AutoCloseable], B](traversable: T)(fun: T => B): B = {
+    closeTraversableOnFail(traversable)(fun).fold( throwable => throw throwable, item => item)
   }
 }
 

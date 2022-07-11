@@ -98,7 +98,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
       pageReadStore = reader.readNextRowGroup()
 
       vectorSchemaRoot.setRowCount(rows)
-      Resources.autoCloseTryGet(vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toArray) { data =>
+      Resources.autoCloseTraversableTryGet(vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toIterator) { data =>
         val batchAllocator = createAllocator("ParquetReaderIterator::transfer")
         /** transfer ownership */
         val transferred = data.map { vector =>
@@ -107,7 +107,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
           // FIXME: possible leak if transfer fails within map
           new ArrowColumnVector(tp.getTo)
         }
-        new ArrowColumnarBatchRow(batchAllocator, transferred, rows)
+        new ArrowColumnarBatchRow(batchAllocator, transferred.toArray, rows)
       }
     }
   }

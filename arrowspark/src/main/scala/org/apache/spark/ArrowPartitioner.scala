@@ -1,14 +1,13 @@
 package org.apache.spark
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.Float4Vector
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
-import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
+import org.apache.spark.sql.column.utils._
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
@@ -17,7 +16,6 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.hashing.byteswap32
 
-// TODO: check memory management
 abstract class ArrowPartitioner extends Partitioner {
   override def getPartition(key: Any): Int = throw new UnsupportedOperationException()
   def getPartitions(key: ArrowColumnarBatchRow): Array[Int]
@@ -101,45 +99,30 @@ class ArrowRangePartitioner[V](
   private def determineBounds(
      candidates: ArrayBuffer[(ArrowColumnarBatchRow, Float)],
      partitions: Int): ArrowColumnarBatchRow = {
+    // FIXME: candidates be autoclosable?
     try {
       assert(partitions - 1 < Integer.MAX_VALUE)
 
       // Checks if we have non-empty batches
       if (candidates.length < 1) return ArrowColumnarBatchRow.empty
-      var allocatorOption: Option[BufferAllocator] = None
-      var i = 0
-      while (allocatorOption.isEmpty && i < candidates.size) {
-        val batch = candidates(i)._1
-        allocatorOption = batch.getFirstAllocator
-        i += 1
-      }
-
-      val allocator = allocatorOption
-        .getOrElse(throw new RuntimeException("[ArrowPartitioner::determineBounds] cannot get allocator"))
-        .newChildAllocator("ArrowPartitioner::determineBounds", 0, org.apache.spark.sql.column.perAllocatorSize)
 
       // we start by sorting the batches, and making the rows unique
       // we keep the weights by adding them as an extra column to the batch
       val batches = candidates map { case (batch, weight) =>
-        try {
-          val weights = new Float4Vector("weights", allocator)
-          try {
+        Resources.autoCloseTryGet(batch) { batch =>
+          Resources.autoCloseTryGet(new Float4Vector("weights", createAllocator("ArrowPartitioner::determineBounds::weights"))) { weights =>
             weights.setValueCount(batch.numRows)
             0 until batch.numRows foreach { index => weights.set(index, weight) }
             // consumes batch and weight
             ArrowColumnarBatchRowTransformers.appendColumns(batch, Array(new ArrowColumnVector(weights)))
-          } finally {
-            weights.close()
           }
-        } finally {
-          batch.close()
         }
       }
 
-      val grouped: ArrowColumnarBatchRow = ArrowColumnarBatchRow.create(batches.toIterator)
+      val grouped: ArrowColumnarBatchRow = ArrowColumnarBatchRow.create(createAllocator("ArrowPartitioner::determineBounds::grouped"), batches.toIterator)
       val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRowSorters.multiColumnSort(grouped, orders)
       val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRowDeduplicators.unique(sorted, orders), grouped.numFields-1)
-      try {
+      Resources.autoCloseTryGet(unique)( unique => Resources.autoCloseTryGet(weighted) { weighted =>
         // now we gather our bounds
         assert(weighted.numFields == 1)
         val weights = weighted.getArray(0)
@@ -147,28 +130,24 @@ class ArrowRangePartitioner[V](
         var cumWeight = 0.0
         var cumSize = 0
         var target = step
-        // FIXME: For now, we assume we do not return too early when creating the bounds
         var boundBuilder: Option[ArrowColumnarBatchRowBuilder] = None
-        0 until unique.numRows takeWhile { index =>
-          cumWeight += weights.getFloat(index)
-          if (cumWeight >= target) {
-//            bounds(cumSize) = unique.copy(index until index +1)
-            boundBuilder = Some(boundBuilder.fold
-            ( new ArrowColumnarBatchRowBuilder(unique.copy(index until index +1, allocatorHint = "ArrowPartitioner::boundBuilder::first")) )
-            ( builder => builder.append(unique.copy(index until index +1, allocatorHint = "ArrowPartitioner::boundBuilder"))))
-            cumSize += 1
-            target += step
+        Resources.autoCloseTryGet(boundBuilder) { _ =>
+          0 until unique.numRows takeWhile { index =>
+            cumWeight += weights.getFloat(index)
+            if (cumWeight >= target) {
+              boundBuilder = Some(boundBuilder.fold
+              ( new ArrowColumnarBatchRowBuilder(unique.copy(createAllocator(s"ArrowPartitioner::boundBuilder::first::$index"), index until index +1)))
+              ( builder => builder.append(unique.copy(createAllocator(s"ArrowPartitioner::boundBuilder::$index"), index until index +1))) )
+              cumSize += 1
+              target += step
+            }
+
+            cumSize < partitions -1
           }
-
-          cumSize < partitions -1
+          rangeBoundsLength = Option(cumSize)
+          boundBuilder.map( _.build(createAllocator("ArrowPartitioner::determineBounds::return")) ).getOrElse(ArrowColumnarBatchRow.empty)
         }
-
-        rangeBoundsLength = Option(cumSize)
-        boundBuilder.map( _.build() ).getOrElse(ArrowColumnarBatchRow.empty)
-      } finally {
-        unique.close()
-        weighted.close()
-      }
+      })
     } finally {
       candidates.foreach(_._1.close())
     }
@@ -190,15 +169,18 @@ class ArrowRangePartitioner[V](
 
     // 'sketch' the distribution from a sample
     val decoded: RDD[ArrowColumnarBatchRow] = rdd.map { iter =>
-      ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(iter._1))._2)
+      ArrowColumnarBatchRow.create(createAllocator("ArrowPartitioner::decoded"),
+        ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(iter._1))._2)
     }
 
+    // FIXME: make closeable?
     val (numItems, sketched) = sketch(decoded, sampleSizePerPartition)
     try {
       if (numItems == 0L) Array.empty
 
       // If the partitions are imbalanced, we re-sample from it
       val fraction = math.min(sampleSize / math.max(numItems, 1L), 1.0)
+      // FIXME: make closeable?
       val candidates = ArrayBuffer.empty[(ArrowColumnarBatchRow, Float)]
       try {
         val imbalancedPartitions = mutable.Set.empty[Int]
@@ -208,7 +190,7 @@ class ArrowRangePartitioner[V](
               imbalancedPartitions += idx
             } else {
               val weight = (n.toDouble / sample.length).toFloat
-              candidates += ((sample.copy(allocatorHint = "ArrowPartitioner::candidatesBuilder"), weight))
+              candidates += ((sample.copy(createAllocator("ArrowPartitioner::candidatesBuilder")), weight))
             }
           } finally {
             sample.close()
@@ -219,7 +201,8 @@ class ArrowRangePartitioner[V](
           val seed = byteswap32(-rdd.id -1)
           val reSampledRDD = imbalanced.mapPartitionsInternal{ iter =>
             val batches = iter.map {
-              array => ArrowColumnarBatchRow.create(ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(array))._2)
+              array => ArrowColumnarBatchRow.create(createAllocator("ArrowPartitioner::imbalanced"),
+                ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(array))._2)
             }
             Iterator(ArrowColumnarBatchRowSamplers.sample(batches, fraction, seed))
           }

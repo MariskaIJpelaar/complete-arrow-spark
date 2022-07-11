@@ -106,7 +106,7 @@ object ArrowColumnarBatchRowConverters {
         }
         new ArrowColumnarBatchRow(firstAllocator, columns, batch.numRows)
       }
-      Resources.closeOnFailGet(firstBatch) { firstBatch =>
+      Resources.closeTraversableOnFailGet(firstBatch) { firstBatch =>
         val secondAllocator = createAllocator("ArrowColumnarBatchRowConverters::splitColumns::second")
         // FIXME: close if allocation fails while performing the map
         val columns = batch.columns.slice(col, batch.numFields).map { column =>
@@ -129,7 +129,7 @@ object ArrowColumnarBatchRowConverters {
    */
   def toUnionVector(batch: ArrowColumnarBatchRow): UnionVector = {
     Resources.autoCloseTryGet(batch) { batch =>
-      Resources.closeOnFailGet(new UnionVector("Combiner",
+      Resources.closeTraversableOnFailGet(new UnionVector("Combiner",
         createAllocator("ArrowColumnarBatchRowConverters::toUnionVector::union"), FieldType.nullable(Struct.INSTANCE), null)) { union =>
         batch.columns foreach { column =>
           val vector = column.getValueVector
@@ -153,7 +153,7 @@ object ArrowColumnarBatchRowConverters {
    *         Caller is responsible for closing the vectors in the array
    */
   def makeFresh(parentAllocator: BufferAllocator, batch: ArrowColumnarBatchRow): Array[ArrowColumnVector] = {
-    Resources.closeOnFailGet(batch) { batch =>
+    Resources.closeTraversableOnFailGet(batch) { batch =>
       Array.tabulate[ArrowColumnVector](batch.numFields) { i =>
         val vector = batch.columns(i).getValueVector
         val tp = vector.getTransferPair(createAllocator(parentAllocator, vector.getName))
