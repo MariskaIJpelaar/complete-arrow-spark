@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.VectorLoader
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
@@ -52,8 +53,9 @@ object ArrowColumnarBatchRowEncoders {
         // This needs to be done separately as we need the schema for the VectorSchemaRoot
         val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
         // consumes first
-        val (root, firstLength) = ArrowColumnarBatchRowConverters.toRoot(first, numCols, numRows)
-        Resources.autoCloseTryGet(root) ( root => Resources.autoCloseTryGet(new ArrowStreamWriter(root, null, Channels.newChannel(oos))) { writer =>
+        val (root, allocator, firstLength) = ArrowColumnarBatchRowConverters.toRoot(first, numCols, numRows)
+        Resources.autoCloseTryGet(allocator) ( _ =>
+          Resources.autoCloseTryGet(root) ( root => Resources.autoCloseTryGet(new ArrowStreamWriter(root, null, Channels.newChannel(oos))) { writer =>
           // write first batch
           writer.start()
           writer.writeBatch()
@@ -68,9 +70,9 @@ object ArrowColumnarBatchRowEncoders {
             val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
             Resources.autoCloseTryGet(batch){ batch =>
               // consumes batch
-              val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
+              val (recordBatch, allocator, batchLength): (ArrowRecordBatch, BufferAllocator, Int) =
                 ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
-              Resources.autoCloseTryGet(recordBatch) { recordBatch =>
+              Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(recordBatch) { recordBatch =>
                 new VectorLoader(root).load(recordBatch)
                 writer.writeBatch()
                 root.close()
@@ -78,11 +80,12 @@ object ArrowColumnarBatchRowEncoders {
                 oos.writeInt(extra.length)
                 oos.write(extra)
                 left = left.map( numLeft => numLeft-batchLength )
-              }
+              })
             }
           }
           oos.flush()
-        })
+        }))
+
       }
       Iterator(bos.toByteArray)
     } finally {
@@ -116,19 +119,20 @@ object ArrowColumnarBatchRowEncoders {
           return null
         }
 
-        Resources.autoCloseTraversableTryGet(reader.getVectorSchemaRoot.getFieldVectors.toIterator) { columns =>
-          val batchAllocator = createAllocator("ArrowColumnarBatchRowEncoders::decode")
-          val length = ois.readInt()
-          val arr_length = ois.readInt()
-          val array = new Array[Byte](arr_length)
-          ois.readFully(array)
+        Resources.autoCloseTryGet(reader.getVectorSchemaRoot) { root =>
+          Resources.autoCloseTraversableTryGet(root.getFieldVectors.toIterator) { columns =>
+            val batchAllocator = createAllocator("ArrowColumnarBatchRowEncoders::decode")
+            val length = ois.readInt()
+            val arr_length = ois.readInt()
+            val array = new Array[Byte](arr_length)
+            ois.readFully(array)
 
-          // Note: vector is transferred and is thus implicitly closed
-          extraDecoder(array, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
-            val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
-            tp.transfer()
-            new ArrowColumnVector(tp.getTo)
-          }).toArray, length))
+            extraDecoder(array, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
+              val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
+              tp.transfer()
+              new ArrowColumnVector(tp.getTo)
+            }).toArray, length))
+          }
         }
       }
 

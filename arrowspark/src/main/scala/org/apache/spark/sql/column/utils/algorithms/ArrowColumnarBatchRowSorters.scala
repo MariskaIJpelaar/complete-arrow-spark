@@ -27,10 +27,11 @@ object ArrowColumnarBatchRowSorters {
       Resources.autoCloseTryGet(new IntVector("indexHolder",
         createAllocator("ArrowColumnarBatchRowSorters::multiColumnSort::indices"))) { indices =>
         // UnionVector representing our batch with columns from sortOrder
-        Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toUnionVector(
+        val (union, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
           ArrowColumnarBatchRowTransformers.getColumns(batch.copy(
             createAllocator("ArrowColumnarBatchRowSorters::multiColumnSort::union")),
-            sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))) { union =>
+            sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))
+        Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(union) { union =>
           val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
 
           // prepare indices
@@ -42,7 +43,7 @@ object ArrowColumnarBatchRowSorters {
 
           /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
           ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
-        }
+        })
       }
     }
   }

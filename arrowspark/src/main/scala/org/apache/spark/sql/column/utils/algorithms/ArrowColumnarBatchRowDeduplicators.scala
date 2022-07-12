@@ -21,12 +21,13 @@ object ArrowColumnarBatchRowDeduplicators {
 
     Resources.autoCloseTryGet(batch) { batch =>
       // UnionVector representing our batch
-      Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toUnionVector(
+      val (union, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(batch.copy(createAllocator("ArrowColumnarBatchRowDeduplicator::unique")),
-          sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray))) { union =>
+          sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray))
+      Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(union) { union =>
         val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
         ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(comparator, union))
-      }
+      })
     }
   }
 }

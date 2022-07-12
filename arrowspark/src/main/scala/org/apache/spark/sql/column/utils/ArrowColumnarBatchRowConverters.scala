@@ -23,9 +23,9 @@ object ArrowColumnarBatchRowConverters {
    * @param batch   batch to convert and close
    * @param numCols (optional) number of columns to convert
    * @param numRows (optional) number of rows to convert
-   * @return The generated ArrowRecordBatch together with the number of rows converted
+   * @return The generated ArrowRecordBatch together with its allocator and the number of rows converted
    */
-  def toArrowRecordBatch(batch: ArrowColumnarBatchRow, numCols: Int, numRows: Option[Int] = None): (ArrowRecordBatch, Int) = {
+  def toArrowRecordBatch(batch: ArrowColumnarBatchRow, numCols: Int, numRows: Option[Int] = None): (ArrowRecordBatch, BufferAllocator, Int) = {
     Resources.autoCloseTryGet(batch) { batch =>
       val nodes = new util.ArrayList[ArrowFieldNode]
       val buffers = new util.ArrayList[ArrowBuf]
@@ -46,25 +46,33 @@ object ArrowColumnarBatchRowConverters {
           appendNodes(child, nodes, buffers)
       }
 
-      batch.columns.slice(0, numCols) foreach (column => appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers))
-      (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
+      val allocator = createAllocator("ArrowColumnarBatchRowConverters::toArrowRecordBatch")
+      batch.columns.slice(0, numCols).foreach { column =>
+        val vector = column.getValueVector
+        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+        tp.transfer()
+        appendNodes(tp.getTo.asInstanceOf[FieldVector], nodes, buffers)
+      }
+      (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true),
+        allocator, rowCount)
     }
   }
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
-   * Returns the root and the number of rows transferred
+   * Returns the root with its allocator and the number of rows transferred
    * Caller should close the root
    */
-  def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): (VectorSchemaRoot, Int) = {
+  def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): (VectorSchemaRoot, BufferAllocator, Int) = {
     Resources.autoCloseTryGet(batch) { batch =>
       val rowCount = numRows.getOrElse(batch.numRows)
       val columns = batch.columns.slice(0, numCols.getOrElse(batch.numFields))
+      val allocator = createAllocator("ArrowColumnarBatchRowConverters::toRoot")
       (VectorSchemaRoot.of(columns.map(column => {
         val vector = column.getValueVector
-        val tp = vector.getTransferPair(vector.getAllocator.newChildAllocator("ArrowColumnarBatchRowConverters::toRoot", 0, org.apache.spark.sql.column.perAllocatorSize))
+        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
         tp.splitAndTransfer(0, rowCount)
         tp.getTo.asInstanceOf[FieldVector]
-      }).toSeq: _*), rowCount)
+      }).toSeq: _*), allocator, rowCount)
     }
   }
 
@@ -124,13 +132,13 @@ object ArrowColumnarBatchRowConverters {
    * Creates an UnionVector from the provided batch
    *
    * @param batch batch to convert and close
-   * @return a fresh UnionVector
+   * @return a fresh UnionVector, with its allocator
    *         Caller is responsible for closing the UnionVector
    */
-  def toUnionVector(batch: ArrowColumnarBatchRow): UnionVector = {
+  def toUnionVector(batch: ArrowColumnarBatchRow): (UnionVector, BufferAllocator) = {
     Resources.autoCloseTryGet(batch) { batch =>
-      Resources.closeOnFailGet(new UnionVector("Combiner",
-        createAllocator("ArrowColumnarBatchRowConverters::toUnionVector::union"), FieldType.nullable(Struct.INSTANCE), null)) { union =>
+      val allocator = createAllocator("ArrowColumnarBatchRowConverters::toUnionVector::union")
+      Resources.closeOnFailGet(new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)) { union =>
         batch.columns foreach { column =>
           val vector = column.getValueVector
           val tp = vector.getTransferPair(createAllocator(union.getAllocator, vector.getName))
@@ -139,7 +147,7 @@ object ArrowColumnarBatchRowConverters {
         }
         union.setValueCount(batch.numRows)
 
-        union
+        (union, allocator)
       }
     }
   }

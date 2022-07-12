@@ -96,11 +96,8 @@ class ArrowColumnarBatchRow(val allocator: BufferAllocator, @transient protected
   }
 
   override def close(): Unit = {
-    columns foreach(column => {
-      val allocator = column.getValueVector.getAllocator
-      column.close()
-      allocator.close()
-    })
+    columns foreach( column => column.close() )
+    columns foreach( column => column.getValueVector.getAllocator.close() )
     allocator.close()
   }
 

@@ -21,14 +21,17 @@ object ArrowColumnarBatchRowDistributors {
         return Array.empty
 
       val names: Array[String] = sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name ).toArray
-      Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toUnionVector(
+      val (keyUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(key.copy(createAllocator("ArrowColumnarBatchRowDistributors::bucketDistributor::keyUnion")), names)
-      )) { keyUnion =>
+      )
+      Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(keyUnion) { keyUnion =>
         val comparator = ArrowColumnarBatchRowUtils.getComparator(keyUnion, sortOrders)
-        Resources.autoCloseTryGet( ArrowColumnarBatchRowConverters.toUnionVector(
-          ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copy(createAllocator("ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion")), names)
-        )) { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distribute() }
-      }
+        val (rangeUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
+          ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copy(createAllocator("ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion")), names))
+        Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(rangeUnion)
+          { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distribute() }
+        )
+      })
     })
   }
 

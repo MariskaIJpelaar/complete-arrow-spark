@@ -41,6 +41,7 @@ object ArrowColumnarBatchRowTransformers {
       new ArrowColumnarBatchRow(batchAllocator, batch.columns map ( column => {
         val vector = column.getValueVector
         val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
+        //TODO: ownership for validity-buffer is different than for data-buffer?
         tp.splitAndTransfer(range.head, range.length)
         new ArrowColumnVector(tp.getTo)
       }), range.length)

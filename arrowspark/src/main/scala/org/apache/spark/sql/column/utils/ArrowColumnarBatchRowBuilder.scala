@@ -10,7 +10,6 @@ import java.io.Closeable
 import scala.collection.immutable.NumericRange
 
 
-// TODO: check memory management
 /** Note: closes first
  * Caller should close after use */
 class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends Closeable {
