@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.{RandomUtils, Resources}
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.IntVector
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -65,24 +66,29 @@ object ArrowColumnarBatchRowTransformers {
   }
 
   /**
-   * Appends an Array of columns to the provided batch and closes the original batch
-   * @param batch batch to append columns to, and close
-   * @param cols columns to append to batch, and close
-   * @return a fresh batch with the columns of the original-batch and the provided columns
-   *         Caller is responsible for closing the batch
+   * Appends the columns of two batches and creates a new batch with it
+   * @param first [[ArrowColumnarBatchRow]] to take first columns from, and close
+   * @param second [[ArrowColumnarBatchRow]] to take second columns from, and close
+   * @param newAllocator [[BufferAllocator]] as allocator for the new batch
+   * @return the newly created batch
    */
-  def appendColumns(batch: ArrowColumnarBatchRow, cols: Array[ArrowColumnVector]): ArrowColumnarBatchRow = {
-    Resources.autoCloseTraversableTryGet(cols.toIterator)( cols => Resources.autoCloseTryGet(batch) { batch =>
-      val allocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowTransformers::appendColumns")
-      // FIXME: cleanup if exception is thrown during map
-      val new_cols = cols.map { column =>
+  def appendColumns(first: ArrowColumnarBatchRow, second: ArrowColumnarBatchRow, newAllocator: BufferAllocator): ArrowColumnarBatchRow = {
+    Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
+      val firstCols = first.columns map { column =>
         val vector = column.getValueVector
-        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+        val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
         tp.splitAndTransfer(0, vector.getValueCount)
         new ArrowColumnVector(tp.getTo)
       }
-      new ArrowColumnarBatchRow(allocator, batch.copyToAllocator(allocator).columns ++ new_cols, batch.numRows)
+      val secondCols = second.columns map { column =>
+        val vector = column.getValueVector
+        val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
+        tp.splitAndTransfer(0, vector.getValueCount)
+        new ArrowColumnVector(tp.getTo)
+      }
+      new ArrowColumnarBatchRow(newAllocator, firstCols ++ secondCols, first.numRows)
     })
+
   }
 
   /**

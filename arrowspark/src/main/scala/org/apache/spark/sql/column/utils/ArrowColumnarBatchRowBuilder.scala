@@ -24,9 +24,9 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
         0 until numRows.getOrElse(first.numRows)).columns
     }
   }
-  protected var num_bytes: Long = {
-    if (columns.isEmpty) 0
-    else columns.map( column => column.getValueVector.getDataBuffer.readableBytes()).max
+
+  protected val numBytes: Array[Long] = Array.tabulate(columns.length) { index =>
+    columns(index).getValueVector.getDataBuffer.readableBytes()
   }
 
   def length: Int = size
@@ -65,7 +65,6 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
   /** Note: closes batch */
   def append(batch: ArrowColumnarBatchRow): ArrowColumnarBatchRowBuilder = {
     Resources.autoCloseTryGet(batch) { batch =>
-      var readableBytes = 0L
       var current_size = 0
       // the columns we want
       val array = numCols.fold(batch.columns)( nums => batch.columns.slice(0, nums) )
@@ -74,17 +73,17 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       if (size + current_size > Integer.MAX_VALUE)
         throw new RuntimeException("[ArrowColumnarBatchRowBuilder batches are too big to be combined!")
 
-      (array, columns).zipped foreach { case (input, output) =>
-        val ivector = input.getValueVector
-        readableBytes = ivector.getDataBuffer.readableBytes().max(readableBytes)
-        val ovector = output.getValueVector
+      (array, columns, numBytes.indices).zipped foreach { case (input, output, byteIndex) =>
+        val iVector = input.getValueVector
+        val oVector = output.getValueVector
         // make sure we have enough space
-        while (ovector.getValueCapacity < size + current_size) ovector.reAlloc()
+        while (oVector.getValueCapacity < size + current_size) oVector.reAlloc()
         // copy contents
-        validityRangeSetter(ovector.getValidityBuffer, size.toLong until (size+current_size).toLong)
-        output.getValueVector.getDataBuffer.setBytes(num_bytes, ivector.getDataBuffer)
+        validityRangeSetter(oVector.getValidityBuffer, size.toLong until (size+current_size).toLong)
+        output.getValueVector.getDataBuffer.setBytes(numBytes(byteIndex), iVector.getDataBuffer)
+        numBytes(byteIndex) += iVector.getDataBuffer.readableBytes()
+
       }
-      num_bytes += readableBytes
       size += current_size
       this
     }
@@ -98,7 +97,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       val vector = column.getValueVector
       vector.setValueCount(size)
       val tp = vector.getTransferPair(
-        createAllocator(parentAllocator, "ArrowColumnarBatchRowBuilder::buildColumns"))
+        createAllocator(parentAllocator, vector.getName))
       tp.splitAndTransfer(0, vector.getValueCount)
       new ArrowColumnVector(tp.getTo)
     })

@@ -36,8 +36,6 @@ trait ArrowFileFormat extends FileFormat {
   def inferSchema(schema: Option[StructType]): Option[StructType] = {
     schema.map( s =>  s.copy( fields = s.fields.map(field => field.copy(dataType = ArrayType.apply(field.dataType)))))
   }
-
-  def closeAllocator(): Unit = allocator.close()
 }
 
 /** Caller should close whatever is gathered from this plan */
