@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.VectorLoader
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
@@ -15,6 +16,7 @@ import org.apache.spark.util.NextIterator
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
+import scala.collection.mutable.ArrayBuffer
 
 object ArrowColumnarBatchRowEncoders {
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
@@ -39,6 +41,7 @@ object ArrowColumnarBatchRowEncoders {
       return Iterator(Array.emptyByteArray)
 
     // FIXME: make iter an Iterator of Closeables?
+    val roots = new ArrayBuffer[RootAllocator]()
     try {
       // how many rows are left to read?
       var left = numRows
@@ -53,6 +56,7 @@ object ArrowColumnarBatchRowEncoders {
         // Prepare first batch
         // This needs to be done separately as we need the schema for the VectorSchemaRoot
         val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
+        roots.append(first.allocator.getRoot.asInstanceOf[RootAllocator])
         // consumes first
         val (root, allocator, firstLength) = ArrowColumnarBatchRowConverters.toRoot(first, numCols, numRows)
         Resources.autoCloseTryGet(allocator) ( _ =>
@@ -70,6 +74,7 @@ object ArrowColumnarBatchRowEncoders {
           while (iter.hasNext && left.forall( _ > 0)) {
             val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
             Resources.autoCloseTryGet(batch){ batch =>
+              roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
               // consumes batch
               val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
                 ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
@@ -91,7 +96,7 @@ object ArrowColumnarBatchRowEncoders {
       Iterator(bos.toByteArray)
     } finally {
       iter.foreach( extraEncoder(_)._2.close() )
-      column.AllocationManager.cleanup()
+      roots.foreach( _.close() )
     }
   }
 

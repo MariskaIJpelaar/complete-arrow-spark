@@ -7,7 +7,6 @@ import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
-import org.apache.spark.sql.column
 import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.SQLMetric
@@ -96,7 +95,6 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       oos.foreach( oos => oos.close() )
       root.foreach( vectorSchemaRoot => vectorSchemaRoot.close() )
       allocator.foreach( allocator => allocator.close() )
-      column.AllocationManager.cleanup()
     }
 
     /** The following methods are never called by shuffle-code (according to UnsafeRowSerializer) */
