@@ -37,7 +37,6 @@ class ArrowRangePartitioner[V](
 
   /** Note: inspiration from: org.apache.spark.RangePartitioner::sketch
    * Callers should close returned batch */
-    // TODO: time
   private def sketch(rdd: RDD[ArrowColumnarBatchRow], sampleSizePerPartition: Int):
   (Long, Iterator[(Int, Long, ArrowColumnarBatchRow)]) = {
     val shift = rdd.id
@@ -111,7 +110,7 @@ class ArrowRangePartitioner[V](
       // we keep the weights by adding them as an extra column to the batch
       val batches = candidates map { case (batch, weight) =>
         Resources.autoCloseTryGet(batch) { batch =>
-          Resources.autoCloseTryGet(new Float4Vector("weights", createAllocator(batch.allocator.getRoot, "ArrowPartitioner::determineBounds::weights"))) { weights =>
+          Resources.autoCloseTryGet(new Float4Vector("weights", batch.allocator.getRoot)) { weights =>
             weights.setValueCount(batch.numRows)
             0 until batch.numRows foreach { index => weights.set(index, weight) }
             // consumes batch and weight
@@ -120,10 +119,8 @@ class ArrowRangePartitioner[V](
         }
       }
 
-      if (batches.isEmpty)
-        return ArrowColumnarBatchRow.empty
+      if (batches.isEmpty) return ArrowColumnarBatchRow.empty
 
-      val root = batches(0).allocator.getRoot
       val grouped: ArrowColumnarBatchRow = ArrowColumnarBatchRow.create(batches.toIterator)
       val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRowSorters.multiColumnSort(grouped, orders)
       val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRowDeduplicators.unique(sorted, orders), grouped.numFields-1)
