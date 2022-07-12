@@ -1,5 +1,6 @@
-import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
-import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import nl.liacs.mijpelaar.utils.Resources
+import org.apache.spark.sql.column
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.vectorized.ArrowColumnarArray
 import org.scalatest.funsuite.AnyFunSuite
@@ -7,38 +8,34 @@ import utils.ArrowColumnarBatchTestUtils.batchFromSeqs
 
 class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
   def testBatches(batches: Seq[ArrowColumnarBatchRow]): Unit = {
-    val copies = batches.map( _.copy() ).toIterator
-    val answer = ArrowColumnarBatchRowUtils.take(batches.toIterator)._2
-    try {
-      var rowIndex = 0
-      copies.zipWithIndex.foreach { case (batch, index) =>
-        try {
-          assertResult(batch.numFields, s"batch $index")(answer.length)
-          answer.indices foreach { colIndex =>
-            val answerArray = answer.apply(colIndex)
-            val expectedArray = batch.getArray(colIndex).asInstanceOf[ArrowColumnarArray].getData
-            0 until batch.numRows foreach { batchIndex =>
-              val answerInt = answerArray.getInt(rowIndex + batchIndex)
-              val expectedInt = expectedArray.getInt(batchIndex)
-              assertResult(expectedInt, s"colIndex: $colIndex, batchIndex: $batchIndex, rowIndex: $rowIndex")(answerInt)
+    Resources.autoCloseTraversableTryGet(batches) { batches =>
+      Resources.autoCloseTraversableTryGet(batches.map(_.copy()).toIterator) { copies =>
+        Resources.autoCloseArrayTryGet(ArrowColumnarBatchRowUtils.take(batches.toIterator)._2) { answer =>
+          var rowIndex = 0
+          copies.zipWithIndex.foreach { case (batch, index) =>
+            Resources.autoCloseTryGet(batch) { batch =>
+              assertResult(batch.numFields, s"batch $index")(answer.length)
+              answer.indices foreach { colIndex =>
+                val answerArray = answer.apply(colIndex)
+                val expectedArray = batch.getArray(colIndex).asInstanceOf[ArrowColumnarArray].getData
+                0 until batch.numRows foreach { batchIndex =>
+                  val answerInt = answerArray.getInt(rowIndex + batchIndex)
+                  val expectedInt = expectedArray.getInt(batchIndex)
+                  assertResult(expectedInt, s"colIndex: $colIndex, batchIndex: $batchIndex, rowIndex: $rowIndex")(answerInt)
+                }
+              }
+              rowIndex += batch.numRows
             }
           }
-          rowIndex += batch.numRows
-        } finally {
-          batch.close()
         }
       }
-    } finally {
-      answer.foreach(_.close())
-      copies.foreach(_.close())
     }
   }
 
   def testSingleBatch(table: Seq[Seq[Int]]): Unit = {
-    val allocator: BufferAllocator = new RootAllocator(Integer.MAX_VALUE)
-    val batch = batchFromSeqs(table, allocator)
+    val batch = batchFromSeqs(table, createAllocator("ArrowColumnarBatchUtilsTakeTests::testSingleBatch"))
     testBatches(Seq(batch))
-    allocator.close()
+    column.resetRootAllocator()
   }
 
   def testSingleIntVector(nums: Seq[Int]): Unit = testSingleBatch(Seq(nums))
@@ -71,10 +68,11 @@ class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchRowUtils::take() two singleton batches") {
-    val allocator: BufferAllocator = new RootAllocator(Integer.MAX_VALUE)
-    val firstBatch = batchFromSeqs(Seq(Seq(42)), allocator.newChildAllocator("first", 0, Integer.MAX_VALUE))
-    val secondBatch = batchFromSeqs(Seq(Seq(32)), allocator.newChildAllocator("second", 0, Integer.MAX_VALUE))
+    val firstBatch = batchFromSeqs(Seq(Seq(42)),
+      createAllocator("ArrowColumnarBatchUtilsTakeTests::twoSingletons::first"))
+    val secondBatch = batchFromSeqs(Seq(Seq(32)),
+      createAllocator("ArrowColumnarBatchUtilsTakeTests::twoSingletons::second"))
     testBatches(Seq(firstBatch, secondBatch))
-    allocator.close()
+    column.resetRootAllocator()
   }
 }

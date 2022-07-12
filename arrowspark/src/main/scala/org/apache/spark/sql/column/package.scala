@@ -6,8 +6,7 @@ package object column {
   type ColumnDataFrame = Dataset[ColumnBatch]
 
   /** FIXME: Ugly, but for now, we will try to manage memory allocation through a public variable
-   * In fact, it is recommended to use the same allocator throughout the whole program, but we should probably
-   * handle accessibility better, and make use of ChildAllocators */
+   * In fact, it is recommended to use the same allocator throughout the whole program */
 
   /** Listener to make sure that allocators are automatically cleaned up if all its children are closed
    * and no memory is allocated anymore */
@@ -54,7 +53,7 @@ package object column {
    * @param name name to give to the child
    * @return the newly created child
    */
-  def createAllocator(parentAllocator: BufferAllocator, name: String) = {
+  def createAllocator(parentAllocator: BufferAllocator, name: String): BufferAllocator = {
     parentAllocator.newChildAllocator(name, 0, perAllocatorSize)
   }
 }

@@ -1,5 +1,6 @@
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.memory.RootAllocator
+import org.apache.spark.sql.column
 import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowBuilder
 import org.apache.spark.sql.vectorized.ArrowColumnarArray
@@ -44,21 +45,19 @@ class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchBuilder singleton batch") {
-    val allocator = new RootAllocator(Integer.MAX_VALUE)
     val batch = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)),
-      allocator.newChildAllocator("singleton", 0, Integer.MAX_VALUE))
+      column.rootAllocator.newChildAllocator("singleton", 0, Integer.MAX_VALUE))
     testBatches(Seq(batch))
-    allocator.close()
+    column.resetRootAllocator()
   }
 
   test("ArrowColumnarBatchBuilder two singleton batches") {
-    val allocator = new RootAllocator(Integer.MAX_VALUE)
     val first = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)),
-      allocator.newChildAllocator("first", 0, Integer.MAX_VALUE))
+      column.rootAllocator.newChildAllocator("first", 0, Integer.MAX_VALUE))
     val second = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(32)),
-      allocator.newChildAllocator("second", 0, Integer.MAX_VALUE))
+      column.rootAllocator.newChildAllocator("second", 0, Integer.MAX_VALUE))
 
     testBatches(Seq(first, second))
-    allocator.close()
+    column.resetRootAllocator()
   }
 }
