@@ -110,6 +110,7 @@ class ArrowRangePartitioner[V](
       // we keep the weights by adding them as an extra column to the batch
       val batches = candidates map { case (batch, weight) =>
         Resources.autoCloseTryGet(batch) { batch =>
+          //TODO: may get closed? Should we copy already?
           Resources.autoCloseTryGet(new Float4Vector("weights", batch.allocator.getRoot)) { weights =>
             weights.setValueCount(batch.numRows)
             0 until batch.numRows foreach { index => weights.set(index, weight) }
