@@ -53,30 +53,35 @@ class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchRowUtils::take() single singleton batch") {
+    column.AllocationManager.reset()
     val root = newRoot()
     testSingleIntVector(root, Seq(42))
     column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() single batch, single column, four rows") {
+    column.AllocationManager.reset()
     val root = newRoot()
     testSingleIntVector(root, Seq(42, 28, 11, 0))
     column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() single batch, single-row, two columns") {
+    column.AllocationManager.reset()
     val root = newRoot()
     testSingleBatch(root, Seq(Seq(42), Seq(24)))
     column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() single batch, two-rows, two columns") {
+    column.AllocationManager.reset()
     val root = newRoot()
     testSingleBatch(root, Seq(Seq(24, 42), Seq(28, 11)))
     column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() two singleton batches") {
+    column.AllocationManager.reset()
     val root = newRoot()
     val firstBatch = batchFromSeqs(Seq(Seq(42)),
       createAllocator(root, "ArrowColumnarBatchUtilsTakeTests::twoSingletons::first"))

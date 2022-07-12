@@ -1,5 +1,6 @@
 package org.apache.spark.sql.vectorized
 
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.column.AllocationManager.createAllocator
@@ -25,6 +26,8 @@ class ArrowColumnarArray(private val columnar: ColumnarArray) extends ArrayData 
       case vector: ArrowColumnVector => vector
     }
   }
+
+  def getParentAllocator: BufferAllocator = getData.getValueVector.getAllocator.getParentAllocator
 
   override def copy(): ArrayData = {
     val vector = getData.getValueVector

@@ -42,6 +42,11 @@ package object column {
     val perAllocatorSize: Long = totalSize
     private val roots: mutable.ListBuffer[RootAllocator] = ListBuffer.empty
 
+    /** Clears all current roots */
+    def reset(): Unit = {
+      roots.clear();
+    }
+
     /**
      * Create a new root to keep track of
      * @return the newly created [[RootAllocator]]

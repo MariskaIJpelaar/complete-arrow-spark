@@ -47,6 +47,7 @@ class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchBuilder singleton batch") {
+    column.AllocationManager.reset()
     val root = newRoot()
     val batch = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)), createAllocator(root, "singleton"))
     testBatches(root, Seq(batch))
@@ -54,6 +55,7 @@ class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchBuilder two singleton batches") {
+    column.AllocationManager.reset()
     val root = newRoot()
 
     val first = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)), createAllocator(root, "first"))

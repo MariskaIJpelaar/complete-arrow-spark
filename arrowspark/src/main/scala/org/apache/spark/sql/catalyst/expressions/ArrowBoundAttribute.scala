@@ -1,4 +1,5 @@
 package org.apache.spark.sql.catalyst.expressions
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.Block.BlockHelper
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
@@ -60,23 +61,32 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
         ev.copy(code = code)
       case _ =>
         val array = ctx.freshName("array")
+        val parents = ctx.freshName("parents")
         val columnType = classOf[ArrowColumnarArray].getName
+        val bufferType = classOf[BufferAllocator].getName
         val vectorType = classOf[ArrowColumnVector].getName
 
         val exprEvals = ctx.generateExpressions(expressions, doSubexpressionElimination = SQLConf.get.subexpressionEliminationEnabled)
         val codes = exprEvals.zipWithIndex map { case(eval, index) =>
+          val column = ctx.freshName("column")
           code"""
                 | ${eval.code}
-                | $array[$index] = (($vectorType)(($columnType)(($columnType)(${eval.value})).copy()).getData());
+                | $columnType $column = (($columnType)(($columnType)(${eval.value})).copy());
+                | $array[$index] = (($vectorType)$column.getData());
+                | $parents[$index] = (($bufferType)$column.getParentAllocator());
                 |""".stripMargin
         }
 
         val batchType = classOf[ArrowColumnarBatchRow].getName
-        val numRows = s"($array.length > 0) ? $array[0].getValueVector().getValueCount() : 0"
+        val staticBatch = ArrowColumnarBatchRow.getClass.getName + ".MODULE$"
+        val numRows = s"$array[0].getValueVector().getValueCount()"
+        val parent = s"$parents[0]"
+        val ret = s"($array.length > 0) ? new $batchType($parent, $array, $numRows) : $staticBatch.empty()"
         val code = code"""
                          | $vectorType[] $array = new $vectorType[${codes.length}];
+                         | $bufferType[] $parents = new $bufferType[${codes.length}];
                          | ${codes.map(_.code).mkString("\n")}
-                         | $batchType ${ev.value} = new $batchType($array, $numRows);
+                         | $batchType ${ev.value} = $ret;
                          |""".stripMargin
         ev.copy(code = code)
     }

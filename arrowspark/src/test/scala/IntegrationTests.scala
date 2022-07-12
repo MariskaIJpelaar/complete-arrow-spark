@@ -161,6 +161,7 @@ class IntegrationTests extends AnyFunSuite {
 
 
   test("Lazy read first row of simple Dataset with ascending numbers through the RDD") {
+    column.AllocationManager.reset()
     generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
@@ -178,6 +179,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Lazy read first row of simple Dataset with ascending numbers through ColumnDataFrame") {
+    column.AllocationManager.reset()
     generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
@@ -194,6 +196,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Lazy read simple Dataset with ascending numbers through ColumnDataFrame") {
+    column.AllocationManager.reset()
     generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
@@ -209,6 +212,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Lazy read simple Dataset with ascending key-column and random value-column through ColumnDataFrame") {
+    column.AllocationManager.reset()
     val table = generateParquets(key = i => i, randomValue = true)
     val directory = new Directory(new File(directory_name))
     assert(directory.exists)
@@ -224,6 +228,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Performing local ColumnarSort on a simple, very small, non-random, Dataset using lazy Reading") {
+    column.AllocationManager.reset()
     val size = 10
     val table = generateParquets(key = i => i*2, randomValue = false, size = size)
     val directory = new Directory(new File(directory_name))
@@ -246,6 +251,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Performing ColumnarSort on a simple, very small, non-random, Dataset using lazy Reading") {
+    column.AllocationManager.reset()
     val size = 10
     val table = generateParquets(key = i => i*2, randomValue = false, size = size)
     val directory = new Directory(new File(directory_name))
@@ -272,6 +278,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Performing single-column ColumnarSort on a simple, random, Dataset using Lazy Reading") {
+    column.AllocationManager.reset()
     // Generate Dataset
     val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true)
     val directory = new Directory(new File(directory_name))
@@ -298,6 +305,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Performing ColumnarSort on a simple, semi-random, Dataset using Lazy Reading") {
+    column.AllocationManager.reset()
     // Generate Dataset
     val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = false)
     val directory = new Directory(new File(directory_name))
@@ -324,6 +332,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Performing ColumnarSort on a simple, random, Dataset using Lazy Reading") {
+    column.AllocationManager.reset()
     // Generate Dataset
     val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true)
     val directory = new Directory(new File(directory_name))
@@ -350,6 +359,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading") {
+    column.AllocationManager.reset()
     // Generate Dataset
     val size = default_size * 15
     val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true, size = size)
@@ -377,6 +387,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading, memory-aware") {
+    column.AllocationManager.reset()
     // Generate Dataset
     val size = default_size * 15
     val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true, size = size)
