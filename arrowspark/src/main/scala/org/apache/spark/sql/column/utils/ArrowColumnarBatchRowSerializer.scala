@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.spark.SparkEnv
@@ -33,13 +34,18 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
   private val intermediate = 'B'
 
   override def serializeStream(s: OutputStream): SerializationStream = new SerializationStream {
+    private var allocator: Option[BufferAllocator] = None
     private var root: Option[VectorSchemaRoot] = None
     private var oos: Option[ObjectOutputStream] = None
     private var writer: Option[ArrowStreamWriter] = None
 
     /** Does not consume batch */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
-      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getRoot"))._1)
+      if (root.isEmpty) {
+        val converted = ArrowColumnarBatchRowConverters.toRoot(batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getRoot"))
+        root = Option(converted._1)
+        allocator = Option(converted._2)
+      }
       root.get
     }
 
@@ -57,18 +63,20 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     private def getWriter(batch: ArrowColumnarBatchRow): ArrowStreamWriter = {
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
-        Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toArrowRecordBatch(
-          batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getWriter"), batch.numFields)._1) { recordBatch =>
-          new VectorLoader(root.get).load(recordBatch)
-          writer.get.start()
-          return writer.get
+        Resources.autoCloseTryGet(batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getWriter")) { copied =>
+          Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toArrowRecordBatch(copied, copied.numFields)._1) { recordBatch =>
+            new VectorLoader(root.get).load(recordBatch)
+            writer.get.start()
+            return writer.get
+          }
         }
       }
 
-      Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toArrowRecordBatch(
-        batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getWriter::recordBatch"), batch.numFields)._1) { recordBatch =>
-        new VectorLoader(root.get).load(recordBatch)
-        writer.get
+      Resources.autoCloseTryGet(batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getWriter::recordBatch")) { copied =>
+        Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toArrowRecordBatch(copied, copied.numFields)._1) { recordBatch =>
+          new VectorLoader(root.get).load(recordBatch)
+          writer.get
+        }
       }
     }
 
@@ -87,6 +95,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       writer.foreach( writer => writer.close() )
       oos.foreach( oos => oos.close() )
       root.foreach( vectorSchemaRoot => vectorSchemaRoot.close() )
+      allocator.foreach( allocator => allocator.close() )
       column.AllocationManager.cleanup()
     }
 
@@ -162,7 +171,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
           val length = ois.get.readInt()
           (0, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
             val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
-            tp.transfer()
+            tp.splitAndTransfer(0, vector.getValueCount)
             new ArrowColumnVector(tp.getTo)
           }).toArray, length))
         }

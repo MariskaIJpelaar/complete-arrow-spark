@@ -37,7 +37,7 @@ object VectorDeduplicator {
   def unique[V <: ValueVector](comparator: VectorValueComparator[V], vector: V, vectorAllocator: BufferAllocator): V = {
     val original = {
       val tp = vector.getTransferPair(vectorAllocator)
-      tp.transfer()
+      tp.splitAndTransfer(0, vector.getValueCount)
       tp.getTo
     }
 

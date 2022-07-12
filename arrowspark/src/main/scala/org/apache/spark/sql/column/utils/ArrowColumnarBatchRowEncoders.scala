@@ -1,7 +1,6 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.VectorLoader
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
@@ -72,9 +71,9 @@ object ArrowColumnarBatchRowEncoders {
             val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
             Resources.autoCloseTryGet(batch){ batch =>
               // consumes batch
-              val (recordBatch, allocator, batchLength): (ArrowRecordBatch, BufferAllocator, Int) =
+              val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
                 ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
-              Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(recordBatch) { recordBatch =>
+              Resources.autoCloseTryGet(recordBatch) { recordBatch =>
                 new VectorLoader(root).load(recordBatch)
                 writer.writeBatch()
                 root.close()
@@ -82,7 +81,7 @@ object ArrowColumnarBatchRowEncoders {
                 oos.writeInt(extra.length)
                 oos.write(extra)
                 left = left.map( numLeft => numLeft-batchLength )
-              })
+              }
             }
           }
           oos.flush()
@@ -132,7 +131,7 @@ object ArrowColumnarBatchRowEncoders {
 
             extraDecoder(array, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
               val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
-              tp.transfer()
+              tp.splitAndTransfer(0, vector.getValueCount)
               new ArrowColumnVector(tp.getTo)
             }).toArray, length))
           }

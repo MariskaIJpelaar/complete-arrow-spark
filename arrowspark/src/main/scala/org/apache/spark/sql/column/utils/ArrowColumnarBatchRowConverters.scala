@@ -21,42 +21,37 @@ object ArrowColumnarBatchRowConverters {
    * copied from org.apache.arrow.vector.VectorUnloader
    * Caller should close the ArrowRecordBatch
    *
-   * @param batch   batch to convert and close
+   * @param batch   batch to convert
+   *                NOTE: batch is NOT closed
    * @param numCols (optional) number of columns to convert
    * @param numRows (optional) number of rows to convert
    * @return The generated ArrowRecordBatch together with its allocator and the number of rows converted
    */
-  def toArrowRecordBatch(batch: ArrowColumnarBatchRow, numCols: Int, numRows: Option[Int] = None): (ArrowRecordBatch, BufferAllocator, Int) = {
-    Resources.autoCloseTryGet(batch) { batch =>
-      val nodes = new util.ArrayList[ArrowFieldNode]
-      val buffers = new util.ArrayList[ArrowBuf]
-      val codec = NoCompressionCodec.INSTANCE
+  def toArrowRecordBatch(batch: ArrowColumnarBatchRow, numCols: Int, numRows: Option[Int] = None): (ArrowRecordBatch, Int) = {
+    val nodes = new util.ArrayList[ArrowFieldNode]
+    val buffers = new util.ArrayList[ArrowBuf]
+    val codec = NoCompressionCodec.INSTANCE
 
-      val rowCount = numRows.getOrElse(batch.numRows)
+    val rowCount = numRows.getOrElse(batch.numRows)
 
-      /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
-      def appendNodes(vector: FieldVector, nodes: util.List[ArrowFieldNode], buffers: util.List[ArrowBuf]): Unit = {
-        nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
-        val fieldBuffers = vector.getFieldBuffers
-        val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
-        if (fieldBuffers.size != expectedBufferCount)
-          throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
-        for (buf <- fieldBuffers)
-          buffers.add(codec.compress(vector.getAllocator, buf))
-        for (child <- vector.getChildrenFromFields)
-          appendNodes(child, nodes, buffers)
-      }
-
-      val allocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowConverters::toArrowRecordBatch")
-      batch.columns.slice(0, numCols).foreach { column =>
-        val vector = column.getValueVector
-        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
-        tp.transfer()
-        appendNodes(tp.getTo.asInstanceOf[FieldVector], nodes, buffers)
-      }
-      (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true),
-        allocator, rowCount)
+    /** copied from org.apache.arrow.vector.VectorUnloader::appendNodes(...) */
+    def appendNodes(vector: FieldVector, nodes: util.List[ArrowFieldNode], buffers: util.List[ArrowBuf]): Unit = {
+      nodes.add(new ArrowFieldNode(rowCount, vector.getNullCount))
+      val fieldBuffers = vector.getFieldBuffers
+      val expectedBufferCount = TypeLayout.getTypeBufferCount(vector.getField.getType)
+      if (fieldBuffers.size != expectedBufferCount)
+        throw new IllegalArgumentException(String.format("wrong number of buffers for field %s in vector %s. found: %s", vector.getField, vector.getClass.getSimpleName, fieldBuffers))
+      for (buf <- fieldBuffers)
+        buffers.add(codec.compress(vector.getAllocator, buf))
+      for (child <- vector.getChildrenFromFields)
+        appendNodes(child, nodes, buffers)
     }
+
+    batch.columns.slice(0, numCols).foreach { column =>
+      appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers)
+    }
+    (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
+
   }
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
@@ -111,7 +106,7 @@ object ArrowColumnarBatchRowConverters {
         val columns = batch.columns.slice(0, col).map { column =>
           val vector = column.getValueVector
           val tp = vector.getTransferPair(createAllocator(firstAllocator, vector.getName))
-          tp.transfer()
+          tp.splitAndTransfer(0, vector.getValueCount)
           new ArrowColumnVector(tp.getTo)
         }
         new ArrowColumnarBatchRow(firstAllocator, columns, batch.numRows)
@@ -122,7 +117,7 @@ object ArrowColumnarBatchRowConverters {
         val columns = batch.columns.slice(col, batch.numFields).map { column =>
           val vector = column.getValueVector
           val tp = vector.getTransferPair(createAllocator(secondAllocator, vector.getName))
-          tp.transfer()
+          tp.splitAndTransfer(0, vector.getValueCount)
           new ArrowColumnVector(tp.getTo)
         }
         (firstBatch, new ArrowColumnarBatchRow(secondAllocator, columns, batch.numRows))
@@ -144,7 +139,7 @@ object ArrowColumnarBatchRowConverters {
         batch.columns foreach { column =>
           val vector = column.getValueVector
           val tp = vector.getTransferPair(createAllocator(union.getAllocator, vector.getName))
-          tp.transfer()
+          tp.splitAndTransfer(0, vector.getValueCount)
           union.addVector(tp.getTo.asInstanceOf[FieldVector])
         }
         union.setValueCount(batch.numRows)
@@ -168,7 +163,7 @@ object ArrowColumnarBatchRowConverters {
         val vector = batch.columns(i).getValueVector
         val tp = vector.getTransferPair(createAllocator(parentAllocator, vector.getName))
         // we 'copy' the content of the first batch ...
-        tp.transfer()
+        tp.splitAndTransfer(0, vector.getValueCount)
         // ... and re-use the ValueVector so we do not have to determine vector types :)
         val new_vec = tp.getTo
         new_vec.clear()
