@@ -1,8 +1,7 @@
 package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.{RandomUtils, Resources}
-import org.apache.arrow.memory.BufferAllocator
-import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.util.random.XORShiftRandom
@@ -71,7 +70,7 @@ object ArrowColumnarBatchRowSamplers {
       var nrBatches = 0
       var remainderBatch: Option[ArrowColumnarBatchRow] = None
 
-      Resources.autoCloseOptionTryGet(remainderBatch) { _ =>
+      try {
         Resources.closeTraversableOnFailGet(new ArrayBuffer[ArrowColumnarBatchRow](k)) { reservoirBuf =>
           if (!input.hasNext) return (ArrowColumnarBatchRow.empty, 0)
 
@@ -82,6 +81,7 @@ object ArrowColumnarBatchRowSamplers {
             val (batchOne, batchTwo): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) =
               ArrowColumnarBatchRowConverters.split(input.next(), (k-inputSize).toInt)
             // consume them
+            remainderBatch.foreach(_.close())
             remainderBatch = Option(batchTwo) // should not trigger an exception
             reservoirBuf += batchOne // for now, we assume there will be no exception here...
             // set batch allocator if this was not done before
@@ -112,6 +112,8 @@ object ArrowColumnarBatchRowSamplers {
             }
           }
         }
+      } finally {
+        remainderBatch.foreach(_.close())
       }
     }
   }

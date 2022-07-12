@@ -17,17 +17,14 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
 
   override def nullable: Boolean = false
 
-  /** Wrapper for pattern matching */
-  private case class BoundReferenceSeq(value: Seq[BoundReference])
-
   /** Note: consumes input
    * Caller should close returned batch */
   override def eval(input: InternalRow): ArrowColumnarBatchRow = input match {
     case batch: ArrowColumnarBatchRow =>
       try {
         expressions match {
-          case references: BoundReferenceSeq =>
-            ArrowColumnarBatchRowTransformers.projection(batch, references.value.map(_.ordinal))
+          case references: Seq[BoundReference] =>
+            ArrowColumnarBatchRowTransformers.projection(batch, references.map(_.ordinal))
           case other =>
             val columns = Array.tabulate[ArrowColumnVector](other.length) { i =>
               other(i).eval(batch).asInstanceOf[ArrowColumnarArray].getData
@@ -42,21 +39,16 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
     case _ => throw new RuntimeException("[ArrowBoundAttribute::eval] only ArrowColumnarBatches are supported")
   }
 
-  /** Note: closes input
-   * Caller is responsible for closing ev.value */
+  /** Caller is responsible for closing ev.value */
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
     expressions match {
-      case references: BoundReferenceSeq =>
+      case references: Seq[BoundReference] =>
         assert(ctx.INPUT_ROW != null)
-        val projections = ctx.addReferenceObj(objName = "projections", obj = references.value.map(_.ordinal))
+        val projections = ctx.addReferenceObj(objName = "projections", obj = references.map(_.ordinal))
         val batchClass = classOf[ArrowColumnarBatchRow].getName
-        val transformerClass = ArrowColumnarBatchRowTransformers.getClass.getName + "$.MODULE$"
+        val transformerClass = ArrowColumnarBatchRowTransformers.getClass.getName + ".MODULE$"
         val code = code"""
-                         | try {
                          |  $batchClass ${ev.value} = $transformerClass.projection(($batchClass)${ctx.INPUT_ROW}, $projections);
-                         | } finally {
-                         |  (($batchClass)${ctx.INPUT_ROW}).close();
-                         | }
                          |""".stripMargin
         ev.copy(code = code)
       case _ =>
@@ -87,6 +79,7 @@ case class ArrowBoundAttribute(expressions: Seq[Expression]) extends LeafExpress
                          | $bufferType[] $parents = new $bufferType[${codes.length}];
                          | ${codes.map(_.code).mkString("\n")}
                          | $batchType ${ev.value} = $ret;
+                         | boolean ${ev.isNull} = ($array.length == 0);
                          |""".stripMargin
         ev.copy(code = code)
     }

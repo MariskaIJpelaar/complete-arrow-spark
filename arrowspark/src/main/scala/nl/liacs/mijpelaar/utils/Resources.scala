@@ -89,32 +89,6 @@ object Resources {
     autoCloseableArrayTry(array)(fun).fold( throwable => throw throwable, item => item)
   }
 
-  /** Same as autoCloseTry, but with Option-type */
-  def autoCloseOptionTry[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): Try[B] = {
-    var t: Option[Throwable] = None
-    try {
-      Success(fun(optional))
-    } catch {
-      case funT: Throwable =>
-        t = Option(funT)
-        assert(t.isDefined)
-        Failure(t.get)
-    } finally {
-      t.fold(optional.foreach(_.close())) { throwable =>
-          try {
-            optional.foreach(_.close())
-          } catch {
-            case closeT: Throwable =>
-              throwable.addSuppressed(closeT)
-              Failure(throwable)
-          }
-      }
-    }
-  }
-
-  def autoCloseOptionTryGet[T <: Option[AutoCloseable], B](optional: T)(fun: T => B): B = {
-    autoCloseOptionTry(optional)(fun).fold( throwable => throw throwable, item => item)
-  }
 
   /** Same as autoCloseTry, but only closes on failure */
   def closeOnFail[A <: AutoCloseable, B](closeable: A)(fun: A => B): Try[B] = {

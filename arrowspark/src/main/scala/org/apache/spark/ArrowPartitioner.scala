@@ -136,7 +136,7 @@ class ArrowRangePartitioner[V](
         var cumSize = 0
         var target = step
         var boundBuilder: Option[ArrowColumnarBatchRowBuilder] = None
-        Resources.autoCloseOptionTryGet(boundBuilder) { _ =>
+        try {
           0 until unique.numRows takeWhile { index =>
             cumWeight += weights.getFloat(index)
             if (cumWeight >= target) {
@@ -151,6 +151,8 @@ class ArrowRangePartitioner[V](
           }
           rangeBoundsLength = Option(cumSize)
           boundBuilder.map( _.build(createAllocator(unique.allocator.getRoot, "ArrowPartitioner::determineBounds::return")) ).getOrElse(ArrowColumnarBatchRow.empty)
+        } finally {
+          boundBuilder.foreach(_.close())
         }
       })
     } finally {

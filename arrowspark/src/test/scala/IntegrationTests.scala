@@ -57,7 +57,7 @@ class IntegrationTests extends AnyFunSuite {
   }
 
   def generateSpark(): SparkSession = {
-    val spark = SparkSession.builder().appName("LazyReaderSmallTest")
+    val spark = SparkSession.builder().appName("IntegrationTests")
       .config("spark.memory.offHeap.enabled", "true")
       .config("spark.memory.offHeap.size", "1GB")
       .master("local[4]")
