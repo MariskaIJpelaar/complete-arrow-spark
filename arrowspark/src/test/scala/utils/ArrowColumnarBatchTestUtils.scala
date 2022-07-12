@@ -1,7 +1,8 @@
 package utils
 
 import org.apache.arrow.memory.BufferAllocator
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 object ArrowColumnarBatchTestUtils {

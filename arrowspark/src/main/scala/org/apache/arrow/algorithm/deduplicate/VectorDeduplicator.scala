@@ -1,6 +1,7 @@
 package org.apache.arrow.algorithm.deduplicate
 
 import org.apache.arrow.algorithm.sort.VectorValueComparator
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{IntVector, ValueVector}
 
 /** Removes adjacent duplicate values according to a given comparator */
@@ -8,8 +9,8 @@ object VectorDeduplicator {
   // returns the indices required to create de-duplicated vector from the original
   // does not close the provided vector
   // Caller is responsible for closing returned IntVector
-  def uniqueIndices[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): IntVector = {
-    val indices = new IntVector("indices", vector.getAllocator.newChildAllocator("VectorDeduplicator::indices", 0, org.apache.spark.sql.column.perAllocatorSize))
+  def uniqueIndices[V <: ValueVector](indicesAllocator: BufferAllocator, comparator: VectorValueComparator[V], vector: V): IntVector = {
+    val indices = new IntVector("indices", indicesAllocator)
 
     comparator.attachVector(vector)
     // the first one won't be a duplicate :)
@@ -33,10 +34,9 @@ object VectorDeduplicator {
   // returns the original vector with duplicates removed
   // closes the passed vector
   // Caller is responsible for closing returned vector
-  def unique[V <: ValueVector](comparator: VectorValueComparator[V], vector: V): V = {
+  def unique[V <: ValueVector](comparator: VectorValueComparator[V], vector: V, vectorAllocator: BufferAllocator): V = {
     val original = {
-      val tp = vector.getTransferPair(vector.getAllocator
-        .newChildAllocator("VectorDeduplicator::unique::transfer", vector.getBufferSize, org.apache.spark.sql.column.perAllocatorSize))
+      val tp = vector.getTransferPair(vectorAllocator)
       tp.transfer()
       tp.getTo
     }

@@ -3,7 +3,8 @@ package org.apache.spark.sql.column.utils
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.memory.{ArrowBuf, BufferAllocator}
 import org.apache.arrow.vector.BitVectorHelper
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.Closeable
@@ -97,7 +98,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       val vector = column.getValueVector
       vector.setValueCount(size)
       val tp = vector.getTransferPair(
-        createAllocator(parentAllocator,"ArrowColumnarBatchRowBuilder::buildColumns"))
+        createAllocator(parentAllocator, "ArrowColumnarBatchRowBuilder::buildColumns"))
       tp.transfer()
       new ArrowColumnVector(tp.getTo)
     })

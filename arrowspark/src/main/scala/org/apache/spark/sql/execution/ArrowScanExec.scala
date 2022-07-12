@@ -1,13 +1,14 @@
 package org.apache.spark.sql.execution
 
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.RootAllocator
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SparkSession, column}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeReference, BoundReference, Expression, PlanExpression, Predicate}
 import org.apache.spark.sql.catalyst.{InternalRow, TableIdentifier}
+import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.sources.{BaseRelation, Filter}
@@ -17,7 +18,7 @@ import scala.collection.mutable
 
 
 trait ArrowFileFormat extends FileFormat {
-  protected lazy val allocator: BufferAllocator = column.rootAllocator.newChildAllocator("SimpleParquetArrowFileFormat", 0, org.apache.spark.sql.column.perAllocatorSize)
+  protected lazy val allocator: RootAllocator = newRoot()
 
   /** Returns a function that can be used to read a single file in as an Iterator of Array[ValueVector]
    * Caller should close batches in Iterator */

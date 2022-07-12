@@ -7,7 +7,9 @@ import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
 
@@ -90,6 +92,7 @@ object ArrowColumnarBatchRowEncoders {
       Iterator(bos.toByteArray)
     } finally {
       iter.foreach( extraEncoder(_)._2.close() )
+      column.AllocationManager.cleanup()
     }
   }
 
@@ -110,7 +113,7 @@ object ArrowColumnarBatchRowEncoders {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         new ObjectInputStream(codec.compressedInputStream(bis))
       }
-      private val allocator = createAllocator("ArrowColumnarBatchRowEncoders::decode::reader")
+      private val allocator = newRoot()
       private val reader = new ArrowStreamReader(ois, allocator)
 
       override protected def getNext(): Any = {
@@ -121,7 +124,7 @@ object ArrowColumnarBatchRowEncoders {
 
         Resources.autoCloseTryGet(reader.getVectorSchemaRoot) { root =>
           Resources.autoCloseTraversableTryGet(root.getFieldVectors.toIterator) { columns =>
-            val batchAllocator = createAllocator("ArrowColumnarBatchRowEncoders::decode")
+            val batchAllocator = createAllocator(allocator, "ArrowColumnarBatchRowEncoders::decode")
             val length = ois.readInt()
             val arr_length = ois.readInt()
             val array = new Array[Byte](arr_length)
@@ -138,7 +141,6 @@ object ArrowColumnarBatchRowEncoders {
 
       override protected def close(): Unit = {
         reader.close()
-        allocator.close()
         ois.close()
         bis.close()
       }

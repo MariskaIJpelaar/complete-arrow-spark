@@ -2,7 +2,7 @@ package org.apache.spark.sql.rdd
 
 import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowUtils}
 
 import scala.collection.mutable.ArrayBuffer
@@ -97,8 +97,8 @@ object ArrowRDD {
 
       res.foreach(result => {
         // NOTE: we require the 'take', because we do not want more than num numRows
-        buf += ArrowColumnarBatchRow.create(createAllocator("ArrowRDD::take"),
-          ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))._2)
+        val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))
+        buf += ArrowColumnarBatchRow.create(decoded._3, decoded._2)
       })
 
       partsScanned += p.size

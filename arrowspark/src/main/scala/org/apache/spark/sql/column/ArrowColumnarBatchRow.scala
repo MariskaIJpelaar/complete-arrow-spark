@@ -3,17 +3,13 @@ package org.apache.spark.sql.column
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ArrowColumnarArray, ColumnarArray}
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
 
 import java.io._
-
-// TODO: memory management
-// TODO: Do not use childAllocators for everything anymore: each batch get a childAllocator named after the function it is created from, FROM THE ROOTALLOCATOR, and has childAllocators for its columns
-//        Whenever a batch is closed, its allocator is also closed
-// TODO: When you pass a batch to a function, you should assume it is invalidated unless otherwise noted. If you want to use it afterwards, you should copy it
 
 /**
  * ArrowColumnarBatchRow as a wrapper around [[ArrowColumnVector]]s to be used as an [[InternalRow]]
@@ -58,19 +54,20 @@ class ArrowColumnarBatchRow(val allocator: BufferAllocator, @transient protected
   override def update(i: Int, value: Any): Unit = throw new UnsupportedOperationException()
   override def setNullAt(i: Int): Unit = update(i, null)
 
-//  /** Get first available allocator */
-//  def getFirstAllocator: Option[BufferAllocator] =
-//    if (numFields > 0) Option(columns(0).getValueVector.getAllocator) else None
+  /** Uses slicing instead of complete copy,
+   * according to: https://arrow.apache.org/docs/java/vector.html#slicing
+   * Caller is responsible for both this batch and copied-batch */
+  override def copy(): ArrowColumnarBatchRow = copyFromCaller("ArrowColumnarBatchRow::copy")
+
+  def copyFromCaller(caller: String, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
+    val newAllocator = createAllocator(allocator.getRoot, caller)
+    copyToAllocator(newAllocator, range)
+  }
 
   /** Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
-  override def copy(): ArrowColumnarBatchRow = copy(createAllocator("ArrowColumnarBatchRow::copy"))
-
-  /** Uses slicing instead of complete copy,
-   * according to: https://arrow.apache.org/docs/java/vector.html#slicing
-   * Caller is responsible for both this batch and copied-batch */
-  def copy(newAllocator: BufferAllocator, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
+  def copyToAllocator(newAllocator: BufferAllocator, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
     if (range.isEmpty)
       return ArrowColumnarBatchRow.empty
 
@@ -140,15 +137,17 @@ class ArrowColumnarBatchRow(val allocator: BufferAllocator, @transient protected
 
 object ArrowColumnarBatchRow {
   /** Creates an empty ArrowColumnarBatchRow */
-  def empty: ArrowColumnarBatchRow = new ArrowColumnarBatchRow(createAllocator("ArrowColumnarBatchRow::empty"),
-    Array.empty, 0)
+  def empty: ArrowColumnarBatchRow =
+    new ArrowColumnarBatchRow(createAllocator(newRoot(), "ArrowColumnarBatchRow::empty"), Array.empty, 0)
+
 
   /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows
    * Closes the batches in the provided iterator
    * WARNING: uses 'take', a very expensive operation. Use with care!
    * Caller is responsible for closing generated batch */
-  def create(allocator: BufferAllocator, iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
-    ArrowColumnarBatchRow.create(allocator, ArrowColumnarBatchRowUtils.take(iter)._2)
+  def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
+    val decoded = ArrowColumnarBatchRowUtils.take(iter)
+    ArrowColumnarBatchRow.create(decoded._3, decoded._2)
   }
 
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors

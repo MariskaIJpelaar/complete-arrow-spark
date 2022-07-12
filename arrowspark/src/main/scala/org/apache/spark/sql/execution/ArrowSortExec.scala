@@ -5,8 +5,8 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenerator, CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, SortOrder}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowSorters
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
 
 import java.util
 import scala.collection.mutable.ArrayBuffer
@@ -102,8 +102,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   // caller is responsible for cleaning ArrowColumnarBatchRows
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitionsInternal { case item: Iterator[ArrowColumnarBatchRow] =>
-      val allocator = createAllocator("ArrowSortExec::doExecute")
-      Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(allocator, item)) { batch =>
+      Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(item)) { batch =>
         val newBatch: ArrowColumnarBatchRow = {
           if (sortOrder.length == 1) {
             val col = attributeReferenceToCol(sortOrder.head)

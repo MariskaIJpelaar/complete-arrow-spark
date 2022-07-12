@@ -2,10 +2,12 @@ package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, SparkComparator, SparkUnionComparator}
-import org.apache.arrow.vector.{ValueVector, ZeroVector}
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.complex.UnionVector
+import org.apache.arrow.vector.{ValueVector, ZeroVector}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 /** Methods that do not fit into the other categories */
@@ -34,7 +36,7 @@ object ArrowColumnarBatchRowUtils {
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
    * @param numCols the number of columns to take
    * @param batches batches to create array from
-   * @return array of merged columns
+   * @return array of merged columns with used allocator
    * Closes the batches from the iterator
    * WARNING: this is an expensive operation, because it copies all data. Use with care!
    *
@@ -49,11 +51,11 @@ object ArrowColumnarBatchRowUtils {
    */
   def take(batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
-           extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None): (Any, Array[ArrowColumnVector]) = {
+           extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None): (Any, Array[ArrowColumnVector], BufferAllocator) = {
     if (!batches.hasNext) {
       if (numCols.isDefined)
-        return (None, Array.tabulate[ArrowColumnVector](numCols.get)(i => new ArrowColumnVector( new ZeroVector(i.toString) ) ))
-      return (None, new Array[ArrowColumnVector](0))
+        return (None, Array.tabulate[ArrowColumnVector](numCols.get)(i => new ArrowColumnVector( new ZeroVector(i.toString) ) ), newRoot())
+      return (None, new Array[ArrowColumnVector](0), newRoot())
     }
 
     // FIXME: Resource releaser with custom close function?
@@ -68,8 +70,8 @@ object ArrowColumnarBatchRowUtils {
           Resources.autoCloseTryGet(batch)(batch => builder.append(batch))
           extraCollected = extraCollector(extra, Option(extraCollected))
         }
-        val allocator = createAllocator("ArrowColumnarBatchRowUtils::take")
-        (extraCollected, builder.buildColumns(allocator))
+        val allocator = createAllocator(first.allocator.getRoot, "ArrowColumnarBatchRowUtils::take")
+        (extraCollected, builder.buildColumns(allocator), allocator)
       })
     } finally {
       /** clear up the remainder */

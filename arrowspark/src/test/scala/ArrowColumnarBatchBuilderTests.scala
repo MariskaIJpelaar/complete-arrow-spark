@@ -1,20 +1,21 @@
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.sql.column
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowBuilder
 import org.apache.spark.sql.vectorized.ArrowColumnarArray
 import org.scalatest.funsuite.AnyFunSuite
 import utils.ArrowColumnarBatchTestUtils
 
 class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
-  def testBatches(batches: Seq[ArrowColumnarBatchRow]): Unit = {
+  def testBatches(rootAllocator: RootAllocator, batches: Seq[ArrowColumnarBatchRow]): Unit = {
     if (batches.isEmpty) return
 
     Resources.autoCloseTraversableTryGet(batches.map(_.copy()).toIterator) { copies =>
       Resources.autoCloseTryGet(new ArrowColumnarBatchRowBuilder(batches.head)) { builder =>
         batches.tail foreach { batch => builder.append(batch) }
-        Resources.autoCloseTryGet(builder.build(createAllocator("ArrowColumnarBatchBuilderTests::testBatches"))) { answer =>
+        Resources.autoCloseTryGet(builder.build(createAllocator(rootAllocator, "ArrowColumnarBatchBuilderTests::testBatches"))) { answer =>
           var rowIndex = 0
           copies.zipWithIndex.foreach { case (batch, index) =>
             Resources.autoCloseTryGet(batch) { batch =>
@@ -40,24 +41,24 @@ class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
 
   test("ArrowColumnarBatchBuilder empty batch") {
     val empty = ArrowColumnarBatchRow.empty
-    val answer = new ArrowColumnarBatchRowBuilder(empty).build(createAllocator("ArrowColumnarBatchRowBuilderTests::empty"))
+    val answer = new ArrowColumnarBatchRowBuilder(empty)
+      .build(createAllocator(empty.allocator.getRoot, "ArrowColumnarBatchRowBuilderTests::empty"))
     assert(empty.equals(answer))
   }
 
   test("ArrowColumnarBatchBuilder singleton batch") {
-    val batch = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)),
-      column.rootAllocator.newChildAllocator("singleton", 0, Integer.MAX_VALUE))
-    testBatches(Seq(batch))
-    column.resetRootAllocator()
+    val root = newRoot()
+    val batch = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)), createAllocator(root, "singleton"))
+    testBatches(root, Seq(batch))
+    column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchBuilder two singleton batches") {
-    val first = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)),
-      column.rootAllocator.newChildAllocator("first", 0, Integer.MAX_VALUE))
-    val second = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(32)),
-      column.rootAllocator.newChildAllocator("second", 0, Integer.MAX_VALUE))
+    val root = newRoot()
 
-    testBatches(Seq(first, second))
-    column.resetRootAllocator()
+    val first = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(42)), createAllocator(root, "first"))
+    val second = ArrowColumnarBatchTestUtils.batchFromSeqs(Seq(Seq(32)), createAllocator(root, "second"))
+    testBatches(root, Seq(first, second))
+    column.AllocationManager.cleanup()
   }
 }

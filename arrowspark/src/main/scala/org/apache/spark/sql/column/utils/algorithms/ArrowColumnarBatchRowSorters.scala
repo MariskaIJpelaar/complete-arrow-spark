@@ -4,7 +4,7 @@ import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, IndexSorter, SparkComparator}
 import org.apache.arrow.vector.IntVector
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
 object ArrowColumnarBatchRowSorters {
@@ -24,12 +24,11 @@ object ArrowColumnarBatchRowSorters {
 
     Resources.autoCloseTryGet(batch) { batch =>
       // Indices for permutations
-      Resources.autoCloseTryGet(new IntVector("indexHolder",
-        createAllocator("ArrowColumnarBatchRowSorters::multiColumnSort::indices"))) { indices =>
+      Resources.autoCloseTryGet(new IntVector("indexHolder", batch.allocator.getRoot)) { indices =>
         // UnionVector representing our batch with columns from sortOrder
         val (union, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
-          ArrowColumnarBatchRowTransformers.getColumns(batch.copy(
-            createAllocator("ArrowColumnarBatchRowSorters::multiColumnSort::union")),
+          ArrowColumnarBatchRowTransformers.getColumns(
+            batch.copyFromCaller("ArrowColumnarBatchRowSorters::multiColumnSort::union"),
             sortOrders.map(order => order.child.asInstanceOf[AttributeReference].name).toArray))
         Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(union) { union =>
           val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
@@ -77,8 +76,7 @@ object ArrowColumnarBatchRowSorters {
 
     Resources.autoCloseTryGet(batch) { batch =>
       val vector = batch.columns(col).getValueVector
-      Resources.autoCloseTryGet(new IntVector("indexHolder",
-        createAllocator("ArrowColumnarBatchRow::sort::indices"))) { indices =>
+      Resources.autoCloseTryGet(new IntVector("indexHolder", batch.allocator.getRoot)) { indices =>
         assert(vector.getValueCount > 0)
 
         indices.allocateNew(vector.getValueCount)

@@ -161,7 +161,7 @@ object EvaluationSuite {
     fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()
 
-    column.resetRootAllocator()
+    column.AllocationManager.cleanup()
   }
 
 

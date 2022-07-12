@@ -2,6 +2,7 @@ package org.apache.spark.sql.vectorized
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
 
@@ -27,8 +28,7 @@ class ArrowColumnarArray(private val columnar: ColumnarArray) extends ArrayData 
 
   override def copy(): ArrayData = {
     val vector = getData.getValueVector
-    val allocator = vector.getAllocator
-      .newChildAllocator(s"ArrowColumnarArray::copy::", 0, org.apache.spark.sql.column.perAllocatorSize)
+    val allocator = createAllocator(vector.getAllocator.getRoot, "ArrowColumnarArray::copy")
     val tp = vector.getTransferPair(allocator)
 
     tp.splitAndTransfer(0, vector.getValueCount)

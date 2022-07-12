@@ -7,7 +7,8 @@ import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
 import org.apache.spark.sql.column
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
@@ -38,7 +39,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
 
     /** Does not consume batch */
     private def getRoot(batch: ArrowColumnarBatchRow): VectorSchemaRoot = {
-      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copy(createAllocator("ArrowColumnarBatchRowSerializer::getRoot")))._1)
+      if (root.isEmpty) root = Option(ArrowColumnarBatchRowConverters.toRoot(batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getRoot"))._1)
       root.get
     }
 
@@ -57,7 +58,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       if (writer.isEmpty) {
         writer = Option(new ArrowStreamWriter(getRoot(batch), null, Channels.newChannel(getOos)))
         Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toArrowRecordBatch(
-          batch.copy(createAllocator("ArrowColumnarBatchRowSerializer::getWriter")), batch.numFields)._1) { recordBatch =>
+          batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getWriter"), batch.numFields)._1) { recordBatch =>
           new VectorLoader(root.get).load(recordBatch)
           writer.get.start()
           return writer.get
@@ -65,7 +66,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       }
 
       Resources.autoCloseTryGet(ArrowColumnarBatchRowConverters.toArrowRecordBatch(
-        batch.copy(createAllocator("ArrowColumnarBatchRowSerializer::getWriter::recordBatch")), batch.numFields)._1) { recordBatch =>
+        batch.copyFromCaller("ArrowColumnarBatchRowSerializer::getWriter::recordBatch"), batch.numFields)._1) { recordBatch =>
         new VectorLoader(root.get).load(recordBatch)
         writer.get
       }
@@ -86,6 +87,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       writer.foreach( writer => writer.close() )
       oos.foreach( oos => oos.close() )
       root.foreach( vectorSchemaRoot => vectorSchemaRoot.close() )
+      column.AllocationManager.cleanup()
     }
 
     /** The following methods are never called by shuffle-code (according to UnsafeRowSerializer) */
@@ -128,7 +130,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
         ois = Option(new ObjectInputStream(cis))
       }
-      private lazy val allocator = column.rootAllocator.newChildAllocator("ArrowColumnarBatchRowSerializer", 0, org.apache.spark.sql.column.perAllocatorSize)
+      private lazy val allocator = newRoot()
       private var reader: Option[ArrowStreamReader] = None
       private def initReader(): Unit = {
         initOis()
@@ -156,7 +158,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
 
         Resources.autoCloseTraversableTryGet(reader.get.getVectorSchemaRoot.getFieldVectors.toIterator) { columns =>
-          val batchAllocator = createAllocator("ArrowColumnarBatchRowSerializer::getNext")
+          val batchAllocator = createAllocator(allocator, "ArrowColumnarBatchRowSerializer::getNext")
           val length = ois.get.readInt()
           (0, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
             val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))

@@ -3,7 +3,8 @@ package org.apache.spark.sql.column.utils.algorithms
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.deduplicate.VectorDeduplicator
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
 object ArrowColumnarBatchRowDeduplicators {
@@ -22,11 +23,12 @@ object ArrowColumnarBatchRowDeduplicators {
     Resources.autoCloseTryGet(batch) { batch =>
       // UnionVector representing our batch
       val (union, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
-        ArrowColumnarBatchRowTransformers.getColumns(batch.copy(createAllocator("ArrowColumnarBatchRowDeduplicator::unique")),
+        ArrowColumnarBatchRowTransformers.getColumns(batch.copyFromCaller("ArrowColumnarBatchRowDeduplicator::unique"),
           sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name).toArray))
       Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(union) { union =>
         val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
-        ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(comparator, union))
+        ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(
+          createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowDeduplicator::indexVector"), comparator, union))
       })
     }
   }

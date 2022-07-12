@@ -1,7 +1,7 @@
 package org.apache.arrow.util.vector.read
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.types.pojo.Schema
 import org.apache.arrow.vector.{IntVector, ValueVector, VectorSchemaRoot}
 import org.apache.hadoop.conf.Configuration
@@ -14,7 +14,8 @@ import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.parquet.io.api.{GroupConverter, PrimitiveConverter}
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources.PartitionedFile
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
@@ -40,7 +41,7 @@ private class DumpGroupConverter extends GroupConverter {
 }
 
 // TODO: if we ask only for one row, then it still reads in the whole partition. Perhaps we could prevent this in any way?
-class ParquetReaderIterator(protected val file: PartitionedFile, protected val allocator: BufferAllocator) extends Iterator[ArrowColumnarBatchRow] {
+class ParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] {
   if (file.length > Integer.MAX_VALUE)
     throw new RuntimeException("[IntegerParquetReaderIterator] Partition is too large")
 
@@ -70,7 +71,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
     val colReader = new ColumnReadStoreImpl(pageReadStore, new DumpGroupConverter(),
       parquetSchema, reader.getFileMetaData.getCreatedBy)
 
-    Resources.autoCloseTryGet(VectorSchemaRoot.create(schema, allocator)) { vectorSchemaRoot =>
+    Resources.autoCloseTryGet(VectorSchemaRoot.create(schema, rootAllocator)) { vectorSchemaRoot =>
       val vectors = vectorSchemaRoot.getFieldVectors
 
       if (pageReadStore.getRowCount > Integer.MAX_VALUE)
@@ -99,7 +100,7 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val a
 
       vectorSchemaRoot.setRowCount(rows)
       Resources.autoCloseTraversableTryGet(vectorSchemaRoot.getFieldVectors.asInstanceOf[java.util.List[ValueVector]].asScala.toIterator) { data =>
-        val batchAllocator = createAllocator("ParquetReaderIterator::transfer")
+        val batchAllocator = createAllocator(rootAllocator, "ParquetReaderIterator::transfer")
         /** transfer ownership */
         val transferred = data.map { vector =>
           val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))

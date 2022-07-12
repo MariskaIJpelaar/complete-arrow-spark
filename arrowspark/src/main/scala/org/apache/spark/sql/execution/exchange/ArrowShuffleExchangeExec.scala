@@ -9,7 +9,7 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateArrowColumnarBatchRowProjection
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, RangePartitioning}
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowSerializer}
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
@@ -107,8 +107,8 @@ object ArrowShuffleExchangeExec {
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)
       iter.map {
         case batch: ArrowColumnarBatchRow => Resources.autoCloseTryGet(batch) { batch =>
-          Resources.autoCloseTryGet(getPartitionKey(batch.copy(createAllocator("ArrowShuffleExchangeExec::getKey"))).asInstanceOf[ArrowColumnarBatchRow]) { key =>
-            (part.getPartitions(key), batch.copy(createAllocator("ArrowShuffleExchangeExec::return")))
+          Resources.autoCloseTryGet(getPartitionKey(batch.copyFromCaller("ArrowShuffleExchangeExec::getKey")).asInstanceOf[ArrowColumnarBatchRow]) { key =>
+            (part.getPartitions(key), batch.copyFromCaller("ArrowShuffleExchangeExec::return"))
           }
         }
       }

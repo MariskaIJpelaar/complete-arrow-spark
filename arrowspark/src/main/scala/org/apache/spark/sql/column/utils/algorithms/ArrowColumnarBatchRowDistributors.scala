@@ -3,7 +3,8 @@ package org.apache.spark.sql.column.utils.algorithms
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
 import scala.collection.mutable
@@ -22,12 +23,12 @@ object ArrowColumnarBatchRowDistributors {
 
       val names: Array[String] = sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name ).toArray
       val (keyUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
-        ArrowColumnarBatchRowTransformers.getColumns(key.copy(createAllocator("ArrowColumnarBatchRowDistributors::bucketDistributor::keyUnion")), names)
+        ArrowColumnarBatchRowTransformers.getColumns(key.copyFromCaller("ArrowColumnarBatchRowDistributors::bucketDistributor::keyUnion"), names)
       )
       Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(keyUnion) { keyUnion =>
         val comparator = ArrowColumnarBatchRowUtils.getComparator(keyUnion, sortOrders)
         val (rangeUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
-          ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copy(createAllocator("ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion")), names))
+          ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copyFromCaller("ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion"), names))
         Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(rangeUnion)
           { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distribute() }
         )
@@ -49,15 +50,15 @@ object ArrowColumnarBatchRowDistributors {
 
       partitionIds.zipWithIndex foreach { case (partitionId, index) =>
         if (distributed.contains(partitionId))
-          distributed(partitionId).append(key.copy(
-            createAllocator("ArrowColumnarBatchRowDistributors::distribute"), index until index+1))
+          distributed(partitionId).append(key
+            .copyFromCaller("ArrowColumnarBatchRowDistributors::distribute", index until index+1))
         else
-          distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key.copy(
-            createAllocator("ArrowColumnarBatchRowDistributors::distribute::first"), index until index+1))
+          distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key
+            .copyFromCaller("ArrowColumnarBatchRowDistributors::distribute::first", index until index+1))
       }
 
       distributed.map ( items =>
-        (items._1, items._2.build(createAllocator("ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
+        (items._1, items._2.build(createAllocator(key.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
     }
   }
 }

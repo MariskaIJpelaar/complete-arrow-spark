@@ -1,6 +1,8 @@
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.sql.column
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.vectorized.ArrowColumnarArray
 import org.scalatest.funsuite.AnyFunSuite
@@ -32,13 +34,12 @@ class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
     }
   }
 
-  def testSingleBatch(table: Seq[Seq[Int]]): Unit = {
-    val batch = batchFromSeqs(table, createAllocator("ArrowColumnarBatchUtilsTakeTests::testSingleBatch"))
+  def testSingleBatch(rootAllocator: RootAllocator, table: Seq[Seq[Int]]): Unit = {
+    val batch = batchFromSeqs(table, createAllocator(rootAllocator, "ArrowColumnarBatchUtilsTakeTests::testSingleBatch"))
     testBatches(Seq(batch))
-    column.resetRootAllocator()
   }
 
-  def testSingleIntVector(nums: Seq[Int]): Unit = testSingleBatch(Seq(nums))
+  def testSingleIntVector(rootAllocator: RootAllocator, nums: Seq[Int]): Unit = testSingleBatch(rootAllocator, Seq(nums))
 
   test("ArrowColumnarBatchRowUtils::take() empty iterator") {
     val answer = ArrowColumnarBatchRowUtils.take(Iterator.empty)
@@ -52,27 +53,36 @@ class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchRowUtils::take() single singleton batch") {
-    testSingleIntVector(Seq(42))
+    val root = newRoot()
+    testSingleIntVector(root, Seq(42))
+    column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() single batch, single column, four rows") {
-    testSingleIntVector(Seq(42, 28, 11, 0))
+    val root = newRoot()
+    testSingleIntVector(root, Seq(42, 28, 11, 0))
+    column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() single batch, single-row, two columns") {
-    testSingleBatch(Seq(Seq(42), Seq(24)))
+    val root = newRoot()
+    testSingleBatch(root, Seq(Seq(42), Seq(24)))
+    column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() single batch, two-rows, two columns") {
-    testSingleBatch(Seq(Seq(24, 42), Seq(28, 11)))
+    val root = newRoot()
+    testSingleBatch(root, Seq(Seq(24, 42), Seq(28, 11)))
+    column.AllocationManager.cleanup()
   }
 
   test("ArrowColumnarBatchRowUtils::take() two singleton batches") {
+    val root = newRoot()
     val firstBatch = batchFromSeqs(Seq(Seq(42)),
-      createAllocator("ArrowColumnarBatchUtilsTakeTests::twoSingletons::first"))
+      createAllocator(root, "ArrowColumnarBatchUtilsTakeTests::twoSingletons::first"))
     val secondBatch = batchFromSeqs(Seq(Seq(32)),
-      createAllocator("ArrowColumnarBatchUtilsTakeTests::twoSingletons::second"))
+      createAllocator(root, "ArrowColumnarBatchUtilsTakeTests::twoSingletons::second"))
     testBatches(Seq(firstBatch, secondBatch))
-    column.resetRootAllocator()
+    column.AllocationManager.cleanup()
   }
 }

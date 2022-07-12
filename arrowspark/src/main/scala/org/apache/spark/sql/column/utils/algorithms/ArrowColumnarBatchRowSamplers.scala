@@ -1,7 +1,9 @@
 package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.{RandomUtils, Resources}
-import org.apache.spark.sql.column.{ArrowColumnarBatchRow, createAllocator}
+import org.apache.arrow.memory.BufferAllocator
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.util.random.XORShiftRandom
 
@@ -24,9 +26,9 @@ object ArrowColumnarBatchRowSamplers {
     Resources.autoCloseTraversableTryGet(input) { input =>
       val first = input.next()
       Resources.autoCloseTraversableTryGet(Iterator(first) ++ input ) { iter =>
-        Resources.closeArrayOnFailGet(ArrowColumnarBatchRowConverters.makeFresh(
-          createAllocator("ArrowColumnarBatchRowSampler::sample::array"),
-          first.copy(createAllocator("ArrowColumnarBatchRowSampler::sample::array::copy")))) { array =>
+        val freshAllocator = createAllocator(first.allocator.getRoot, "ArrowColumnarBatchRowSampler::sample::array")
+        Resources.closeArrayOnFailGet(ArrowColumnarBatchRowConverters.makeFresh(freshAllocator,
+          first.copyFromCaller("ArrowColumnarBatchRowSampler::sample::array::copy"))) { array =>
           val rand = new XORShiftRandom(seed)
           var i = 0
           while (iter.hasNext) {
@@ -42,7 +44,7 @@ object ArrowColumnarBatchRowSamplers {
             }
           }
           array foreach ( column => column.getValueVector.setValueCount(i) )
-          new ArrowColumnarBatchRow(createAllocator("ArrowColumnarBatchRowSampler::sample::return"), array.toArray, i)
+          new ArrowColumnarBatchRow(freshAllocator, array, i)
         }
       }
     }
@@ -71,23 +73,24 @@ object ArrowColumnarBatchRowSamplers {
 
       Resources.autoCloseOptionTryGet(remainderBatch) { _ =>
         Resources.closeTraversableOnFailGet(new ArrayBuffer[ArrowColumnarBatchRow](k)) { reservoirBuf =>
+          if (!input.hasNext) return (ArrowColumnarBatchRow.empty, 0)
 
-          val batchAllocator = createAllocator("ArrowColumnarBatchRow::sampleAndCount")
           while (inputSize < k) {
             // ArrowColumnarBatchRow.create consumes the batches
-            if (!input.hasNext) return (ArrowColumnarBatchRow.create(batchAllocator, reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
+            if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
 
             val (batchOne, batchTwo): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) =
               ArrowColumnarBatchRowConverters.split(input.next(), (k-inputSize).toInt)
             // consume them
             remainderBatch = Option(batchTwo) // should not trigger an exception
             reservoirBuf += batchOne // for now, we assume there will be no exception here...
+            // set batch allocator if this was not done before
             nrBatches += 1
             inputSize += batchOne.numRows
           }
 
           // closes reservoirBuf
-          Resources.closeOnFailGet(ArrowColumnarBatchRow.create(batchAllocator, reservoirBuf.toIterator)) { reservoir =>
+          Resources.closeOnFailGet(ArrowColumnarBatchRow.create(reservoirBuf.toIterator)) { reservoir =>
             // add our remainder to the iterator, if there is any
             Resources.autoCloseTraversableTryGet(remainderBatch.fold(input)( Iterator(_) ++ input )) { iter =>
               // make sure we do not use this batch anymore
@@ -105,7 +108,6 @@ object ArrowColumnarBatchRowSamplers {
                 }
               }
 
-              // we have to copy since we want to guarantee to always close reservoir
               (reservoir, inputSize)
             }
           }
