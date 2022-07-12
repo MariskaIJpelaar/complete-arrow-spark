@@ -23,7 +23,7 @@ object ArrowColumnarBatchRowTransformers {
       new ArrowColumnarBatchRow(batchAllocator, indices.toArray map ( index => {
         val vector = batch.columns(index).getValueVector
         val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
-        tp.transfer()
+        tp.splitAndTransfer(0, vector.getValueCount)
         new ArrowColumnVector(tp.getTo)
       }), batch.numRows)
     }
@@ -78,7 +78,7 @@ object ArrowColumnarBatchRowTransformers {
       val new_cols = cols.map { column =>
         val vector = column.getValueVector
         val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
-        tp.transfer()
+        tp.splitAndTransfer(0, vector.getValueCount)
         new ArrowColumnVector(tp.getTo)
       }
       new ArrowColumnarBatchRow(allocator, batch.copyToAllocator(allocator).columns ++ new_cols, batch.numRows)
@@ -100,7 +100,7 @@ object ArrowColumnarBatchRowTransformers {
       }.map { column =>
         val vector = column.getValueVector
         val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
-        tp.transfer()
+        tp.splitAndTransfer(0, vector.getValueCount)
         new ArrowColumnVector(tp.getTo)
       }
       new ArrowColumnarBatchRow(allocator, cols, batch.numRows)
