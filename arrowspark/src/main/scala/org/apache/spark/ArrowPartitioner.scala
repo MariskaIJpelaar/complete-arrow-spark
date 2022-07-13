@@ -249,10 +249,11 @@ class ArrowRangePartitioner[V](
   }
 
   override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = {
-    Resources.autoCloseTryGet(key) ( key => Resources.autoCloseTryGet(
-      ArrowColumnarBatchRow.create(createAllocator(key.allocator.getRoot, "ArrowPartitioner::getPartitions"),
-        ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rangeBounds))._2)) { ranges =>
-      ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
-    })
+    Resources.autoCloseTryGet(key) { key =>
+      val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rangeBounds))
+      Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(decoded._3, decoded._2)) { ranges =>
+        ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
+      }
+    }
   }
 }
