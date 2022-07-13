@@ -1,7 +1,7 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.{ArrowBuf, BufferAllocator}
+import org.apache.arrow.memory.{ArrowBuf, BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.BitVectorHelper
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -11,23 +11,40 @@ import java.io.Closeable
 import scala.collection.immutable.NumericRange
 
 
-/** Note: closes first
+/** Note: closes first, and copies data to RootAllocator
  * Caller should close after use */
 class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends Closeable {
   protected[column] var size = 0
+  protected[column] val rootAllocator: RootAllocator = first.allocator.getRoot.asInstanceOf[RootAllocator]
+  protected val numBytes: Array[Long] = Array.tabulate(first.numFields) { _ => 0 }
   protected[column] val columns: Array[ArrowColumnVector] = {
     Resources.autoCloseTryGet(first) { first =>
       size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE))
 
-      ArrowColumnarBatchRowTransformers.take(
-        ArrowColumnarBatchRowTransformers.projection(first, 0 until numCols.getOrElse(first.numFields)),
-        0 until numRows.getOrElse(first.numRows)).columns
+      first.columns.slice(0, numCols.getOrElse(first.numFields)).zipWithIndex map[ArrowColumnVector, Array[ArrowColumnVector]] { case (column: ArrowColumnVector, colIndex: Int) =>
+        val vector = column.getValueVector
+        val tp = vector.getTransferPair(rootAllocator)
+        // we copy type and size
+        tp.splitAndTransfer(0, size)
+        val newVector = tp.getTo
+        // and clear the content, so we are 'free' from first
+        newVector.clear()
+        newVector.setInitialCapacity(size)
+        newVector.allocateNew()
+
+        // make sure we have enough space (should be so, but just in case)
+        while (newVector.getValueCapacity < size) newVector.reAlloc()
+        // copy the actual contents
+        validityRangeSetter(newVector.getValidityBuffer, 0L until size.toLong)
+        numBytes(colIndex) = vector.getDataBuffer.readableBytes()
+        newVector.getDataBuffer.setBytes(0, vector.getDataBuffer)
+
+        // return an ArrowColumnVector of copied data
+        new ArrowColumnVector(newVector)
+      }
     }
   }
 
-  protected val numBytes: Array[Long] = Array.tabulate(columns.length) { index =>
-    columns(index).getValueVector.getDataBuffer.readableBytes()
-  }
 
   def length: Int = size
   def numFields: Int = columns.length
@@ -80,8 +97,9 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
         while (oVector.getValueCapacity < size + current_size) oVector.reAlloc()
         // copy contents
         validityRangeSetter(oVector.getValidityBuffer, size.toLong until (size+current_size).toLong)
+        val readableBytes = iVector.getDataBuffer.readableBytes()
         output.getValueVector.getDataBuffer.setBytes(numBytes(byteIndex), iVector.getDataBuffer)
-        numBytes(byteIndex) += iVector.getDataBuffer.readableBytes()
+        numBytes(byteIndex) += readableBytes
 
       }
       size += current_size

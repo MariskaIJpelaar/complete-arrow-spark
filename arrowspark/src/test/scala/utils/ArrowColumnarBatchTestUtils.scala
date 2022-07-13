@@ -11,7 +11,7 @@ object ArrowColumnarBatchTestUtils {
     val array: Array[ArrowColumnVector] = Array.tabulate(table.length) { index =>
       val nums = table(index)
       maxSize = maxSize.max(nums.size)
-      new ArrowColumnVector(utils.IntVectorUtils.fromSeq(nums, createAllocator(allocator, s"Sequence $index"),
+      new ArrowColumnVector(utils.ArrowVectorUtils.intFromSeq(nums, createAllocator(allocator, s"Sequence $index"),
         name=s"IntVector $index"))
     }
     new ArrowColumnarBatchRow(allocator, array, maxSize)

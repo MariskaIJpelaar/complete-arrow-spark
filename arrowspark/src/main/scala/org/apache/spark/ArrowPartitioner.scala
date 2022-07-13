@@ -1,16 +1,15 @@
 package org.apache.spark
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.vector.Float4Vector
+import org.apache.arrow.vector.{Float4Vector, ValueVector}
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
+import org.apache.spark.sql.column.utils._
 import org.apache.spark.sql.rdd.ArrowRDD
-import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import scala.collection.mutable
@@ -110,14 +109,16 @@ class ArrowRangePartitioner[V](
       // we keep the weights by adding them as an extra column to the batch
       val batches = candidates map { case (batch, weight) =>
         Resources.autoCloseTryGet(batch) { batch =>
-          val weightAllocator = createAllocator(batch.allocator.getRoot, "ArrowPartitioner::weights")
-          Resources.autoCloseTryGet(new Float4Vector("weights", createAllocator(weightAllocator, "weights"))) { weightsVector =>
-            weightsVector.setValueCount(batch.numRows)
-            Resources.autoCloseTryGet(new ArrowColumnarBatchRow(weightAllocator, Array(new ArrowColumnVector(weightsVector)), batch.numRows)) { weightsBatch =>
-              0 until batch.numRows foreach { index => weightsVector.set(index, weight) }
-              ArrowColumnarBatchRowTransformers.appendColumns(batch, weightsBatch, createAllocator(batch.allocator.getRoot, "ArrowPartitioner::append"))
-            }
-          }
+         Resources.autoCloseTryGet(new Float4Vector("weights", batch.allocator.getRoot)) { weightsVector =>
+           // allocate at root
+           weightsVector.setInitialCapacity(batch.numRows)
+           weightsVector.allocateNew()
+           weightsVector.setValueCount(batch.numRows)
+           0 until batch.numRows foreach { index => weightsVector.set(index, weight) }
+           // transfer to batch
+           val weightBatch = ArrowColumnarBatchRow.create("ArrowPartitioner::determineBounds::weightBatch", Array(weightsVector.asInstanceOf[ValueVector]))
+           ArrowColumnarBatchRowTransformers.appendColumns(batch, weightBatch, createAllocator(batch.allocator.getRoot, "ArrowPartitioner::append"))
+         }
         }
       }
 

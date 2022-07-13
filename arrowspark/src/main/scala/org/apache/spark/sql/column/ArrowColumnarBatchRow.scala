@@ -1,6 +1,8 @@
 package org.apache.spark.sql.column
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.vector.ValueVector
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
@@ -148,6 +150,27 @@ object ArrowColumnarBatchRow {
   def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
     val decoded = ArrowColumnarBatchRowUtils.take(iter)
     ArrowColumnarBatchRow.create(decoded._3, decoded._2)
+  }
+
+  /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors
+   * Transfers the vectors to a new-allocator with given name
+   * Closes the vector afterwards
+   * Caller is responsible for closing the generated batch */
+  def create(name: String, cols: Array[ValueVector]): ArrowColumnarBatchRow = {
+    Resources.autoCloseArrayTryGet(cols) { cols =>
+      if (cols.isEmpty)
+        return ArrowColumnarBatchRow.empty
+
+      val allocator = createAllocator(cols(0).getAllocator.getRoot, name)
+      val size = cols(0).getValueCount
+      val newCols = cols map { vector =>
+        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+        tp.splitAndTransfer(0, vector.getValueCount)
+        new ArrowColumnVector(tp.getTo)
+      }
+      new ArrowColumnarBatchRow(allocator, newCols, size)
+    }
+
   }
 
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors
