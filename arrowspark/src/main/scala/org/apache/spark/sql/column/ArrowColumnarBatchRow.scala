@@ -23,7 +23,7 @@ import java.io._
  * @param numRows Number of rows in each column.
  *                NOTE: for now we assume every column has the same length
  */
-class ArrowColumnarBatchRow(val allocator: BufferAllocator, @transient protected[column] val columns: Array[ArrowColumnVector], val numRows: Int) extends InternalRow with Closeable {
+class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transient protected[column] val columns: Array[ArrowColumnVector], val numRows: Int) extends InternalRow with Closeable {
   override def numFields: Int = columns.length
 
   def length: Long = numRows
