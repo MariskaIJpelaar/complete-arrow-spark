@@ -1,5 +1,8 @@
 import _root_.utils.ParquetWriter
+import io.netty.util.internal.PlatformDependent
 import nl.liacs.mijpelaar.utils.RandomUtils
+import org.apache.arrow.memory.DefaultAllocationManagerOption
+import org.apache.arrow.memory.DefaultAllocationManagerOption.AllocationManagerType
 import org.apache.avro.SchemaBuilder
 import org.apache.avro.generic.{GenericData, GenericRecordBuilder}
 import org.apache.hadoop.conf.Configuration
@@ -31,28 +34,37 @@ class IntegrationTests extends AnyFunSuite {
   case class Row(var colA: Int, var colB: Int)
 
   def generateParquets(key: Int => Int, randomValue: Boolean, size: Int = default_size): util.List[Row] = {
-    val directory = new Directory(new File(directory_name))
-    assert(!directory.exists || directory.deleteRecursively())
+    try {
+      println(s"before generate: ${PlatformDependent.usedDirectMemory()}")
+      val directory = new Directory(new File(directory_name))
+      assert(!directory.exists || directory.deleteRecursively())
 
-    val table: util.List[Row] = new util.ArrayList[Row]()
-    val records: util.List[GenericData.Record] = new util.ArrayList[GenericData.Record]()
-    0 until size foreach { i =>
-      val numA: Int = key(i)
-      val numB: Int = if (randomValue) random.generateRandomNumber() else i*2 + 1
-      table.add(Row(numA, numB))
-      records.add(new GenericRecordBuilder(schema).set("numA", numA).set("numB", numB).build())
+      val table: util.List[Row] = new util.ArrayList[Row]()
+      val records: util.List[GenericData.Record] = new util.ArrayList[GenericData.Record]()
+      0 until size foreach { i =>
+        val numA: Int = key(i)
+        val numB: Int = if (randomValue) random.generateRandomNumber() else i*2 + 1
+        table.add(Row(numA, numB))
+        records.add(new GenericRecordBuilder(schema).set("numA", numA).set("numB", numB).build())
+      }
+
+
+      val recordsSize = size / num_files
+      val writeables: util.List[ParquetWriter.Writable] = new util.ArrayList[ParquetWriter.Writable]()
+      0 until num_files foreach { i =>
+        writeables.add(new ParquetWriter.Writable(
+          HadoopOutputFile.fromPath(new Path(directory.path, s"file$i.parquet"), new Configuration()),
+          records.subList(i*recordsSize, (i+1)*recordsSize)
+        ))}
+
+      ParquetWriter.write_batch(schema, writeables, true)
+
+
+      table
+    } finally {
+      ParquetWriter.close()
+      println(s"after close: ${PlatformDependent.usedDirectMemory()}")
     }
-
-    val recordsSize = size / num_files
-    val writeables: util.List[ParquetWriter.Writable] = new util.ArrayList[ParquetWriter.Writable]()
-    0 until num_files foreach { i =>
-      writeables.add(new ParquetWriter.Writable(
-        HadoopOutputFile.fromPath(new Path(directory.path, s"file$i.parquet"), new Configuration()),
-        records.subList(i*recordsSize, (i+1)*recordsSize)
-    ))}
-    ParquetWriter.write_batch(schema, writeables, true)
-    ParquetWriter.close()
-    table
   }
 
   def generateSpark(): SparkSession = {
@@ -160,6 +172,7 @@ class IntegrationTests extends AnyFunSuite {
 
 
   test("Lazy read first row of simple Dataset with ascending numbers through the RDD") {
+    System.setProperty(DefaultAllocationManagerOption.ALLOCATION_MANAGER_TYPE_PROPERTY_NAME, AllocationManagerType.Netty.name())
     column.AllocationManager.reset()
     generateParquets(key = i => i*2, randomValue = false)
     val directory = new Directory(new File(directory_name))
@@ -179,6 +192,7 @@ class IntegrationTests extends AnyFunSuite {
     column.AllocationManager.reset()
 
     directory.deleteRecursively()
+    println(s"after run: ${PlatformDependent.usedDirectMemory()}")
   }
 
   test("Lazy read first row of simple Dataset with ascending numbers through ColumnDataFrame") {
@@ -430,5 +444,55 @@ class IntegrationTests extends AnyFunSuite {
     column.AllocationManager.reset()
 
     directory.deleteRecursively()
+  }
+
+  def runTest(): Unit = {
+    column.AllocationManager.reset()
+    // Generate Dataset
+    val size = default_size * 15
+    val table = generateParquets(key = _ => random.generateRandomNumber(0, 10), randomValue = true, size = size)
+    val directory = new Directory(new File(directory_name))
+    assert(directory.exists)
+
+    val spark = generateSpark()
+
+    // Construct DataFrame
+    val df: ColumnDataFrame = new ColumnDataFrameReader(spark).format("utils.SimpleArrowFileFormat").loadDF(directory.path)
+
+    // Perform ColumnarSort
+    val new_df = df.sort("numA", "numB")
+
+    val rdd = new_df.queryExecution.executedPlan.execute()
+    val func: Iterator[InternalRow] => Int = { case iter: Iterator[ArrowColumnarBatchRow] =>
+      iter.map { batch =>
+        try {
+          batch.numRows
+        } finally {
+          batch.close()
+        }
+      }.sum
+    }
+    spark.sparkContext.runJob(rdd, func).sum
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
+
+    directory.deleteRecursively()
+  }
+
+  test("Performing ColumnarSort on a simple, random, somewhat larger Dataset using Lazy Reading, memory-test") {
+    System.setProperty(DefaultAllocationManagerOption.ALLOCATION_MANAGER_TYPE_PROPERTY_NAME, AllocationManagerType.Netty.name())
+
+    var limit: Option[Long] = None
+    var current: Long = PlatformDependent.usedDirectMemory()
+    val numRuns = 5
+
+    0 until numRuns foreach { _ =>
+      runTest()
+
+      current = PlatformDependent.usedDirectMemory()
+//      assert(limit.forall( lim => lim >= current))
+      println(current)
+      if (limit.isEmpty) limit = Option(current)
+    }
   }
 }

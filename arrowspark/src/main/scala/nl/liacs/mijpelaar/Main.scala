@@ -103,14 +103,11 @@ class Main extends Callable[Unit] {
       /**
        * Run the actual experiments
        */
-      // TODO: tmp
-      0 until nr_runs foreach { index =>
+      0 until nr_runs foreach { _ =>
         if (data_dir != "")
           EvaluationSuite.sort(spark, fw, Directory(data_dir))
         else if (data_file != "")
           EvaluationSuite.sort(spark, fw, data_file)
-
-        println(index)
       }
 
       fw.close()

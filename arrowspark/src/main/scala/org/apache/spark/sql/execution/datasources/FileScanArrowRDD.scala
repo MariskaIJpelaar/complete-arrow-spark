@@ -196,7 +196,13 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       iterator.close()
       // check if we are done with this root
       roots.foreach( root => root.getChildAllocators.forEach( child => assert(child.getAllocatedMemory == 0) ))
-      roots.foreach( root => if (root.getAllocatedMemory == 0) root.close())
+      roots.foreach{ root =>
+        // TODO: tmp?
+        if (root.getAllocatedMemory != 0)
+          root.releaseBytes(root.getAllocatedMemory)
+        root.close()
+      }
+//      roots.foreach( root => if (root.getAllocatedMemory == 0) root.close())
     })
 
     iterator

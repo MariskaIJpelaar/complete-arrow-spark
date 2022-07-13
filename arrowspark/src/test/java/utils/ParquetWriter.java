@@ -1,5 +1,6 @@
 package utils;
 
+import io.netty.util.internal.PlatformDependent;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
@@ -33,10 +34,16 @@ public class ParquetWriter {
     private static final Schema default_schema = SchemaBuilder.builder("simple").record("record")
             .fields().requiredInt("id").requiredString("name")
             .endRecord();
-    public static Schema get_default_schema() { return default_schema; }
+
+    public static Schema get_default_schema() {
+        return default_schema;
+    }
 
     private static MessageType message_type = null;
-    public static MessageType get_message_type() { return message_type; }
+
+    public static MessageType get_message_type() {
+        return message_type;
+    }
 
     public static void write_default_simple(OutputFile fileToWrite) {
         List<GenericData.Record> recordsToWrite = Arrays.asList(
@@ -48,21 +55,23 @@ public class ParquetWriter {
     }
 
     private static VectorSchemaRoot root = null;
-    private static BufferAllocator allocator = null;
-    public static VectorSchemaRoot get_vector_schema_root() { return root; }
+    private static BufferAllocator allocator = new RootAllocator(Integer.MAX_VALUE);
+
+    public static VectorSchemaRoot get_vector_schema_root() {
+        return root;
+    }
 
     public static void close() {
         if (root != null)
             root.close();
-        if (allocator != null)
-            allocator.close();
         root = null;
-        allocator = null;
+        allocator.close();
+        allocator = new RootAllocator(Integer.MAX_VALUE);
+        ;
     }
 
 
     private static void set_vector_schema_root(List<GenericData.Record> recordsToWrite) {
-        allocator = new RootAllocator(Integer.MAX_VALUE);
         org.apache.arrow.vector.types.pojo.Schema arrowSchema = new SchemaConverter().fromParquet(get_message_type()).getArrowSchema();
 
         List<FieldVector> field_vectors = new ArrayList<>();
@@ -89,6 +98,7 @@ public class ParquetWriter {
         }
         root = new VectorSchemaRoot(arrowSchema, field_vectors, recordsToWrite.size());
     }
+
 
     public static class Writable {
         public OutputFile fileToWrite;
