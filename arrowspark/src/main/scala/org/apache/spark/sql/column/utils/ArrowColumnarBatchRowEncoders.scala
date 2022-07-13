@@ -7,7 +7,6 @@ import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.sql.column
 import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector

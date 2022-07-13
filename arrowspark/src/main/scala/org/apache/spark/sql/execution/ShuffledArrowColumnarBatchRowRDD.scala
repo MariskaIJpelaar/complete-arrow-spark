@@ -1,12 +1,16 @@
 package org.apache.spark.sql.execution
 
-import org.apache.spark.{Dependency, MapOutputTrackerMaster, Partition, Partitioner, ShuffleDependency, SparkEnv, TaskContext}
+import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.rdd.RDD
 import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLShuffleReadMetricsReporter}
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark._
+
+import java.io.Closeable
+import scala.collection.mutable.ArrayBuffer
 
 /** Note: copied functionalities from org.apache.spark.rdd.ShuffledRowRDD
  * Caller is responsible for closing rdd output */
@@ -105,7 +109,32 @@ class ShuffledArrowColumnarBatchRowRDD(
           context,
           sqlMetricsReporter)
     }
-    reader.read().asInstanceOf[Iterator[Product2[Int, InternalRow]]].map(_._2).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
+
+
+    val iterator = new Iterator[ArrowColumnarBatchRow] with Closeable {
+      private val roots = new ArrayBuffer[RootAllocator]()
+      private val iterator = reader.read().asInstanceOf[Iterator[Product2[Int, InternalRow]]].map(_._2).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
+
+      override def hasNext: Boolean = iterator.hasNext
+
+      override def next(): ArrowColumnarBatchRow = {
+        val batch = iterator.next()
+        roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
+        batch
+      }
+
+      override def close(): Unit = {
+        iterator.foreach( batch => {
+          roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
+          batch.close()
+        })
+        roots.foreach(_.close())
+      }
+    }
+
+    context.addTaskCompletionListener[Unit]( _ => iterator.close() )
+
+    iterator
   }
 
   override def clearDependencies(): Unit = {

@@ -2,9 +2,6 @@ package org.apache.spark.sql
 
 import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
 
-import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
-
 package object column {
   type ColumnDataFrame = Dataset[ColumnBatch]
 
@@ -40,11 +37,11 @@ package object column {
   object AllocationManager {
     val totalSize: Long = 16L * 1024L * 1024L * 1024L // 16 GB
     val perAllocatorSize: Long = totalSize
-    private val roots: mutable.ListBuffer[RootAllocator] = ListBuffer.empty
+//    private val roots: mutable.ListBuffer[RootAllocator] = ListBuffer.empty
 
     /** Clears all current roots */
     def reset(): Unit = {
-      roots.clear();
+//      roots.clear();
     }
 
     /**
@@ -53,14 +50,26 @@ package object column {
      */
    def newRoot(): RootAllocator = {
      val root = new RootAllocator(totalSize)
-     roots.append(root)
+//     roots.append(root)
      root
    }
 
+
+    def isCleaned: Boolean = true
+//      roots.forall( allocator => {
+//      try {
+//        // we actually want to assertClosed()...
+//        allocator.assertOpen()
+//        return false
+//      } catch {
+//        case _: Throwable => return true
+//      }
+//    })
+
     /** Closes all [[RootAllocator]]s in the tracked roots */
     def cleanup(): Unit = {
-      roots.foreach( _.close() )
-      roots.clear()
+//      roots.foreach( _.close() )
+//      roots.clear()
     }
 
     /**

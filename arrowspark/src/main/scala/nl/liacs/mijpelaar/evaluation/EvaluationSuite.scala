@@ -1,10 +1,10 @@
 package nl.liacs.mijpelaar.evaluation
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column._
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.vectorized.ArrowColumnVector
-import org.apache.spark.sql.{SparkSession, column}
 
 import java.io.FileWriter
 import java.nio.file.Paths
@@ -160,8 +160,6 @@ object EvaluationSuite {
     val cas_stop = System.nanoTime()
     fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()
-
-    column.AllocationManager.cleanup()
   }
 
 

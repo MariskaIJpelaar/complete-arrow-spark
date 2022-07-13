@@ -1,6 +1,7 @@
 package org.apache.spark.sql.execution.datasources
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.RootAllocator
 import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
@@ -13,6 +14,7 @@ import org.apache.spark.util.NextIterator
 import org.apache.spark.{Partition, SparkUpgradeException, TaskContext}
 
 import java.io.{Closeable, FileNotFoundException, IOException}
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.runtime.universe._
 
 /**
@@ -35,6 +37,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
 
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
+  private val roots = new ArrayBuffer[RootAllocator]()
 
   /** Caller should close batches in iterator */
   override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
@@ -170,6 +173,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
           case partition: ArrowColumnarBatchRow =>
             Resources.closeOnFailGet(partition) { partition =>
               inputMetrics.incRecordsRead(partition.numFields)
+              roots.append(partition.allocator.getRoot.asInstanceOf[RootAllocator])
               incTaskInputMetricsBytesRead()
               partition
             }
@@ -177,7 +181,10 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       }
 
       override def close(): Unit = {
-        currentIterator.foreach { case iter: Iterator[ArrowColumnarBatchRow] => iter.foreach(_.close())  }
+        currentIterator.foreach { case iter: Iterator[ArrowColumnarBatchRow] => iter.foreach { batch =>
+          roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
+          batch.close()
+        }}
         incTaskInputMetricsBytesRead()
         InputFileBlockHolder.unset()
         resetCurrentIterator()
@@ -185,7 +192,12 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
     }
 
     // Register an on-task-completion callback to close the input stream
-    context.addTaskCompletionListener[Unit](_ => iterator.close())
+    context.addTaskCompletionListener[Unit](_ => {
+      iterator.close()
+      // check if we are done with this root
+      roots.foreach( root => root.getChildAllocators.forEach( child => assert(child.getAllocatedMemory == 0) ))
+      roots.foreach( root => if (root.getAllocatedMemory == 0) root.close())
+    })
 
     iterator
   }

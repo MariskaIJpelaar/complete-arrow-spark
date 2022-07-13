@@ -1,7 +1,7 @@
 package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.{RandomUtils, Resources}
-import org.apache.spark.sql.column.AllocationManager.createAllocator
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.util.random.XORShiftRandom
@@ -20,7 +20,7 @@ object ArrowColumnarBatchRowSamplers {
    * Caller is responsible for closing returned batch
    */
   def sample(input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
-    if (!input.hasNext) ArrowColumnarBatchRow.empty
+    if (!input.hasNext) ArrowColumnarBatchRow.empty()
 
     Resources.autoCloseTraversableTryGet(input) { input =>
       val first = input.next()
@@ -72,7 +72,7 @@ object ArrowColumnarBatchRowSamplers {
 
       try {
         Resources.closeTraversableOnFailGet(new ArrayBuffer[ArrowColumnarBatchRow](k)) { reservoirBuf =>
-          if (!input.hasNext) return (ArrowColumnarBatchRow.empty, 0)
+          if (!input.hasNext) return (ArrowColumnarBatchRow.empty(), 0)
 
           while (inputSize < k) {
             // ArrowColumnarBatchRow.create consumes the batches

@@ -7,8 +7,8 @@ import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.column.utils._
+import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.rdd.ArrowRDD
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
@@ -103,7 +103,7 @@ class ArrowRangePartitioner[V](
       assert(partitions - 1 < Integer.MAX_VALUE)
 
       // Checks if we have non-empty batches
-      if (candidates.length < 1) return ArrowColumnarBatchRow.empty
+      if (candidates.length < 1) return ArrowColumnarBatchRow.empty()
 
       // we start by sorting the batches, and making the rows unique
       // we keep the weights by adding them as an extra column to the batch
@@ -122,7 +122,7 @@ class ArrowRangePartitioner[V](
         }
       }
 
-      if (batches.isEmpty) return ArrowColumnarBatchRow.empty
+      if (batches.isEmpty) return ArrowColumnarBatchRow.empty()
 
       val grouped: ArrowColumnarBatchRow = ArrowColumnarBatchRow.create(batches.toIterator)
       val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRowSorters.multiColumnSort(grouped, orders)
@@ -150,7 +150,8 @@ class ArrowRangePartitioner[V](
             cumSize < partitions -1
           }
           rangeBoundsLength = Option(cumSize)
-          boundBuilder.map( _.build(createAllocator(unique.allocator.getRoot, "ArrowPartitioner::determineBounds::return")) ).getOrElse(ArrowColumnarBatchRow.empty)
+          boundBuilder.map( _.build(createAllocator(unique.allocator.getRoot, "ArrowPartitioner::determineBounds::return")) )
+            .getOrElse(ArrowColumnarBatchRow.empty())
         } finally {
           boundBuilder.foreach(_.close())
         }

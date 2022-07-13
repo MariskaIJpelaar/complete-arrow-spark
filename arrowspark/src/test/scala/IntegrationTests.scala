@@ -19,7 +19,6 @@ import scala.reflect.io.Directory
 
 
 class IntegrationTests extends AnyFunSuite {
-
   private val default_size = 100 * 1000 // 100k
   private val num_files = 10
   private val directory_name = "data/numbers"
@@ -172,8 +171,12 @@ class IntegrationTests extends AnyFunSuite {
     df.explain(true)
     val first = df.queryExecution.executedPlan.execute().first().asInstanceOf[ArrowColumnarBatchRow]
     checkFirstNonRandom(first)
+    val root = first.allocator.getRoot
     first.close()
-    column.AllocationManager.cleanup()
+    root.close()
+
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -190,7 +193,8 @@ class IntegrationTests extends AnyFunSuite {
 
     checkFirstNonRandom(df.first())
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -206,7 +210,8 @@ class IntegrationTests extends AnyFunSuite {
     df.explain(true)
     checkAnswerNonRandom(df.collect())
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -222,7 +227,8 @@ class IntegrationTests extends AnyFunSuite {
     df.explain(true)
     checkAnswer(table, df.collect())
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -245,7 +251,8 @@ class IntegrationTests extends AnyFunSuite {
 
     new_df.collect()
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -272,7 +279,8 @@ class IntegrationTests extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect(), size = size)
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -299,7 +307,8 @@ class IntegrationTests extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect(), colNrs = 1 until num_cols)
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -326,7 +335,8 @@ class IntegrationTests extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect())
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -353,7 +363,8 @@ class IntegrationTests extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect())
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -381,7 +392,8 @@ class IntegrationTests extends AnyFunSuite {
     // Check if result is equal to our computed table
     checkSorted(table, new_df.collect(), size = size)
 
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }
@@ -414,7 +426,8 @@ class IntegrationTests extends AnyFunSuite {
       }.sum
     }
     spark.sparkContext.runJob(rdd, func).sum
-    column.AllocationManager.cleanup()
+    assert(column.AllocationManager.isCleaned)
+    column.AllocationManager.reset()
 
     directory.deleteRecursively()
   }

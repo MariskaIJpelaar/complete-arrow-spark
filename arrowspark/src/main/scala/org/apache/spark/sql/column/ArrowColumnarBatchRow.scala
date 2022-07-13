@@ -1,7 +1,7 @@
 package org.apache.spark.sql.column
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.ValueVector
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
@@ -71,7 +71,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
    * Caller is responsible for both this batch and copied-batch */
   def copyToAllocator(newAllocator: BufferAllocator, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
     if (range.isEmpty)
-      return ArrowColumnarBatchRow.empty
+      return ArrowColumnarBatchRow.empty()
 
     new ArrowColumnarBatchRow(newAllocator, columns map { v =>
       val vector = v.getValueVector
@@ -139,8 +139,8 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
 
 object ArrowColumnarBatchRow {
   /** Creates an empty ArrowColumnarBatchRow */
-  def empty: ArrowColumnarBatchRow =
-    new ArrowColumnarBatchRow(createAllocator(newRoot(), "ArrowColumnarBatchRow::empty"), Array.empty, 0)
+  def empty(): ArrowColumnarBatchRow =
+    new ArrowColumnarBatchRow(newRoot(), Array.empty, 0)
 
 
   /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows
@@ -159,7 +159,7 @@ object ArrowColumnarBatchRow {
   def create(name: String, cols: Array[ValueVector]): ArrowColumnarBatchRow = {
     Resources.autoCloseArrayTryGet(cols) { cols =>
       if (cols.isEmpty)
-        return ArrowColumnarBatchRow.empty
+        return ArrowColumnarBatchRow.empty()
 
       val allocator = createAllocator(cols(0).getAllocator.getRoot, name)
       val size = cols(0).getValueCount
