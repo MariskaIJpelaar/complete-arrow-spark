@@ -1,5 +1,6 @@
 package org.apache.spark.sql.execution.datasources
 
+import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.util.vector.read.ParquetReaderIterator
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
@@ -32,7 +33,10 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
 
   /** Returns a function that can be used to read a single file in as an Iterator of Array[ValueVector]
    * Caller should close batches in iterator */
-  override def buildArrowReaderWithPartitionValues(sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType, requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String], hadoopConf: Configuration): PartitionedFile => Iterator[ArrowColumnarBatchRow] = {
-    (file: PartitionedFile) => { new ParquetReaderIterator(file, allocator)}
+  override def buildArrowReaderWithPartitionValues(
+      sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType,
+      requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String],
+      hadoopConf: Configuration): (PartitionedFile, RootAllocator) => Iterator[ArrowColumnarBatchRow] = {
+    (file: PartitionedFile, root: RootAllocator) => { new ParquetReaderIterator(file, root)}
   }
 }

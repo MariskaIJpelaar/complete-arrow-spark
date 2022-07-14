@@ -1,6 +1,7 @@
 package org.apache.spark.sql.execution.datasources
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.RootAllocator
 import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
@@ -29,8 +30,8 @@ import scala.reflect.runtime.universe._
  * Caller should close batch in RDD
  */
 class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
-                                     readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow],
-                                     @transient val filePartitions: Seq[ArrowFilePartition])
+                        readFunction: (PartitionedFile, RootAllocator) => Iterator[ArrowColumnarBatchRow],
+                        @transient val filePartitions: Seq[ArrowFilePartition])
                                      extends RDD[ArrowColumnarBatchRow](sparkSession.sparkContext, Nil) with ArrowRDD {
 
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
@@ -73,7 +74,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       // Caller should close
       private def readCurrentFile(): Iterator[ArrowColumnarBatchRow] = {
         try {
-          readFunction(currentFile.get)
+          readFunction(currentFile.get, split.allocator)
         } catch {
           case e: FileNotFoundException =>
             throw QueryExecutionErrors.readCurrentFileNotFoundError(e)
