@@ -1,23 +1,20 @@
 package org.apache.spark.sql.execution
 
-import org.apache.arrow.memory.RootAllocator
+import org.apache.spark._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLShuffleReadMetricsReporter}
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark._
-
-import java.io.Closeable
-import scala.collection.mutable.ArrayBuffer
+import org.apache.spark.sql.rdd.ArrowRDD
 
 /** Note: copied functionalities from org.apache.spark.rdd.ShuffledRowRDD
  * Caller is responsible for closing rdd output */
 class ShuffledArrowColumnarBatchRowRDD(
       var dependency: ShuffleDependency[Array[Int], InternalRow, InternalRow],
       metrics: Map[String, SQLMetric],
-      partitionSpecs: Array[ShufflePartitionSpec]) extends RDD[ArrowColumnarBatchRow](dependency.rdd.context, Nil) {
+      partitionSpecs: Array[ShufflePartitionSpec]) extends RDD[ArrowColumnarBatchRow](dependency.rdd.context, Nil) with ArrowRDD {
 
   def this(
             dependency: ShuffleDependency[Array[Int], InternalRow, InternalRow],
@@ -65,7 +62,7 @@ class ShuffledArrowColumnarBatchRowRDD(
   }
 
   // Caller is responsible for closing batches in iterator
-  override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
+  override def compute(split: ArrowPartition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
     val tempMetrics = context.taskMetrics().createTempShuffleReadMetrics()
     // `SQLShuffleReadMetricsReporter` will update its own metrics for SQL exchange operator,
     // as well as the `tempMetrics` for basic shuffle metrics.
@@ -110,31 +107,7 @@ class ShuffledArrowColumnarBatchRowRDD(
           sqlMetricsReporter)
     }
 
-
-    val iterator = new Iterator[ArrowColumnarBatchRow] with Closeable {
-      private val roots = new ArrayBuffer[RootAllocator]()
-      private val iterator = reader.read().asInstanceOf[Iterator[Product2[Int, InternalRow]]].map(_._2).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
-
-      override def hasNext: Boolean = iterator.hasNext
-
-      override def next(): ArrowColumnarBatchRow = {
-        val batch = iterator.next()
-        roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
-        batch
-      }
-
-      override def close(): Unit = {
-        iterator.foreach( batch => {
-          roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
-          batch.close()
-        })
-        roots.foreach(_.close())
-      }
-    }
-
-    context.addTaskCompletionListener[Unit]( _ => iterator.close() )
-
-    iterator
+    reader.read().asInstanceOf[Iterator[Product2[Int, InternalRow]]].map(_._2).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
   }
 
   override def clearDependencies(): Unit = {

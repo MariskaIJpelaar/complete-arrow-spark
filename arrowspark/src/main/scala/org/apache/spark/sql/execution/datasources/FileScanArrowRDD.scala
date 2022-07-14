@@ -1,7 +1,6 @@
 package org.apache.spark.sql.execution.datasources
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.RootAllocator
 import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
@@ -11,10 +10,9 @@ import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.execution.QueryExecutionException
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.util.NextIterator
-import org.apache.spark.{Partition, SparkUpgradeException, TaskContext}
+import org.apache.spark.{ArrowPartition, Partition, SparkUpgradeException, TaskContext}
 
 import java.io.{Closeable, FileNotFoundException, IOException}
-import scala.collection.mutable.ArrayBuffer
 import scala.reflect.runtime.universe._
 
 /**
@@ -32,15 +30,14 @@ import scala.reflect.runtime.universe._
  */
 class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
                                      readFunction: PartitionedFile => Iterator[ArrowColumnarBatchRow],
-                                     @transient val filePartitions: Seq[FilePartition])
+                                     @transient val filePartitions: Seq[ArrowFilePartition])
                                      extends RDD[ArrowColumnarBatchRow](sparkSession.sparkContext, Nil) with ArrowRDD {
 
   private val ignoreCorruptFiles = sparkSession.sessionState.conf.ignoreCorruptFiles
   private val ignoreMissingFiles = sparkSession.sessionState.conf.ignoreMissingFiles
-  private val roots = new ArrayBuffer[RootAllocator]()
 
   /** Caller should close batches in iterator */
-  override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
+  override def compute(split: ArrowPartition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
     val iterator = new Iterator[ArrowColumnarBatchRow] with AutoCloseable {
       private val inputMetrics = context.taskMetrics().inputMetrics
       private val existingBytesRead = inputMetrics.bytesRead
@@ -58,7 +55,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
         inputMetrics.setBytesRead(existingBytesRead + getBytesReadCallback())
       }
 
-      private[this] val files = split.asInstanceOf[FilePartition].files.toIterator
+      private[this] val files = split.asInstanceOf[ArrowFilePartition].files.toIterator
       private[this] var currentFile: Option[PartitionedFile] = None
       private[this] var currentIterator : Option[Iterator[Object]] = None
 
@@ -173,7 +170,6 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
           case partition: ArrowColumnarBatchRow =>
             Resources.closeOnFailGet(partition) { partition =>
               inputMetrics.incRecordsRead(partition.numFields)
-              roots.append(partition.allocator.getRoot.asInstanceOf[RootAllocator])
               incTaskInputMetricsBytesRead()
               partition
             }
@@ -181,10 +177,9 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
       }
 
       override def close(): Unit = {
-        currentIterator.foreach { case iter: Iterator[ArrowColumnarBatchRow] => iter.foreach { batch =>
-          roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
-          batch.close()
-        }}
+//        currentIterator.foreach { case iter: Iterator[ArrowColumnarBatchRow] => iter.foreach { batch =>
+//          batch.close()
+//        }}
         incTaskInputMetricsBytesRead()
         InputFileBlockHolder.unset()
         resetCurrentIterator()
@@ -195,13 +190,23 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
     context.addTaskCompletionListener[Unit](_ => {
       iterator.close()
       // check if we are done with this root
-      roots.foreach( root => root.getChildAllocators.forEach( child => assert(child.getAllocatedMemory == 0) ))
-      roots.foreach{ root =>
-        // TODO: tmp?
-        if (root.getAllocatedMemory != 0)
-          root.releaseBytes(root.getAllocatedMemory)
-        root.close()
-      }
+//      roots.foreach( root => root.getChildAllocators.forEach( child => assert(child.getAllocatedMemory == 0) ))
+//      roots.foreach{ root =>
+//        // TODO: tmp?
+//        try {
+//          root.close()
+//        } catch {
+//          case e: Throwable =>
+//            println("--------------DEBUG--------------")
+//            println(root.toVerboseString)
+//            println("---------------------------------")
+//            throw e
+//        }
+
+//        if (root.getAllocatedMemory != 0)
+//          root.releaseBytes(root.getAllocatedMemory)
+//        root.close()
+//      }
 //      roots.foreach( root => if (root.getAllocatedMemory == 0) root.close())
     })
 
@@ -214,7 +219,7 @@ class FileScanArrowRDD (@transient protected val sparkSession: SparkSession,
   }
 
   override protected def getPreferredLocations(s: Partition): Seq[String] = {
-    s.asInstanceOf[FilePartition].preferredLocations()
+    s.asInstanceOf[ArrowFilePartition].preferredLocations()
   }
 
 

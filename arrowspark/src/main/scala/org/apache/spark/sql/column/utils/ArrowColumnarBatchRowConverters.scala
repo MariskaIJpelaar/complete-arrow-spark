@@ -65,7 +65,8 @@ object ArrowColumnarBatchRowConverters {
       val allocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowConverters::toRoot")
       (VectorSchemaRoot.of(columns.map(column => {
         val vector = column.getValueVector
-        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+        // NOTE: we do not create a new allocator here to ease allocator management
+        val tp = vector.getTransferPair(allocator)
         tp.splitAndTransfer(0, rowCount)
         tp.getTo.asInstanceOf[FieldVector]
       }).toSeq: _*), allocator, rowCount)

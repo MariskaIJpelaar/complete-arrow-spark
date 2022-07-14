@@ -85,7 +85,7 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
     }.sortBy(_.length)(implicitly[Ordering[Long]].reverse)
 
     val partitions =
-      FilePartition.getFilePartitions(fs.relation.sparkSession, splitFiles, maxSplitBytes)
+      ArrowFilePartition.getFilePartitions(fs.relation.sparkSession, splitFiles, maxSplitBytes)
 
     new FileScanArrowRDD(fsRelation.sparkSession, readFunc, partitions)
   }
@@ -124,11 +124,11 @@ case class ArrowScanExec(fs: FileSourceScanExec) extends DataSourceScanExec with
         val partitionedFiles = coalescedBuckets.get(bucketId).map {
           _.values.flatten.toArray
         }.getOrElse(Array.empty).asInstanceOf[Array[org.apache.spark.sql.execution.datasources.PartitionedFile]]
-        FilePartition(bucketId, partitionedFiles)
+        ArrowFilePartition(FilePartition(bucketId, partitionedFiles))
       }
     }.getOrElse {
       Seq.tabulate(numBuckets) { bucketId =>
-        FilePartition(bucketId, prunedFilesGroupedToBuckets.getOrElse(bucketId, Array.empty))
+        ArrowFilePartition(FilePartition(bucketId, prunedFilesGroupedToBuckets.getOrElse(bucketId, Array.empty)))
       }
     }
 

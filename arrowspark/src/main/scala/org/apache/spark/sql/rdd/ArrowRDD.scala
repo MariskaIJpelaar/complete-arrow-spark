@@ -1,5 +1,6 @@
 package org.apache.spark.sql.rdd
 
+import org.apache.spark.{ArrowPartition, Partition, TaskContext}
 import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -19,6 +20,16 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
   // Caller should close returned batches
   // Closes the batches in the RDD
   override def toLocalIterator: Iterator[ArrowColumnarBatchRow] = ArrowRDD.toLocalIterator(this)
+
+  override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = split match {
+    case arrowPartition: ArrowPartition => {
+      context.addTaskCompletionListener[Unit]( _ => arrowPartition.allocator.close() )
+      compute(arrowPartition, context)
+    }
+    case _ => throw new IllegalArgumentException(s"ArrowRDD can only accept ArrowPartitions, not ${split.getClass.getName}")
+  }
+
+  def compute(split: ArrowPartition, context: TaskContext): Iterator[ArrowColumnarBatchRow]
 }
 
 object ArrowRDD {

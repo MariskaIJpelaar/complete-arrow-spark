@@ -40,7 +40,7 @@ private class DumpGroupConverter extends GroupConverter {
   final def getConverter(fieldIndex: Int) = new DumpConverter
 }
 
-// TODO: if we ask only for one row, then it still reads in the whole partition. Perhaps we could prevent this in any way?
+// FIXME: if we ask only for one row, then it still reads in the whole partition. Perhaps we could prevent this in any way?
 class ParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] {
   if (file.length > Integer.MAX_VALUE)
     throw new RuntimeException("[IntegerParquetReaderIterator] Partition is too large")
