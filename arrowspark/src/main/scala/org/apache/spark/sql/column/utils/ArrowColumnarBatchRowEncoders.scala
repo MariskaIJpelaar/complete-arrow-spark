@@ -86,7 +86,6 @@ object ArrowColumnarBatchRowEncoders {
           }
           oos.flush()
         }))
-
       }
       Iterator(bos.toByteArray)
     } finally {

@@ -147,7 +147,6 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
 
       while (records.hasNext) {
         val (key, value) = records.next()
-        // In case of ArrowPartition: key = FilePartition, value = ArrowColumnarBatchRow
         (key, value) match {
           case (partitionIds: Array[Int], partition: ArrowColumnarBatchRow) =>
             try {

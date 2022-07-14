@@ -25,7 +25,18 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
 
   override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = split match {
     case arrowPartition: ArrowPartition => {
-      context.addTaskCompletionListener[Unit]( _ => arrowPartition.allocator.close() )
+      context.addTaskCompletionListener[Unit]( _ =>
+        try {
+          arrowPartition.allocator.close()
+        } catch {
+          case e: Throwable =>
+            println("---------------DEBUG------------------")
+            println(arrowPartition.allocator.toVerboseString)
+            println("--------------------------------------")
+            throw e
+        }
+
+      )
       compute(arrowPartition, context)
     }
     case _ => throw new IllegalArgumentException(s"ArrowRDD can only accept ArrowPartitions, not ${split.getClass.getName}")

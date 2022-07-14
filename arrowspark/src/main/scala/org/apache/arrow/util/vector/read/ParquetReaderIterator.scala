@@ -62,7 +62,13 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
   }
   private lazy val colDesc = parquetSchema.getColumns
 
-  override def hasNext: Boolean = pageReadStore != null
+  override def hasNext: Boolean = {
+    val tasksLeft = pageReadStore != null
+    if (!tasksLeft) {
+      reader.close()
+    }
+    tasksLeft
+  }
 
   override def next(): ArrowColumnarBatchRow = {
     if (!hasNext)

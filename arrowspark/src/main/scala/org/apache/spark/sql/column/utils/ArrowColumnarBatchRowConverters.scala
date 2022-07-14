@@ -56,7 +56,7 @@ object ArrowColumnarBatchRowConverters {
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
    * Returns the root with its allocator and the number of rows transferred
-   * Caller should close the root
+   * Caller should close the root and allocator
    */
   def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): (VectorSchemaRoot, BufferAllocator, Int) = {
     Resources.autoCloseTryGet(batch) { batch =>

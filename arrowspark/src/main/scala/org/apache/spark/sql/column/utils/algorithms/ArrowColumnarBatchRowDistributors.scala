@@ -47,18 +47,21 @@ object ArrowColumnarBatchRowDistributors {
     Resources.autoCloseTryGet(key) { key =>
       // FIXME: close builder if we return earlier than expected
       val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
+      try {
+        partitionIds.zipWithIndex foreach { case (partitionId, index) =>
+          if (distributed.contains(partitionId))
+            distributed(partitionId).append(key
+              .copyFromCaller("ArrowColumnarBatchRowDistributors::distribute", index until index+1))
+          else
+            distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key
+              .copyFromCaller("ArrowColumnarBatchRowDistributors::distribute::first", index until index+1))
+        }
 
-      partitionIds.zipWithIndex foreach { case (partitionId, index) =>
-        if (distributed.contains(partitionId))
-          distributed(partitionId).append(key
-            .copyFromCaller("ArrowColumnarBatchRowDistributors::distribute", index until index+1))
-        else
-          distributed(partitionId) = new ArrowColumnarBatchRowBuilder(key
-            .copyFromCaller("ArrowColumnarBatchRowDistributors::distribute::first", index until index+1))
+        distributed.map ( items =>
+          (items._1, items._2.build(createAllocator(key.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
+      } finally {
+        distributed.foreach ( item => item._2.close() )
       }
-
-      distributed.map ( items =>
-        (items._1, items._2.build(createAllocator(key.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
     }
   }
 }
