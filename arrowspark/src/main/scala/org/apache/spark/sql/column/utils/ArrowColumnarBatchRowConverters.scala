@@ -138,7 +138,7 @@ object ArrowColumnarBatchRowConverters {
       Resources.closeOnFailGet(new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)) { union =>
         batch.columns foreach { column =>
           val vector = column.getValueVector
-          val tp = vector.getTransferPair(createAllocator(union.getAllocator, vector.getName))
+          val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
           tp.splitAndTransfer(0, vector.getValueCount)
           union.addVector(tp.getTo.asInstanceOf[FieldVector])
         }

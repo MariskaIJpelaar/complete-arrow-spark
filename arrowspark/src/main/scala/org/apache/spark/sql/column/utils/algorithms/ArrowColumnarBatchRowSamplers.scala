@@ -1,7 +1,7 @@
 package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.{RandomUtils, Resources}
-import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.util.random.XORShiftRandom
@@ -100,11 +100,13 @@ object ArrowColumnarBatchRowSamplers {
               val rand = new RandomUtils(new XORShiftRandom(seed))
 
               while (iter.hasNext) {
-                Resources.autoCloseTryGet(ArrowColumnarBatchRowTransformers.sample(iter.next(), seed)) { sample =>
-                  0 until sample.numRows foreach { index =>
-                    reservoir.copyAtIndex(sample, rand.generateRandomNumber(end = k-1), index)
+                Resources.autoCloseTryGet(iter.next()) { batch =>
+                  inputSize += batch.numRows
+                  Resources.autoCloseTryGet(ArrowColumnarBatchRowTransformers.sample(batch, seed)) { sample =>
+                    0 until sample.numRows foreach { index =>
+                      reservoir.copyAtIndex(sample, rand.generateRandomNumber(end = k-1), index)
+                    }
                   }
-                  inputSize += sample.numRows
                 }
               }
 

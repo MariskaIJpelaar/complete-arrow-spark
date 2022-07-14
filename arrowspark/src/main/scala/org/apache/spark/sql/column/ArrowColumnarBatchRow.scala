@@ -99,9 +99,16 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
     // TODO: tmp release-on-demand?
     columns foreach{ column =>
       val childAllocator = column.getValueVector.getAllocator
-      if (childAllocator.getAllocatedMemory != 0)
-        childAllocator.releaseBytes(childAllocator.getAllocatedMemory)
-      childAllocator.close()
+      try {
+        childAllocator.close()
+      } catch {
+        case e: Throwable =>
+          println(childAllocator.getRoot.toVerboseString)
+          throw e
+      }
+//      if (childAllocator.getAllocatedMemory != 0)
+//        childAllocator.releaseBytes(childAllocator.getAllocatedMemory)
+//      childAllocator.close()
     }
     allocator.close()
   }

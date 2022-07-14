@@ -114,8 +114,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
     columns.map( column => {
       val vector = column.getValueVector
       vector.setValueCount(size)
-      val tp = vector.getTransferPair(
-        createAllocator(parentAllocator, vector.getName))
+      val tp = vector.getTransferPair(createAllocator(parentAllocator, vector.getName))
       tp.splitAndTransfer(0, vector.getValueCount)
       new ArrowColumnVector(tp.getTo)
     })
