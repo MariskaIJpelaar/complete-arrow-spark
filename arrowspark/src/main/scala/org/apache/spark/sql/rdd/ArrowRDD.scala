@@ -56,10 +56,10 @@ object ArrowRDD {
 
   /** Returns a local iterator for each partition
    * Caller should cose batches in the returned iterator */
-  def toLocalIterator(rdd: RDD[ArrowColumnarBatchRow]): Iterator[ArrowColumnarBatchRow] = {
+  def toLocalIterator(rdd: RDD[ArrowColumnarBatchRow], rootAllocator: Option[RootAllocator] = None): Iterator[ArrowColumnarBatchRow] = {
     val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRowEncoders.encode(res))
     childRDD.toLocalIterator.flatMap( result =>
-      ArrowColumnarBatchRowEncoders.decode(newRoot(), result).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
+      ArrowColumnarBatchRowEncoders.decode(rootAllocator.getOrElse(newRoot()), result).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
     )
   }
 
@@ -96,7 +96,7 @@ object ArrowRDD {
   /** Note: copied and adapted from RDD.scala
    * batches in RDD are consumed (closed)
    * Caller should close returned batches */
-  def take(num: Int, rdd: RDD[ArrowColumnarBatchRow]): Array[ArrowColumnarBatchRow] = {
+  def take(num: Int, rdd: RDD[ArrowColumnarBatchRow], rootAllocator: Option[RootAllocator] = None): Array[ArrowColumnarBatchRow] = {
     if (num == 0) new Array[ArrowColumnarBatchRow](0)
 
     val scaleUpFactor = Math.max(rdd.conf.get(RDD_LIMIT_SCALE_UP_FACTOR), 2)
@@ -131,7 +131,7 @@ object ArrowRDD {
 
       res.foreach(result => {
         // NOTE: we require the 'take', because we do not want more than num numRows
-        val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(newRoot(), result), numRows = Option(num))
+        val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rootAllocator.getOrElse(newRoot()), result), numRows = Option(num))
         buf += ArrowColumnarBatchRow.create(decoded._3, decoded._2)
       })
 
