@@ -210,13 +210,13 @@ class ArrowRangePartitioner[V](
           if (imbalancedPartitions.nonEmpty) {
             val imbalanced = new PartitionPruningRDD(rdd.map(_._1), imbalancedPartitions.contains)
             val seed = byteswap32(-rdd.id -1)
-            val reSampledRDD = imbalanced.mapPartitionsInternal{ iter =>
+            val reSampledRDD = ArrowRDD.mapPartitionsInternal(imbalanced, (root: RootAllocator, iter: Iterator[Array[Byte]]) => {
               val batches = iter.map { array => {
-                val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(newRoot(), array))
+                val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(root, array))
                 ArrowColumnarBatchRow.create(decoded._3, decoded._2)
               }}
               Iterator(ArrowColumnarBatchRowSamplers.sample(batches, fraction, seed))
-            }
+            })
             val weight = (1.0 / fraction).toFloat
             candidates ++= ArrowRDD.collect(reSampledRDD, rootAllocator = Option(allocator)).map( x => (x._2, weight))
           }
