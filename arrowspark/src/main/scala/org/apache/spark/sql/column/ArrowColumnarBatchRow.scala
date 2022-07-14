@@ -1,7 +1,7 @@
 package org.apache.spark.sql.column
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.ValueVector
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
@@ -96,7 +96,13 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
 
   override def close(): Unit = {
     columns foreach( column => column.close() )
-    columns foreach( column => column.getValueVector.getAllocator.close() )
+    // TODO: tmp release-on-demand?
+    columns foreach{ column =>
+      val childAllocator = column.getValueVector.getAllocator
+      if (childAllocator.getAllocatedMemory != 0)
+        childAllocator.releaseBytes(childAllocator.getAllocatedMemory)
+      childAllocator.close()
+    }
     allocator.close()
   }
 
