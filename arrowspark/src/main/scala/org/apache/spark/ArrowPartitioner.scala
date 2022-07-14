@@ -1,11 +1,12 @@
 package org.apache.spark
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.{Float4Vector, ValueVector}
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.sql.catalyst.expressions.SortOrder
-import org.apache.spark.sql.column.AllocationManager.createAllocator
+import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils._
 import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
@@ -176,10 +177,14 @@ class ArrowRangePartitioner[V](
     val sampleSizePerPartition = math.ceil(3.0 * sampleSize / rdd.partitions.length).toInt
 
     // 'sketch' the distribution from a sample
-    val decoded: RDD[ArrowColumnarBatchRow] = rdd.map { iter =>
-      val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(iter._1))
+    val decoded = ArrowRDD.map(rdd, (root: RootAllocator, item: Product2[Array[Byte], V]) => {
+      val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(root, item._1))
       ArrowColumnarBatchRow.create(decoded._3, decoded._2)
-    }
+    })
+//    val decoded: RDD[ArrowColumnarBatchRow] = rdd.map { iter =>
+//      val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(iter._1))
+//      ArrowColumnarBatchRow.create(decoded._3, decoded._2)
+//    }
 
     // FIXME: make closeable?
     val (numItems, sketched) = sketch(decoded, sampleSizePerPartition)
@@ -209,7 +214,7 @@ class ArrowRangePartitioner[V](
           val seed = byteswap32(-rdd.id -1)
           val reSampledRDD = imbalanced.mapPartitionsInternal{ iter =>
             val batches = iter.map { array => {
-              val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(array))
+              val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(newRoot(), array))
               ArrowColumnarBatchRow.create(decoded._3, decoded._2)
             }}
             Iterator(ArrowColumnarBatchRowSamplers.sample(batches, fraction, seed))
@@ -251,7 +256,7 @@ class ArrowRangePartitioner[V](
 
   override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = {
     Resources.autoCloseTryGet(key) { key =>
-      val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rangeBounds))
+      val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(newRoot(), rangeBounds))
       Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(decoded._3, decoded._2)) { ranges =>
         ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
       }

@@ -7,7 +7,7 @@ import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
@@ -15,7 +15,6 @@ import org.apache.spark.util.NextIterator
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
-import scala.collection.mutable.ArrayBuffer
 
 object ArrowColumnarBatchRowEncoders {
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
@@ -40,7 +39,6 @@ object ArrowColumnarBatchRowEncoders {
       return Iterator(Array.emptyByteArray)
 
     // FIXME: make iter an Iterator of Closeables?
-    val roots = new ArrayBuffer[RootAllocator]()
     try {
       // how many rows are left to read?
       var left = numRows
@@ -55,7 +53,6 @@ object ArrowColumnarBatchRowEncoders {
         // Prepare first batch
         // This needs to be done separately as we need the schema for the VectorSchemaRoot
         val (extra, first): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
-        roots.append(first.allocator.getRoot.asInstanceOf[RootAllocator])
         // consumes first
         val (root, allocator, firstLength) = ArrowColumnarBatchRowConverters.toRoot(first, numCols, numRows)
         Resources.autoCloseTryGet(allocator) ( _ =>
@@ -73,7 +70,6 @@ object ArrowColumnarBatchRowEncoders {
           while (iter.hasNext && left.forall( _ > 0)) {
             val (extra, batch): (Array[Byte], ArrowColumnarBatchRow) = extraEncoder(iter.next())
             Resources.autoCloseTryGet(batch){ batch =>
-              roots.append(batch.allocator.getRoot.asInstanceOf[RootAllocator])
               // consumes batch
               val (recordBatch, batchLength): (ArrowRecordBatch, Int) =
                 ArrowColumnarBatchRowConverters.toArrowRecordBatch(batch, root.getFieldVectors.size(), numRows = left)
@@ -95,7 +91,6 @@ object ArrowColumnarBatchRowEncoders {
       Iterator(bos.toByteArray)
     } finally {
       iter.foreach( extraEncoder(_)._2.close() )
-      roots.foreach( _.close() )
     }
   }
 
@@ -106,7 +101,7 @@ object ArrowColumnarBatchRowEncoders {
    *
    * Callers are responsible for closing the returned 'Any' containing the batch
    */
-  def decode(bytes: Array[Byte],
+  def decode(rootAllocator: RootAllocator, bytes: Array[Byte],
              extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch): Iterator[Any] = {
     if (bytes.length == 0)
       return Iterator.empty
@@ -116,7 +111,7 @@ object ArrowColumnarBatchRowEncoders {
         val codec = CompressionCodec.createCodec(SparkEnv.get.conf)
         new ObjectInputStream(codec.compressedInputStream(bis))
       }
-      private val allocator = newRoot()
+      private val allocator = rootAllocator
       private val reader = new ArrowStreamReader(ois, allocator)
 
       override protected def getNext(): Any = {

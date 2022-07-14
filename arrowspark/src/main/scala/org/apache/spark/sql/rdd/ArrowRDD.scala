@@ -1,8 +1,10 @@
 package org.apache.spark.sql.rdd
 
+import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.{ArrowPartition, Partition, TaskContext}
 import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{RDD, RDDOperationScope}
+import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowUtils}
 
@@ -33,12 +35,20 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
 }
 
 object ArrowRDD {
+  /** Returns a new RDD by applying a function to all elements of this RDD */
+  def map[U: ClassTag, T: ClassTag](rdd: RDD[T], f: (RootAllocator, T) => U): RDD[U] =
+    RDDOperationScope.withScope(rdd.sparkContext) {
+      val cleanF = rdd.sparkContext.clean(f)
+      new ArrowMapPartitionsRDD[U, T](rdd, (_, _, rootAllocator, iter) =>
+        iter.map(item => cleanF(rootAllocator, item)) )
+    }
+
   /** Returns a local iterator for each partition
    * Caller should cose batches in the returned iterator */
   def toLocalIterator(rdd: RDD[ArrowColumnarBatchRow]): Iterator[ArrowColumnarBatchRow] = {
     val childRDD = rdd.mapPartitionsInternal( res => ArrowColumnarBatchRowEncoders.encode(res))
     childRDD.toLocalIterator.flatMap( result =>
-      ArrowColumnarBatchRowEncoders.decode(result).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
+      ArrowColumnarBatchRowEncoders.decode(newRoot(), result).asInstanceOf[Iterator[ArrowColumnarBatchRow]]
     )
   }
 
@@ -64,7 +74,7 @@ object ArrowRDD {
     // FIXME: For now, we assume we do not return too early when building the buf
     val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
     res.foreach(result => {
-      val decoded = ArrowColumnarBatchRowEncoders.decode(result, extraDecoder = extraDecoder)
+      val decoded = ArrowColumnarBatchRowEncoders.decode(newRoot(), result, extraDecoder = extraDecoder)
       buf ++= decoded.map( item => extraTaker(item) )
     })
     buf.toArray
@@ -108,7 +118,7 @@ object ArrowRDD {
 
       res.foreach(result => {
         // NOTE: we require the 'take', because we do not want more than num numRows
-        val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(result), numRows = Option(num))
+        val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(newRoot(), result), numRows = Option(num))
         buf += ArrowColumnarBatchRow.create(decoded._3, decoded._2)
       })
 
