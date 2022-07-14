@@ -1,12 +1,12 @@
 package org.apache.spark.sql.rdd
 
 import org.apache.arrow.memory.RootAllocator
-import org.apache.spark.{ArrowPartition, Partition, TaskContext}
 import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.{RDD, RDDOperationScope}
 import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowUtils}
+import org.apache.spark.{ArrowPartition, Partition, TaskContext}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
@@ -35,7 +35,18 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
 }
 
 object ArrowRDD {
-  /** Returns a new RDD by applying a function to all elements of this RDD */
+  /** [performance] Spark's internal mapPartitions method that skips closure cleaning
+   * Inspired from: org.apache.spark.rdd.RDD::mapPartitionsInternal */
+  private[spark] def mapPartitionsInternal[U: ClassTag, T: ClassTag](
+      rdd: RDD[T],
+      f: (RootAllocator, Iterator[T]) => Iterator[U],
+      preservePartitioning: Boolean = false): RDD[U] =
+    RDDOperationScope.withScope(rdd.sparkContext) {
+    new ArrowMapPartitionsRDD[U, T](rdd, (_, _, root, iter) => f(root, iter), preservePartitioning)
+  }
+
+  /** Returns a new RDD by applying a function to all elements of this RDD
+   * Inspired from: org.apache.spark.rdd.RDD::map */
   def map[U: ClassTag, T: ClassTag](rdd: RDD[T], f: (RootAllocator, T) => U): RDD[U] =
     RDDOperationScope.withScope(rdd.sparkContext) {
       val cleanF = rdd.sparkContext.clean(f)
@@ -56,17 +67,19 @@ object ArrowRDD {
    * Collect utility for rdds that contain ArrowColumnarBatchRows. Users can pass optional functions to process data
    * if the rdd has more complex data than only ArrowColumnarBatchRows
    * @param rdd rdd with the batches, which is also closed
+   * @param rootAllocator (optional) [[RootAllocator]] to allocate batches with, otherwise, each batch gets its own allocator
    * @param extraEncoder (optional) split item into encoded custom-data and a batch
    * @param extraDecoder (optional) decode an array of bytes to custom-data and a batch to a single instance
    * @param extraTaker (optional) split the item from the iterator into (customData, batch)
-   * @return array of custom-data and batches
-   *         Caller should close the batches in the array
+   * @return array of custom-data and batches, and the [[RootAllocator]] used to allocate the batches
+   *         Caller should close the batches in the array, and their RootAllocators
    */
   def collect[T: ClassTag](rdd: RDD[T],
+                           rootAllocator: Option[RootAllocator] = Option(newRoot()),
                            extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
                            extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch,
                            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]))
-                          (implicit ct: ClassTag[T]): Array[(Any, ArrowColumnarBatchRow)] = {
+                          (implicit ct: ClassTag[T]): (Array[(Any, ArrowColumnarBatchRow)]) = {
     val childRDD = rdd.mapPartitionsInternal { res => ArrowColumnarBatchRowEncoders.encode(res, extraEncoder = extraEncoder)}
     val res = rdd.sparkContext.runJob(childRDD, (it: Iterator[Array[Byte]]) => {
       if (!it.hasNext) Array.emptyByteArray else it.next()
@@ -74,7 +87,7 @@ object ArrowRDD {
     // FIXME: For now, we assume we do not return too early when building the buf
     val buf = new ArrayBuffer[(Any, ArrowColumnarBatchRow)]
     res.foreach(result => {
-      val decoded = ArrowColumnarBatchRowEncoders.decode(newRoot(), result, extraDecoder = extraDecoder)
+      val decoded = ArrowColumnarBatchRowEncoders.decode(rootAllocator.getOrElse(newRoot()), result, extraDecoder = extraDecoder)
       buf ++= decoded.map( item => extraTaker(item) )
     })
     buf.toArray

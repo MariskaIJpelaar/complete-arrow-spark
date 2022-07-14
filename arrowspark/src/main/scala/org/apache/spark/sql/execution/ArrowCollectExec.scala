@@ -20,7 +20,7 @@ case class ArrowCollectExec(child: SparkPlan) extends UnaryExecNode {
     else ArrowRDD.toLocalIterator(rdd.asInstanceOf[RDD[ArrowColumnarBatchRow]])
   }
 
-  /** Caller should close batches in Array */
+  /** Caller should close batches in Array, and the RootAllocator used to allocate them */
   override def executeCollect(): Array[InternalRow] = {
     val rdd = execute()
     if (rdd.isInstanceOf[ArrowRDD]) rdd.collect() else ArrowRDD.collect(rdd).map(_._2)

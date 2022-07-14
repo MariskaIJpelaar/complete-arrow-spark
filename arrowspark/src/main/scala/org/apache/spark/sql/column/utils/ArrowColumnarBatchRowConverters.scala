@@ -131,7 +131,7 @@ object ArrowColumnarBatchRowConverters {
    *
    * @param batch batch to convert and close
    * @return a fresh UnionVector, with its allocator
-   *         Caller is responsible for closing the UnionVector
+   *         Caller is responsible for closing the UnionVector and allocator
    */
   def toUnionVector(batch: ArrowColumnarBatchRow): (UnionVector, BufferAllocator) = {
     Resources.autoCloseTryGet(batch) { batch =>
@@ -139,7 +139,8 @@ object ArrowColumnarBatchRowConverters {
       Resources.closeOnFailGet(new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)) { union =>
         batch.columns foreach { column =>
           val vector = column.getValueVector
-          val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+          // we do not create a new allocator, to make release easier in a non-batch-type
+          val tp = vector.getTransferPair(allocator)
           tp.splitAndTransfer(0, vector.getValueCount)
           union.addVector(tp.getTo.asInstanceOf[FieldVector])
         }

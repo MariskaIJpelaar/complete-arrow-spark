@@ -70,8 +70,11 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
    * Caller is responsible for both this batch and copied-batch */
   def copyToAllocator(newAllocator: BufferAllocator, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
-    if (range.isEmpty)
+    if (range.isEmpty) {
+      // TODO: pass newAllocator to empty?
+      newAllocator.close()
       return ArrowColumnarBatchRow.empty()
+    }
 
     new ArrowColumnarBatchRow(newAllocator, columns map { v =>
       val vector = v.getValueVector
@@ -104,7 +107,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
       } catch {
         case e: Throwable =>
           println("---------------------DEBUG-----------------------")
-          println(childAllocator.getRoot.toVerboseString)
+          println(childAllocator.getParentAllocator.toVerboseString)
           println("-------------------------------------------------")
           throw e
       }
