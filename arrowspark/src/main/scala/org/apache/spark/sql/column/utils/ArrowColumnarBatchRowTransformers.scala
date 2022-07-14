@@ -116,6 +116,7 @@ object ArrowColumnarBatchRowTransformers {
   /**
    * Creates a new ArrowColumnarBatchRow from the given ArrowColumnarBatchRow,
    * with rows in order of the provided indices-vector
+   * First allocates in the RootAllocator of the provided batch, then with an own Allocator
    * @param batch ArrowColumnarBatchRow to create new batch from, and close
    * @param indices IntVector representing the indices to use, and close
    * @return a new Batch with permuted (subset) of rows from provided batch
@@ -126,23 +127,27 @@ object ArrowColumnarBatchRowTransformers {
       assert(indices.getValueCount > 0)
 
       // FIXME: clean up if exception is thrown within map
-      val allocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowTransformers::applyIndices")
+      val root = batch.allocator.getRoot
+      val allocator = createAllocator(root, "ArrowColumnarBatchRowTransformers::applyIndices")
       new ArrowColumnarBatchRow(allocator, batch.columns map { column =>
         val vector = column.getValueVector
         assert(indices.getValueCount <= vector.getValueCount)
 
         // transfer type
-        val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))
+        val tp = vector.getTransferPair(root)
         tp.splitAndTransfer(0, indices.getValueCount)
-        val new_vector = tp.getTo
+        Resources.autoCloseTryGet(tp.getTo) { newVector =>
+          newVector.setInitialCapacity(indices.getValueCount)
+          newVector.allocateNew()
 
-        new_vector.setInitialCapacity(indices.getValueCount)
-        new_vector.allocateNew()
+          0 until indices.getValueCount foreach { index => newVector.copyFromSafe(indices.get(index), index, vector) }
+          newVector.setValueCount(indices.getValueCount)
 
-        0 until indices.getValueCount foreach { index => new_vector.copyFromSafe(indices.get(index), index, vector) }
-        new_vector.setValueCount(indices.getValueCount)
-
-        new ArrowColumnVector(new_vector)
+          // transfer to new allocator
+          val newTp = newVector.getTransferPair(createAllocator(allocator, newVector.getName))
+          newTp.splitAndTransfer(0, indices.getValueCount)
+          new ArrowColumnVector(newTp.getTo)
+        }
       }, indices.getValueCount)
     })
   }

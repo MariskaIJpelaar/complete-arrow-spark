@@ -9,6 +9,18 @@ import org.apache.spark.sql.execution.metric.{SQLMetric, SQLShuffleReadMetricsRe
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.rdd.ArrowRDD
 
+import scala.language.implicitConversions
+
+private case class ArrowShuffledRowRDDPartition(partition: ShuffledRowRDDPartition) extends Partition with ArrowPartition {
+  override def index: Int = partition.index
+
+}
+
+private object ArrowShuffledRowRDDPartition {
+  implicit def toShuffledRowRDDPartition(arrowShuffledRowRDDPartition: ArrowShuffledRowRDDPartition): ShuffledRowRDDPartition =
+    arrowShuffledRowRDDPartition.partition
+}
+
 /** Note: copied functionalities from org.apache.spark.rdd.ShuffledRowRDD
  * Caller is responsible for closing rdd output */
 class ShuffledArrowColumnarBatchRowRDD(
@@ -39,26 +51,31 @@ class ShuffledArrowColumnarBatchRowRDD(
     }
 
   override protected def getPartitions: Array[Partition] =
-    Array.tabulate[Partition](partitionSpecs.length) { i => ShuffledRowRDDPartition(i, partitionSpecs(i)) }
-
-  override def getPreferredLocations(split: Partition): Seq[String] = {
-    val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
-    split.asInstanceOf[ShuffledRowRDDPartition].spec match {
-      case CoalescedPartitionSpec(startReducerIndex, endReducerIndex, _) =>
-        // TODO order by partition size.
-        startReducerIndex.until(endReducerIndex).flatMap { reducerIndex =>
-          tracker.getPreferredLocationsForShuffle(dependency, reducerIndex)
-        }
-
-      case PartialReducerPartitionSpec(_, startMapIndex, endMapIndex, _) =>
-        tracker.getMapLocation(dependency, startMapIndex, endMapIndex)
-
-      case PartialMapperPartitionSpec(mapIndex, _, _) =>
-        tracker.getMapLocation(dependency, mapIndex, mapIndex + 1)
-
-      case CoalescedMapperPartitionSpec(startMapIndex, endMapIndex, _) =>
-        tracker.getMapLocation(dependency, startMapIndex, endMapIndex)
+    Array.tabulate[Partition](partitionSpecs.length) { i =>
+      ArrowShuffledRowRDDPartition(ShuffledRowRDDPartition(i, partitionSpecs(i)))
     }
+
+  override def getPreferredLocations(split: Partition): Seq[String] = split match {
+    case arrowShuffledRowRDDPartition: ArrowShuffledRowRDDPartition =>
+      val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
+      arrowShuffledRowRDDPartition.spec match {
+        case CoalescedPartitionSpec(startReducerIndex, endReducerIndex, _) =>
+          // TODO order by partition size.
+          startReducerIndex.until(endReducerIndex).flatMap { reducerIndex =>
+            tracker.getPreferredLocationsForShuffle(dependency, reducerIndex)
+          }
+
+        case PartialReducerPartitionSpec(_, startMapIndex, endMapIndex, _) =>
+          tracker.getMapLocation(dependency, startMapIndex, endMapIndex)
+
+        case PartialMapperPartitionSpec(mapIndex, _, _) =>
+          tracker.getMapLocation(dependency, mapIndex, mapIndex + 1)
+
+        case CoalescedMapperPartitionSpec(startMapIndex, endMapIndex, _) =>
+          tracker.getMapLocation(dependency, startMapIndex, endMapIndex)
+      }
+    case _ =>
+      throw new IllegalArgumentException("ShuffledArrowColumnarBatchRowRDD::getPreferredLocations only accepts ArrowShuffledRowRDDPartitions")
   }
 
   // Caller is responsible for closing batches in iterator
@@ -67,7 +84,7 @@ class ShuffledArrowColumnarBatchRowRDD(
     // `SQLShuffleReadMetricsReporter` will update its own metrics for SQL exchange operator,
     // as well as the `tempMetrics` for basic shuffle metrics.
     val sqlMetricsReporter = new SQLShuffleReadMetricsReporter(tempMetrics, metrics)
-    val reader = split.asInstanceOf[ShuffledRowRDDPartition].spec match {
+    val reader = split.asInstanceOf[ArrowShuffledRowRDDPartition].spec match {
       case CoalescedPartitionSpec(startReducerIndex, endReducerIndex, _) =>
         SparkEnv.get.shuffleManager.getReader(
           dependency.shuffleHandle,
