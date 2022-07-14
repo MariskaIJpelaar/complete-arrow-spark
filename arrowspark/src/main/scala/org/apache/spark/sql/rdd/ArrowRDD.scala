@@ -75,7 +75,7 @@ object ArrowRDD {
    *         Caller should close the batches in the array, and their RootAllocators
    */
   def collect[T: ClassTag](rdd: RDD[T],
-                           rootAllocator: Option[RootAllocator] = Option(newRoot()),
+                           rootAllocator: Option[RootAllocator] = None,
                            extraEncoder: Any => (Array[Byte], ArrowColumnarBatchRow) = batch => (Array.emptyByteArray, batch.asInstanceOf[ArrowColumnarBatchRow]),
                            extraDecoder: (Array[Byte], ArrowColumnarBatchRow) => Any = (_, batch) => batch,
                            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]))
