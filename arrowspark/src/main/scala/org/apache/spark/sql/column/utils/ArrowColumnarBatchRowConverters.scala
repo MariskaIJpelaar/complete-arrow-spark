@@ -76,14 +76,14 @@ object ArrowColumnarBatchRowConverters {
    * Splits a single batch into two
    *
    * @param batch    ArrowColumnarBatchRow to split and close
-   * @param rowIndex index to split on
+   * @param firstLength length of first batch
    * @return two ArrowColumnarBatchRows split on rowIndex from batch
-   *         If rowIndex > batch.numRows, returns (original-batch, empty-batch)
+   *         If firstLength >= batch.numRows, returns (original-batch, empty-batch)
    *         Caller is responsible for closing the batches
    */
-  def split(batch: ArrowColumnarBatchRow, rowIndex: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
+  def split(batch: ArrowColumnarBatchRow, firstLength: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     Resources.autoCloseTryGet(batch) { batch =>
-      val splitPoint = rowIndex.min(batch.numRows)
+      val splitPoint = firstLength.min(batch.numRows)
       (batch.copyFromCaller("ArrowColumnarBatchRowConverters::split::first", 0 until splitPoint),
         batch.copyFromCaller("ArrowColumnarBatchRowConverters::split::second", splitPoint until batch.numRows))
     }
