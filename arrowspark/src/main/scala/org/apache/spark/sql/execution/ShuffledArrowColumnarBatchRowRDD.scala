@@ -5,6 +5,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowSerializer
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLShuffleReadMetricsReporter}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.rdd.ArrowRDD
@@ -80,12 +81,14 @@ class ShuffledArrowColumnarBatchRowRDD(
 
   // Caller is responsible for closing batches in iterator
   override def compute(split: ArrowPartition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
+    // TODO: attach allocator to deserializer!
     val tempMetrics = context.taskMetrics().createTempShuffleReadMetrics()
     // `SQLShuffleReadMetricsReporter` will update its own metrics for SQL exchange operator,
     // as well as the `tempMetrics` for basic shuffle metrics.
     val sqlMetricsReporter = new SQLShuffleReadMetricsReporter(tempMetrics, metrics)
     val reader = split.asInstanceOf[ArrowShuffledRowRDDPartition].spec match {
       case CoalescedPartitionSpec(startReducerIndex, endReducerIndex, _) =>
+        dependency.serializer.asInstanceOf[ArrowColumnarBatchRowSerializer].attachAllocator(split.allocator)
         SparkEnv.get.shuffleManager.getReader(
           dependency.shuffleHandle,
           startReducerIndex,

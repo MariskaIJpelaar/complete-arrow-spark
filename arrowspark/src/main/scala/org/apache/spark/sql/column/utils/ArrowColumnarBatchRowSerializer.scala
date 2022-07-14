@@ -1,13 +1,13 @@
 package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.spark.SparkEnv
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
-import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.vectorized.ArrowColumnVector
@@ -25,11 +25,13 @@ import scala.reflect.ClassTag
  * please know what you are doing :) */
 class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extends Serializer with Serializable {
   // Caller should close whatever is deserialized
-  override def newInstance(): SerializerInstance = new ArrowColumnarBatchRowSerializerInstance(dataSize)
+  private var rootAllocator: Option[RootAllocator] = None
+  def attachAllocator(root: RootAllocator): Unit = { rootAllocator = Option(root) }
+  override def newInstance(): SerializerInstance = new ArrowColumnarBatchRowSerializerInstance(dataSize, rootAllocator)
   override def supportsRelocationOfSerializedObjects: Boolean = true
 }
 
-private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric]) extends SerializerInstance {
+private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric], rootAllocator: Option[RootAllocator]) extends SerializerInstance {
   private val intermediate = 'B'
 
   override def serializeStream(s: OutputStream): SerializationStream = new SerializationStream {
@@ -137,7 +139,8 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         }
         ois = Option(new ObjectInputStream(cis))
       }
-      private lazy val allocator = newRoot()
+      private lazy val allocator = rootAllocator
+        .getOrElse( throw new IllegalStateException("No RootAllocator added for ArrowColumnarBatchRowDeserializer") )
       private var reader: Option[ArrowStreamReader] = None
       private def initReader(): Unit = {
         initOis()
