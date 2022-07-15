@@ -2,7 +2,7 @@ package org.apache.spark.sql.column.utils
 
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, SparkComparator, SparkUnionComparator}
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.{ValueVector, ZeroVector}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
@@ -34,6 +34,7 @@ object ArrowColumnarBatchRowUtils {
 
   /**
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
+   * @param rootAllocator [[RootAllocator]] to allocate with
    * @param numCols the number of columns to take
    * @param batches batches to create array from
    * @return array of merged columns with used allocator
@@ -49,33 +50,34 @@ object ArrowColumnarBatchRowUtils {
    *
    * Caller is responsible for closing returned vectors
    */
-  def take(batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
+  def take(rootAllocator: RootAllocator, batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
            extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None): (Any, Array[ArrowColumnVector], BufferAllocator) = {
-    if (!batches.hasNext) {
-      if (numCols.isDefined)
-        return (None, Array.tabulate[ArrowColumnVector](numCols.get)(i => new ArrowColumnVector( new ZeroVector(i.toString) ) ), newRoot())
-      return (None, new Array[ArrowColumnVector](0), newRoot())
-    }
+    Resources.closeOnFailGet(createAllocator(rootAllocator, "ArrowColumnarBatchRowUtils::take")) { allocator =>
+      if (!batches.hasNext) {
+        if (numCols.isDefined)
+          return (None, Array.tabulate[ArrowColumnVector](numCols.get)(i => new ArrowColumnVector( new ZeroVector(i.toString) ) ), allocator)
+        return (None, new Array[ArrowColumnVector](0), allocator)
+      }
 
-    // FIXME: Resource releaser with custom close function?
-    try {
-      // get first batch and its extra
-      val (extra, first) = extraTaker(batches.next())
-      Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(new ArrowColumnarBatchRowBuilder(first, numCols, numRows)) { builder =>
+      // FIXME: Resource releaser with custom close function?
+      try {
+        // get first batch and its extra
+        val (extra, first) = extraTaker(batches.next())
+        Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(new ArrowColumnarBatchRowBuilder(first, numCols, numRows)) { builder =>
 
-        var extraCollected = extraCollector(extra, None)
-        while (batches.hasNext && numRows.forall( num => builder.length < num)) {
-          val (extra, batch) = extraTaker(batches.next())
-          Resources.autoCloseTryGet(batch)(batch => builder.append(batch))
-          extraCollected = extraCollector(extra, Option(extraCollected))
-        }
-        val allocator = createAllocator(first.allocator.getRoot, "ArrowColumnarBatchRowUtils::take")
-        (extraCollected, builder.buildColumns(allocator), allocator)
-      })
-    } finally {
-      /** clear up the remainder */
-      batches.foreach( extraTaker(_)._2.close() )
+          var extraCollected = extraCollector(extra, None)
+          while (batches.hasNext && numRows.forall( num => builder.length < num)) {
+            val (extra, batch) = extraTaker(batches.next())
+            Resources.autoCloseTryGet(batch)(batch => builder.append(batch))
+            extraCollected = extraCollector(extra, Option(extraCollected))
+          }
+          (extraCollected, builder.buildColumns(allocator), allocator)
+        })
+      } finally {
+        /** clear up the remainder */
+        batches.foreach( extraTaker(_)._2.close() )
+      }
     }
   }
 

@@ -153,7 +153,8 @@ object ArrowRDD {
 
       res.foreach(result => {
         // NOTE: we require the 'take', because we do not want more than num numRows
-        val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(rootAllocator.getOrElse(newRoot()), result), numRows = Option(num))
+        val root = rootAllocator.getOrElse(newRoot())
+        val decoded = ArrowColumnarBatchRowUtils.take(root, ArrowColumnarBatchRowEncoders.decode(root, result), numRows = Option(num))
         buf += ArrowColumnarBatchRow.create(decoded._3, decoded._2)
       })
 

@@ -15,7 +15,8 @@ import scala.collection.immutable.NumericRange
  * Caller should close after use */
 class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Option[Int] = None, val numRows: Option[Int] = None) extends Closeable {
   protected[column] var size = 0
-  protected[column] val rootAllocator: RootAllocator = first.allocator.getRoot.asInstanceOf[RootAllocator]
+  val rootAllocator: RootAllocator = first.allocator.getRoot.asInstanceOf[RootAllocator]
+  def getRootAllocator: RootAllocator = rootAllocator
   protected val numBytes: Array[Long] = Array.tabulate(first.numFields) { _ => 0 }
   protected[column] val columns: Array[ArrowColumnVector] = {
     Resources.autoCloseTryGet(first) { first =>

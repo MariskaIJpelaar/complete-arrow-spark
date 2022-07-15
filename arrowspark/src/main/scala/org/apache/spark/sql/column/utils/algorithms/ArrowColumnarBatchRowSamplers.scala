@@ -79,7 +79,7 @@ object ArrowColumnarBatchRowSamplers {
 
           while (inputSize < k) {
             // ArrowColumnarBatchRow.create consumes the batches
-            if (!input.hasNext) return (ArrowColumnarBatchRow.create(reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
+            if (!input.hasNext) return (ArrowColumnarBatchRow.create(rootAllocator, reservoirBuf.slice(0, nrBatches).toIterator), inputSize)
 
             val (batchOne, batchTwo): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) =
               ArrowColumnarBatchRowConverters.split(input.next(), (k-inputSize).toInt)
@@ -93,7 +93,7 @@ object ArrowColumnarBatchRowSamplers {
           }
 
           // closes reservoirBuf
-          Resources.closeOnFailGet(ArrowColumnarBatchRow.create(reservoirBuf.toIterator)) { reservoir =>
+          Resources.closeOnFailGet(ArrowColumnarBatchRow.create(rootAllocator, reservoirBuf.toIterator)) { reservoir =>
             // add our remainder to the iterator, if there is any
             Resources.autoCloseTraversableTryGet(remainderBatch.fold(input)( Iterator(_) ++ input )) { iter =>
               // make sure we do not use this batch anymore

@@ -129,7 +129,7 @@ class ArrowRangePartitioner[V](
 
       if (batches.isEmpty) return ArrowColumnarBatchRow.empty(rootAllocator)
 
-      val grouped: ArrowColumnarBatchRow = ArrowColumnarBatchRow.create(batches.toIterator)
+      val grouped: ArrowColumnarBatchRow = ArrowColumnarBatchRow.create(rootAllocator, batches.toIterator)
       val sorted: ArrowColumnarBatchRow = ArrowColumnarBatchRowSorters.multiColumnSort(grouped, orders)
       val (unique, weighted) = ArrowColumnarBatchRowConverters.splitColumns(ArrowColumnarBatchRowDeduplicators.unique(sorted, orders), grouped.numFields-1)
       Resources.autoCloseTryGet(unique)( unique => Resources.autoCloseTryGet(weighted) { weighted =>
@@ -182,7 +182,7 @@ class ArrowRangePartitioner[V](
 
     // 'sketch' the distribution from a sample
     val decoded = ArrowRDD.map(rdd, (root: RootAllocator, item: Product2[Array[Byte], V]) => {
-      val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(root, item._1))
+      val decoded = ArrowColumnarBatchRowUtils.take(root, ArrowColumnarBatchRowEncoders.decode(root, item._1))
       ArrowColumnarBatchRow.create(decoded._3, decoded._2)
     })
 
@@ -215,7 +215,7 @@ class ArrowRangePartitioner[V](
             val seed = byteswap32(-rdd.id -1)
             val reSampledRDD = ArrowRDD.mapPartitionsInternal(imbalanced, (root: RootAllocator, iter: Iterator[Array[Byte]]) => {
               val batches = iter.map { array => {
-                val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(root, array))
+                val decoded = ArrowColumnarBatchRowUtils.take(root, ArrowColumnarBatchRowEncoders.decode(root, array))
                 ArrowColumnarBatchRow.create(decoded._3, decoded._2)
               }}
               Iterator(ArrowColumnarBatchRowSamplers.sample(allocator, batches, fraction, seed))
@@ -259,7 +259,7 @@ class ArrowRangePartitioner[V](
   override def getPartitions(key: ArrowColumnarBatchRow): Array[Int] = {
     Resources.autoCloseTryGet(key) { key =>
       Resources.autoCloseTryGet(newRoot()) { root =>
-        val decoded = ArrowColumnarBatchRowUtils.take(ArrowColumnarBatchRowEncoders.decode(root, rangeBounds))
+        val decoded = ArrowColumnarBatchRowUtils.take(root, ArrowColumnarBatchRowEncoders.decode(root, rangeBounds))
         Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(decoded._3, decoded._2)) { ranges =>
           ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
         }

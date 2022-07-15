@@ -9,10 +9,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import utils.ArrowColumnarBatchTestUtils.batchFromSeqs
 
 class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
-  def testBatches(batches: Seq[ArrowColumnarBatchRow]): Unit = {
+  def testBatches(rootAllocator: RootAllocator, batches: Seq[ArrowColumnarBatchRow]): Unit = {
     Resources.autoCloseTraversableTryGet(batches) { batches =>
       Resources.autoCloseTraversableTryGet(batches.map(_.copy()).toIterator) { copies =>
-        Resources.autoCloseArrayTryGet(ArrowColumnarBatchRowUtils.take(batches.toIterator)._2) { answer =>
+        Resources.autoCloseArrayTryGet(ArrowColumnarBatchRowUtils.take(rootAllocator, batches.toIterator)._2) { answer =>
           var rowIndex = 0
           copies.zipWithIndex.foreach { case (batch, index) =>
             Resources.autoCloseTryGet(batch) { batch =>
@@ -36,20 +36,22 @@ class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
 
   def testSingleBatch(rootAllocator: RootAllocator, table: Seq[Seq[Int]]): Unit = {
     val batch = batchFromSeqs(table, createAllocator(rootAllocator, "ArrowColumnarBatchUtilsTakeTests::testSingleBatch"))
-    testBatches(Seq(batch))
+    testBatches(rootAllocator, Seq(batch))
   }
 
   def testSingleIntVector(rootAllocator: RootAllocator, nums: Seq[Int]): Unit = testSingleBatch(rootAllocator, Seq(nums))
 
   test("ArrowColumnarBatchRowUtils::take() empty iterator") {
-    val answer = ArrowColumnarBatchRowUtils.take(Iterator.empty)
-    assertResult(0)(answer._2.length)
+    Resources.autoCloseTryGet(newRoot()) { root =>
+      val answer = ArrowColumnarBatchRowUtils.take(root, Iterator.empty)
+      assertResult(0)(answer._2.length)
+    }
   }
 
   test("ArrowColumnarBatchRowUtils::take() single empty batch") {
     Resources.autoCloseTryGet(newRoot()) { root =>
       val empty = ArrowColumnarBatchRow.empty(root)
-      val answer = ArrowColumnarBatchRowUtils.take(Iterator(empty))
+      val answer = ArrowColumnarBatchRowUtils.take(root, Iterator(empty))
       assertResult(0)(answer._2.length)
     }
   }
@@ -83,13 +85,12 @@ class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchRowUtils::take() two singleton batches") {
-    column.AllocationManager.reset()
-    val root = newRoot()
-    val firstBatch = batchFromSeqs(Seq(Seq(42)),
-      createAllocator(root, "ArrowColumnarBatchUtilsTakeTests::twoSingletons::first"))
-    val secondBatch = batchFromSeqs(Seq(Seq(32)),
-      createAllocator(root, "ArrowColumnarBatchUtilsTakeTests::twoSingletons::second"))
-    testBatches(Seq(firstBatch, secondBatch))
-    column.AllocationManager.cleanup()
+    Resources.autoCloseTryGet(newRoot()) { root =>
+      val firstBatch = batchFromSeqs(Seq(Seq(42)),
+        createAllocator(root, "ArrowColumnarBatchUtilsTakeTests::twoSingletons::first"))
+      val secondBatch = batchFromSeqs(Seq(Seq(32)),
+        createAllocator(root, "ArrowColumnarBatchUtilsTakeTests::twoSingletons::second"))
+      testBatches(root, Seq(firstBatch, secondBatch))
+    }
   }
 }

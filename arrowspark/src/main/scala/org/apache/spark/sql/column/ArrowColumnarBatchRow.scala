@@ -196,8 +196,8 @@ object ArrowColumnarBatchRow {
    * Closes the batches in the provided iterator
    * WARNING: uses 'take', a very expensive operation. Use with care!
    * Caller is responsible for closing generated batch */
-  def create(iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
-    val decoded = ArrowColumnarBatchRowUtils.take(iter)
+  def create(rootAllocator: RootAllocator, iter: Iterator[ArrowColumnarBatchRow]): ArrowColumnarBatchRow = {
+    val decoded = ArrowColumnarBatchRowUtils.take(rootAllocator, iter)
     ArrowColumnarBatchRow.create(decoded._3, decoded._2)
   }
 

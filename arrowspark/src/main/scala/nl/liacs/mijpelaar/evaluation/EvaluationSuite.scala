@@ -3,87 +3,12 @@ package nl.liacs.mijpelaar.evaluation
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column._
-import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
-import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.FileWriter
 import java.nio.file.Paths
 import scala.reflect.io.Directory
 
 object EvaluationSuite {
-  val isSortedBatch: (ArrowColumnarBatchRow, Range) => Boolean = (answer: ArrowColumnarBatchRow, colNrs: Range) => {
-    val columns: Array[ArrowColumnVector] = ArrowColumnarBatchRowUtils.take(Iterator(answer))._2
-    try {
-      var result = true
-      if (columns.length <= 0) result = false
-      else if (answer.numRows == 1) result = true
-      else if (columns.exists( col => col.getValueVector.getValueCount != answer.numRows )) result = false
-      else {
-        1 until answer.numRows foreach { rowIndex =>
-          colNrs.takeWhile { colIndex =>
-            val numOne = columns(colIndex).getInt(rowIndex - 1)
-            val numTwo = columns(colIndex).getInt(rowIndex)
-            if (numOne == numTwo) {
-              true // continue to check the next column
-            } else if (numOne < numTwo) {
-              false // stop looking, it's alright
-            } else {
-              // stop looking, it's bad
-              result = false
-              false
-            }
-          }
-        }
-      }
-      result
-    } finally {
-      columns.foreach( vector => vector.close() )
-    }
-  }
-
-
-  val isSorted: (ColumnBatch, Range) => Boolean = (answer: ColumnBatch, colNrs: Range) => {
-    val cols = TColumn.fromBatches(Array(answer))
-    if (cols.length <= 0) {
-      false
-    } else if (cols.exists( _.length != cols.head.length)) {
-      // every column same no. elements?
-      false
-    } else if (cols.head.length == 1) {
-      // one row is always sorted
-      true
-    } else {
-      var result = true
-      1 until cols.head.length foreach { rowIndex =>
-        colNrs.takeWhile { colIndex =>
-          val firstVar = cols(colIndex).get(rowIndex-1)
-          val secondVar = cols(colIndex).get(rowIndex)
-          if (firstVar.isEmpty || secondVar.isEmpty) {
-            false
-          } else {
-            (firstVar.get, secondVar.get) match {
-              case (numOne: Int, numTwo: Int) =>
-                if (numOne == numTwo) {
-                  true // continue to check the next column
-                } else if (numOne < numTwo) {
-                  false // stop looking, it's alright
-                }  else {
-                  // stop looking, it's bad
-                  result = false
-                  false
-                }
-              case _ =>
-                // wrong type, stop looking
-                result = false
-                false
-            }
-          }
-        }
-      }
-      result
-    }
-  }
-
   /** Sort on the first two columns (which we assume are integers) of a parquet file */
   def sort(spark: SparkSession, fw: FileWriter, file: String): Unit = {
     val df = spark.read.parquet(file)

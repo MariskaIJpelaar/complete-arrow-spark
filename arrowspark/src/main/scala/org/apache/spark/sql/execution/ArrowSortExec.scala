@@ -1,15 +1,16 @@
 package org.apache.spark.sql.execution
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenerator, CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, SortOrder}
+import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowBuilder
 import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowSorters
-
-import java.util
-import scala.collection.mutable.ArrayBuffer
+import org.apache.spark.sql.rdd.ArrowRDD
 
 /** copied and adapted from org.apache.spark.sql.execution.SortExec
  * Caller is responsible for closing returned batches from this plan */
@@ -24,7 +25,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   }
 
   // FIXME: For now, we assume that we won't return too early, and that partitions will be consumed by create
-  private val partitions: scala.collection.mutable.Buffer[ArrowColumnarBatchRow] = new ArrayBuffer[ArrowColumnarBatchRow]()
+  private val partitions: Option[ArrowColumnarBatchRowBuilder] = Option.empty
   private var partitionsIdx: Int = _
   private var thisPartitions: String = _
   // FIXME: For now, we assume that we won't return too early, and that sortedBatch will be consumed by caller
@@ -57,16 +58,24 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
     val order = ctx.freshName("order")
     val col = ctx.freshName("col")
+    val root = ctx.freshName("root")
+    val builder = ctx.freshName("builder")
 
     val staticBatch = classOf[ArrowColumnarBatchRow].getName + "$.MODULE$"
     val staticSorter = ArrowColumnarBatchRowSorters.getClass.getName + ".MODULE$"
+    val builderClass = classOf[ArrowColumnarBatchRowBuilder].getName
+    val allocatorClass = classOf[RootAllocator].getName
+    val staticManager = column.AllocationManager.getClass.getName + ".MODULE$"
 
     val code =
       s"""
        | if ($needToSort) {
        |  $addToSorterFuncName();
        |
-       |  $batch = $staticBatch.create($thisPartitions.toIterator());
+       |  $builderClass $builder = (($builderClass)((scala.Option<$builderClass>)references[$partitionsIdx]).get());
+       |  $allocatorClass $root = $builder.getRootAllocator();
+       |  $batch = $builder.build($staticManager.createAllocator($root, "CompiledSort"));
+       |  $builder.close();
        |  ${classOf[ArrowColumnarBatchRow].getName} $newBatch = null;
        |
        |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
@@ -88,31 +97,41 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
   override def doConsume(ctx: CodegenContext, input: Seq[ExprCode], row: ExprCode): String = {
     val temp = ctx.freshName("temp")
+    val builderClass = classOf[ArrowColumnarBatchRowBuilder].getName
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
+    val builder = ctx.freshName("builder")
 
     val code = s"""
        |${row.code}
-       |${classOf[util.List[ArrowColumnarBatchRow]].getName} $temp = scala.collection.JavaConverters.bufferAsJavaList($thisPartitions);
-       |$temp.add((${classOf[ArrowColumnarBatchRow].getName})${row.value});
-       |references[$partitionsIdx] = (${classOf[ArrayBuffer[ArrowColumnarBatchRow]].getName})scala.collection.JavaConverters.asScalaBuffer($temp);
+       |
+       |scala.Option<$builderClass> $builder = ((scala.Option<$builderClass>)references[$partitionsIdx]);
+       |if ($builder.isDefined()) {
+       |  (($builderClass)($builder.get())).append(($batchClass)${row.value});
+       |} else {
+       |  references[$partitionsIdx] = scala.Option.apply(new $builderClass(($batchClass)${row.value}, scala.Option.empty(), scala.Option.empty()));
+       |}
      """.stripMargin
     code
   }
 
   // caller is responsible for cleaning ArrowColumnarBatchRows
   override protected def doExecute(): RDD[InternalRow] = {
-    child.execute().mapPartitionsInternal { case item: Iterator[ArrowColumnarBatchRow] =>
-      Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(item)) { batch =>
-        val newBatch: ArrowColumnarBatchRow = {
-          if (sortOrder.length == 1) {
-            val col = attributeReferenceToCol(sortOrder.head)
-            ArrowColumnarBatchRowSorters.sort(batch, col, sortOrder.head)
-          } else {
-            ArrowColumnarBatchRowSorters.multiColumnSort(batch, sortOrder)
+    ArrowRDD.mapPartitionsInternal(child.execute(), {
+      (root: RootAllocator, item: Iterator[InternalRow]) => item match {
+        case batchIter: Iterator[ArrowColumnarBatchRow] =>
+          Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(root, batchIter)) { batch =>
+            val newBatch: ArrowColumnarBatchRow = {
+              if (sortOrder.length == 1) {
+                val col = attributeReferenceToCol(sortOrder.head)
+                ArrowColumnarBatchRowSorters.sort(batch, col, sortOrder.head)
+              } else {
+                ArrowColumnarBatchRowSorters.multiColumnSort(batch, sortOrder)
+              }
+            }
+            Iterator(newBatch)
           }
-        }
-        Iterator(newBatch)
       }
-    }
+    }).asInstanceOf[RDD[InternalRow]]
   }
 
   override def output: Seq[Attribute] = child.output
