@@ -128,11 +128,12 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
       try {
         childAllocator.close()
       } catch {
-        case _: Throwable =>
+        case e: Throwable =>
           println("---------------------DEBUG-----------------------")
           println(childAllocator.getParentAllocator.toVerboseString)
           println("-------------------------------------------------")
-          println("----------Note: we ignore this error-------------")
+//          println("----------Note: we ignore this error-------------")
+          throw e
       }
 //      if (childAllocator.getAllocatedMemory != 0)
 //        childAllocator.releaseBytes(childAllocator.getAllocatedMemory)
@@ -141,11 +142,12 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
     try {
       allocator.close()
     } catch {
-      case _: Throwable =>
+      case e: Throwable =>
         println("---------------------DEBUG-----------------------")
         println(allocator.getParentAllocator.toVerboseString)
         println("-------------------------------------------------")
-        println("----------Note: we ignore this error-------------")
+//        println("----------Note: we ignore this error-------------")
+        throw e
     }
   }
 
