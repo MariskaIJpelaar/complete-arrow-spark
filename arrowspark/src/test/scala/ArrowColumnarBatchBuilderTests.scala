@@ -41,8 +41,8 @@ class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
 
 
   test("ArrowColumnarBatchBuilder empty batch") {
-    val empty = ArrowColumnarBatchRow.empty()
-    val root = empty.allocator.getRoot
+    val root = newRoot()
+    val empty = ArrowColumnarBatchRow.empty(root)
     val answer = new ArrowColumnarBatchRowBuilder(empty)
       .build(createAllocator(empty.allocator.getRoot, "ArrowColumnarBatchRowBuilderTests::empty"))
     assert(empty.equals(answer))
@@ -79,7 +79,7 @@ class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
     val intVec: ValueVector = utils.ArrowVectorUtils.intFromSeq(Seq(32, 42), root, name = "intVec")
     val floatVec: ValueVector = utils.ArrowVectorUtils.floatFromSeq(Seq(1.0, 1.5), root, name = "floatVec")
 
-    Resources.autoCloseTryGet(ArrowColumnarBatchRow.create("batch", Array(intVec, floatVec))) { batch =>
+    Resources.autoCloseTryGet(ArrowColumnarBatchRow.transfer(root, "batch", Array(intVec, floatVec))) { batch =>
       Resources.autoCloseTryGet(batch.copy()) { copy =>
         Resources.autoCloseTryGet(new ArrowColumnarBatchRowBuilder(batch)) { builder =>
           Resources.autoCloseTryGet(builder.build(createAllocator(root, "ArrowColumnarBatchBuilderTests::multiTyped"))) { answer =>
@@ -127,12 +127,12 @@ class ArrowColumnarBatchBuilderTests extends AnyFunSuite {
     val intVec: ValueVector = utils.ArrowVectorUtils.intFromSeq(Seq(32, 42), root, name = "intVec")
     val floatVec: ValueVector = utils.ArrowVectorUtils.floatFromSeq(Seq(1.0, 1.5), root, name = "floatVec")
 
-    Resources.autoCloseTryGet(ArrowColumnarBatchRow.create("batch", Array(intVec, floatVec))) { batch =>
+    Resources.autoCloseTryGet(ArrowColumnarBatchRow.transfer(root, "batch", Array(intVec, floatVec))) { batch =>
       Resources.autoCloseTryGet(batch.copy()) { copy =>
         Resources.autoCloseTryGet(new ArrowColumnarBatchRowBuilder(batch)) { builder =>
           val intVec2: ValueVector = utils.ArrowVectorUtils.intFromSeq(Seq(16, 54), root, name = "intVec")
           val floatVec2: ValueVector = utils.ArrowVectorUtils.floatFromSeq(Seq(0.8, 1.6), root, name = "floatVec")
-          Resources.autoCloseTryGet(ArrowColumnarBatchRow.create("batch2", Array(intVec2, floatVec2))) { batch2 =>
+          Resources.autoCloseTryGet(ArrowColumnarBatchRow.transfer(root, "batch2", Array(intVec2, floatVec2))) { batch2 =>
             Resources.autoCloseTryGet(batch2.copy()) { copy2 =>
               builder.append(batch2)
               Resources.autoCloseTryGet(builder.build(createAllocator(root, "ArrowColumnarBatchBuilderTests::multiTyped"))) { answer =>

@@ -8,12 +8,14 @@ import utils.ArrowColumnarBatchTestUtils
 class ArrowColumnarBatchConvertersSplitTests extends AnyFunSuite {
 
   test("ArrowColumnarBatchRowConvertersSplit empty") {
-    Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty()) { empty =>
-      val (first, second) = ArrowColumnarBatchRowConverters.split(empty.copy(), 0)
-      Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
-        assert(first.equals(empty))
-        assert(second.equals(empty))
-      })
+    Resources.autoCloseTryGet(newRoot()) { root =>
+      Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty(root)) { empty =>
+        val (first, second) = ArrowColumnarBatchRowConverters.split(empty.copy(), 0)
+        Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
+          assert(first.equals(empty))
+          assert(second.equals(empty))
+        })
+      }
     }
   }
 
@@ -23,7 +25,7 @@ class ArrowColumnarBatchConvertersSplitTests extends AnyFunSuite {
         val (first, second) = ArrowColumnarBatchRowConverters.split(batch.copy(), 1)
         Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
           assert(first.equals(batch))
-          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty()) ( empty => assert(second.equals(empty)) )
+          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty(root)) ( empty => assert(second.equals(empty)) )
         })
       }
     }
@@ -35,7 +37,7 @@ class ArrowColumnarBatchConvertersSplitTests extends AnyFunSuite {
         val (first, second) = ArrowColumnarBatchRowConverters.split(batch.copy(), 0)
         Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
           assert(second.equals(batch))
-          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty()) ( empty => assert(first.equals(empty)) )
+          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty(root)) ( empty => assert(first.equals(empty)) )
         })
       }
     }
@@ -47,7 +49,7 @@ class ArrowColumnarBatchConvertersSplitTests extends AnyFunSuite {
         val (first, second) = ArrowColumnarBatchRowConverters.split(batch.copy(), 2)
         Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
           assert(first.equals(batch))
-          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty()) ( empty => assert(second.equals(empty)) )
+          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty(root)) ( empty => assert(second.equals(empty)) )
         })
       }
     }
@@ -83,7 +85,7 @@ class ArrowColumnarBatchConvertersSplitTests extends AnyFunSuite {
         val (first, second) = ArrowColumnarBatchRowConverters.split(batch.copy(), 0)
         Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
           assert(second.equals(batch))
-          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty()) ( empty => assert(first.equals(empty)) )
+          Resources.autoCloseTryGet(ArrowColumnarBatchRow.empty(root)) ( empty => assert(first.equals(empty)) )
         })
       }
     }

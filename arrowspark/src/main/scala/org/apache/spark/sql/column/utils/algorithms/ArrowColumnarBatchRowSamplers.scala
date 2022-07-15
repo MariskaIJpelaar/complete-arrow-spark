@@ -1,6 +1,7 @@
 package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.{RandomUtils, Resources}
+import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
@@ -12,6 +13,7 @@ import scala.util.Random
 object ArrowColumnarBatchRowSamplers {
   /**
    * Sample rows from batches where the sample-size is determined by probability
+   * @param rootAllocator [[RootAllocator]] to use for allocation
    * @param input the batches to sample from and close
    * @param fraction the probability of a sample being taken
    * @param seed a seed for the "random"-generator
@@ -19,13 +21,13 @@ object ArrowColumnarBatchRowSamplers {
    *
    * Caller is responsible for closing returned batch
    */
-  def sample(input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
-    if (!input.hasNext) ArrowColumnarBatchRow.empty()
+  def sample(rootAllocator: RootAllocator, input: Iterator[ArrowColumnarBatchRow], fraction: Double, seed: Long): ArrowColumnarBatchRow = {
+    if (!input.hasNext) ArrowColumnarBatchRow.empty(rootAllocator)
 
     Resources.autoCloseTraversableTryGet(input) { input =>
       val first = input.next()
       Resources.autoCloseTraversableTryGet(Iterator(first) ++ input ) { iter =>
-        val freshAllocator = createAllocator(first.allocator.getRoot, "ArrowColumnarBatchRowSampler::sample::array")
+        val freshAllocator = createAllocator(rootAllocator, "ArrowColumnarBatchRowSampler::sample::array")
         Resources.closeArrayOnFailGet(ArrowColumnarBatchRowConverters.makeFresh(freshAllocator,
           first.copyFromCaller("ArrowColumnarBatchRowSampler::sample::array::copy"))) { array =>
           val rand = new XORShiftRandom(seed)
@@ -52,6 +54,7 @@ object ArrowColumnarBatchRowSamplers {
   /**
    * Reservoir sampling implementation that also returns the input size
    * Note: inspiration from org.apache.spark.util.random.RandomUtils::reservoirSampleAndCount
+   * @param rootAllocator [[RootAllocator]] to allocate with
    * @param input input batches
    * @param k reservoir size
    * @param seed random seed
@@ -60,10 +63,10 @@ object ArrowColumnarBatchRowSamplers {
    *
    * Caller is responsible for closing the returned batch
    */
-  def sampleAndCount(input: Iterator[ArrowColumnarBatchRow], k: Int, seed: Long = Random.nextLong()):
+  def sampleAndCount(rootAllocator: RootAllocator, input: Iterator[ArrowColumnarBatchRow], k: Int, seed: Long = Random.nextLong()):
   (ArrowColumnarBatchRow, Long) = {
     Resources.autoCloseTraversableTryGet(input) { input =>
-      if (k < 1) (Array.empty[ArrowColumnarBatchRow], 0)
+      if (k < 1) return (ArrowColumnarBatchRow.empty(rootAllocator), 0)
 
       // First, we fill the reservoir with k elements
       var inputSize = 0L
@@ -72,7 +75,7 @@ object ArrowColumnarBatchRowSamplers {
 
       try {
         Resources.closeTraversableOnFailGet(new ArrayBuffer[ArrowColumnarBatchRow](k)) { reservoirBuf =>
-          if (!input.hasNext) return (ArrowColumnarBatchRow.empty(), 0)
+          if (!input.hasNext) return (ArrowColumnarBatchRow.empty(rootAllocator), 0)
 
           while (inputSize < k) {
             // ArrowColumnarBatchRow.create consumes the batches

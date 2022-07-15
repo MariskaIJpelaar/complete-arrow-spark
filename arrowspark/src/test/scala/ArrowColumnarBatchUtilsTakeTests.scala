@@ -47,9 +47,11 @@ class ArrowColumnarBatchUtilsTakeTests extends AnyFunSuite {
   }
 
   test("ArrowColumnarBatchRowUtils::take() single empty batch") {
-    val empty = ArrowColumnarBatchRow.empty
-    val answer = ArrowColumnarBatchRowUtils.take(Iterator(empty))
-    assertResult(0)(answer._2.length)
+    Resources.autoCloseTryGet(newRoot()) { root =>
+      val empty = ArrowColumnarBatchRow.empty(root)
+      val answer = ArrowColumnarBatchRowUtils.take(Iterator(empty))
+      assertResult(0)(answer._2.length)
+    }
   }
 
   test("ArrowColumnarBatchRowUtils::take() single singleton batch") {

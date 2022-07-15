@@ -28,9 +28,9 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   private var partitionsIdx: Int = _
   private var thisPartitions: String = _
   // FIXME: For now, we assume that we won't return too early, and that sortedBatch will be consumed by caller
-  private var sortedIdx: Int = _
-  private val sortedBatch: ArrowColumnarBatchRow = ArrowColumnarBatchRow.empty()
-  private var thisSorted: String = _
+//  private var sortedIdx: Int = _
+//  private val sortedBatch: ArrowColumnarBatchRow = ArrowColumnarBatchRow.empty()
+//  private var thisSorted: String = _
 
   override protected def doProduce(ctx: CodegenContext): String = {
     val needToSort =
@@ -41,8 +41,8 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val orders = ctx.addReferenceObj("sortOrder", sortOrder)
     partitionsIdx = ctx.references.length
     thisPartitions = ctx.addReferenceObj("partitions", partitions)
-    sortedIdx = ctx.references.length
-    thisSorted = ctx.addReferenceObj("sortedBatch", sortedBatch)
+//    sortedIdx = ctx.references.length
+//    thisSorted = ctx.addReferenceObj("sortedBatch", sortedBatch)
 
     val batch = ctx.addMutableState(classOf[ArrowColumnarBatchRow].getName, "batch", forceInline = true)
     val newBatch = ctx.freshName("newBatch")
@@ -76,10 +76,9 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  } else {
        |    $newBatch = $staticSorter.multiColumnSort($batch, $orders);
        |  }
-       |  references[$sortedIdx] = $newBatch;
        |
        |  $needToSort = false;
-       |  ${consume(ctx, null, thisSorted)}
+       |  ${consume(ctx, null, newBatch)}
        | }
        |
        |

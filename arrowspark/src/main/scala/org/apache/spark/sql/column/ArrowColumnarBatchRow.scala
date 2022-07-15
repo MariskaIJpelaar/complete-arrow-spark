@@ -1,11 +1,11 @@
 package org.apache.spark.sql.column
 
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.ValueVector
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
-import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ArrowColumnarArray, ColumnarArray}
@@ -71,9 +71,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
    * Caller is responsible for both this batch and copied-batch */
   def copyToAllocator(newAllocator: BufferAllocator, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
     if (range.isEmpty) {
-      // TODO: pass newAllocator to empty?
-      newAllocator.close()
-      return ArrowColumnarBatchRow.empty()
+      return ArrowColumnarBatchRow.empty(newAllocator)
     }
 
     // copy of the whole column
@@ -190,8 +188,8 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
 
 object ArrowColumnarBatchRow {
   /** Creates an empty ArrowColumnarBatchRow */
-  def empty(): ArrowColumnarBatchRow =
-    new ArrowColumnarBatchRow(newRoot(), Array.empty, 0)
+  def empty(parent: BufferAllocator): ArrowColumnarBatchRow =
+    new ArrowColumnarBatchRow(createAllocator(parent, "ArrowColumnarBatchRow::empty"), Array.empty, 0)
 
 
   /** Creates a fresh ArrowColumnarBatchRow from an iterator of ArrowColumnarBatchRows
@@ -207,12 +205,12 @@ object ArrowColumnarBatchRow {
    * Transfers the vectors to a new-allocator with given name
    * Closes the vector afterwards
    * Caller is responsible for closing the generated batch */
-  def create(name: String, cols: Array[ValueVector]): ArrowColumnarBatchRow = {
+  def transfer(root: RootAllocator, name: String, cols: Array[ValueVector]): ArrowColumnarBatchRow = {
     Resources.autoCloseArrayTryGet(cols) { cols =>
       if (cols.isEmpty)
-        return ArrowColumnarBatchRow.empty()
+        return ArrowColumnarBatchRow.empty(root)
 
-      val allocator = createAllocator(cols(0).getAllocator.getRoot, name)
+      val allocator = createAllocator(root, name)
       val size = cols(0).getValueCount
       val newCols = cols map { vector =>
         val tp = vector.getTransferPair(createAllocator(allocator, vector.getName))

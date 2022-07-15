@@ -65,6 +65,17 @@ object ArrowRDD {
         iter.map(item => cleanF(rootAllocator, item)) )
     }
 
+  /** Return a new RDD by applying a function to each partition of this RDD, while tracking the index of the original partition.
+  preservesPartitioning indicates whether the input function preserves the partitioner,
+  which should be false unless this is a pair RDD and the input function doesn't modify the keys.
+   Inspired from: org.apache.spark.rdd.RDD:mapPartitionsWithIndex*/
+  def mapPartitionsWithIndex[U: ClassTag, T: ClassTag](
+      rdd: RDD[T], f: (Int, RootAllocator, Iterator[T]) => Iterator[U], preservePartitioning: Boolean = false): RDD[U] =
+    RDDOperationScope.withScope(rdd.sparkContext) {
+      new ArrowMapPartitionsRDD(rdd,
+        (_, index, rootAllocator, iter: Iterator[T]) => f(index, rootAllocator, iter), preservePartitioning)
+    }
+
   /** Returns a local iterator for each partition
    * Caller should cose batches in the returned iterator */
   def toLocalIterator(rdd: RDD[ArrowColumnarBatchRow], rootAllocator: Option[RootAllocator] = None): Iterator[ArrowColumnarBatchRow] = {
