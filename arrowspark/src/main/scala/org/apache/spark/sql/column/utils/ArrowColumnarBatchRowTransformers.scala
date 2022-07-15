@@ -39,13 +39,30 @@ object ArrowColumnarBatchRowTransformers {
    */
   def take(batch: ArrowColumnarBatchRow, range: Range): ArrowColumnarBatchRow = {
     Resources.autoCloseTryGet(batch) { batch =>
-      val batchAllocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowTransformers::take()")
-      new ArrowColumnarBatchRow(batchAllocator, batch.columns map ( column => {
-        val vector = column.getValueVector
-        val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
-        tp.splitAndTransfer(range.head, range.length)
-        new ArrowColumnVector(tp.getTo)
-      }), range.length)
+      // first we transfer our subset to the RootAllocator
+      // but only if we require a strict subset
+      val root = batch.allocator.getRoot
+      val subset =
+        if (range.length == batch.numRows) {
+          batch.columns
+        } else {
+          batch.columns.map { column =>
+            val vector = column.getValueVector
+            val tp = vector.getTransferPair(root)
+            tp.splitAndTransfer(range.head, range.length)
+            new ArrowColumnVector(tp.getTo)
+          }
+        }
+      Resources.autoCloseArrayTryGet(subset) { subset =>
+        // then we copy this subset to the allocator
+        val batchAllocator = createAllocator(root, "ArrowColumnarBatchRowTransformers::take()")
+        new ArrowColumnarBatchRow(batchAllocator, subset map ( column => {
+          val vector = column.getValueVector
+          val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
+          tp.splitAndTransfer(0, vector.getValueCount)
+          new ArrowColumnVector(tp.getTo)
+        }), range.length)
+      }
     }
   }
 

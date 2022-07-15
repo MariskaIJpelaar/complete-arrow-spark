@@ -76,12 +76,35 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
       return ArrowColumnarBatchRow.empty()
     }
 
-    new ArrowColumnarBatchRow(newAllocator, columns map { v =>
-      val vector = v.getValueVector
-      val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
+    // copy of the whole column
+    if (range.length == numRows) {
+      return new ArrowColumnarBatchRow(newAllocator, columns map { v =>
+        val vector = v.getValueVector
+        val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
+        tp.splitAndTransfer(0, vector.getValueCount)
+        new ArrowColumnVector(tp.getTo)
+      }, range.length)
+    }
+
+    // if we are a strict subset of the batch,
+    // then we first transfer this subset to the RootAllocator
+    val root = newAllocator.getRoot
+    val subset = columns map { column =>
+      val vector = column.getValueVector
+      val tp = vector.getTransferPair(root)
       tp.splitAndTransfer(range.head, range.length)
       new ArrowColumnVector(tp.getTo)
-    }, range.length)
+    }
+
+    // then we copy to the fresh batch
+    Resources.autoCloseArrayTryGet(subset) { subset =>
+      new ArrowColumnarBatchRow(newAllocator, subset map { v =>
+        val vector = v.getValueVector
+        val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
+        tp.splitAndTransfer(0, vector.getValueCount)
+        new ArrowColumnVector(tp.getTo)
+      }, range.length)
+    }
   }
 
   /**
