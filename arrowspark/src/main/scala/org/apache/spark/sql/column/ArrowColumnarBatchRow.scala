@@ -109,7 +109,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
           println("---------------------DEBUG-----------------------")
           println(childAllocator.getParentAllocator.toVerboseString)
           println("-------------------------------------------------")
-          throw e
+          println("----------Note: we ignore this error-------------")
       }
 //      if (childAllocator.getAllocatedMemory != 0)
 //        childAllocator.releaseBytes(childAllocator.getAllocatedMemory)
