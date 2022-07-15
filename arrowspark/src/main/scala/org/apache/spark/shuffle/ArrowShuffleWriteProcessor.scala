@@ -28,7 +28,6 @@ private[spark] class ArrowShuffleWriteProcessor extends ShuffleWriteProcessor {
       context: TaskContext,
       partition: Partition): MapStatus = {
 
-    // TODO: do we need to close our serializer here somewhere?
     var writer: ShuffleWriter[Any, Any] = null
     try {
       val manager = SparkEnv.get.shuffleManager

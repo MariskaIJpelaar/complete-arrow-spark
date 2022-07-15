@@ -81,7 +81,6 @@ class ShuffledArrowColumnarBatchRowRDD(
 
   // Caller is responsible for closing batches in iterator
   override def compute(split: ArrowPartition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = {
-    // TODO: attach allocator to deserializer!
     val tempMetrics = context.taskMetrics().createTempShuffleReadMetrics()
     // `SQLShuffleReadMetricsReporter` will update its own metrics for SQL exchange operator,
     // as well as the `tempMetrics` for basic shuffle metrics.

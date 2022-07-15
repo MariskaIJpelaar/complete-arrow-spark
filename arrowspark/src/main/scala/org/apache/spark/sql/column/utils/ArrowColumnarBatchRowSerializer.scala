@@ -171,9 +171,15 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
           val batchAllocator = createAllocator(allocator, "ArrowColumnarBatchRowSerializer::getNext")
           val length = ois.get.readInt()
           (0, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
-            val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
-            tp.splitAndTransfer(0, vector.getValueCount)
-            new ArrowColumnVector(tp.getTo)
+            // first, we transfer to root
+            val rootTp = vector.getTransferPair(allocator)
+            rootTp.transfer()
+            Resources.autoCloseTryGet(rootTp.getTo) { newVec =>
+              // then, we splitAndTransfer to getNext-allocator
+              val tp = newVec.getTransferPair(createAllocator(batchAllocator, newVec.getName))
+              tp.splitAndTransfer(0, newVec.getValueCount)
+              new ArrowColumnVector(tp.getTo)
+            }
           }).toArray, length))
         }
       }
