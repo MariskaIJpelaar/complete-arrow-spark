@@ -105,7 +105,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
       try {
         childAllocator.close()
       } catch {
-        case e: Throwable =>
+        case _: Throwable =>
           println("---------------------DEBUG-----------------------")
           println(childAllocator.getParentAllocator.toVerboseString)
           println("-------------------------------------------------")
