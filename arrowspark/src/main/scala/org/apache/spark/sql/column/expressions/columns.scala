@@ -9,6 +9,7 @@ import org.apache.spark.sql.vectorized.ArrowColumnarArray
 import scala.reflect.ClassTag.Nothing
 
 
+// TODO: check if all usages clean ArrowColumnarArray
 class GenericColumn(protected[sql] val values: Array[Any]) extends TColumn {
   /** No-arg constructor for serialization */
   protected def this() = this(new Array[Any](0))
