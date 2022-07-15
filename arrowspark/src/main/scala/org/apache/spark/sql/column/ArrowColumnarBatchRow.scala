@@ -115,7 +115,15 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
 //        childAllocator.releaseBytes(childAllocator.getAllocatedMemory)
 //      childAllocator.close()
     }
-    allocator.close()
+    try {
+      allocator.close()
+    } catch {
+      case _: Throwable =>
+        println("---------------------DEBUG-----------------------")
+        println(allocator.getParentAllocator.toVerboseString)
+        println("-------------------------------------------------")
+        println("----------Note: we ignore this error-------------")
+    }
   }
 
   def getSizeInBytes: Int = columns.map(column => column.getValueVector.getBufferSize ).sum
