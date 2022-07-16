@@ -69,8 +69,8 @@ object EvaluationSuite {
         .loadDF(dir.path)
     val cCols = cdf.columns
     assert(cCols.length > 0)
-    val sorted_cdf = cdf
-//    val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
+//    val sorted_cdf = cdf
+    val sorted_cdf = if (cCols.length == 1) cdf.sort(cCols(0)) else cdf.sort(cCols(0), cCols(1))
     val cas_start = System.nanoTime()
     val arrowRDD = sorted_cdf.queryExecution.executedPlan.execute()
     val arrowFunc: Iterator[InternalRow] => Int = { case iter: Iterator[ArrowColumnarBatchRow] =>

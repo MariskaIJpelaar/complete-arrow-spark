@@ -6,6 +6,7 @@ import org.apache.spark.rdd.{RDD, RDDOperationScope}
 import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowUtils}
+import org.apache.spark.sql.execution.datasources.ArrowFilePartition
 import org.apache.spark.{ArrowPartition, Partition, TaskContext}
 
 import scala.collection.mutable.ArrayBuffer
@@ -27,6 +28,7 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
     case arrowPartition: ArrowPartition => {
       context.addTaskCompletionListener[Unit]( _ =>
         try {
+//          println(s"close: ${arrowPartition.asInstanceOf[ArrowFilePartition].filePartition.files.map(file => file.toString()).mkString("Array(", ", ", ")")}")
           arrowPartition.allocator.close()
         } catch {
           case e: Throwable =>
@@ -37,6 +39,7 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
         }
 
       )
+//      println(s"compute: ${arrowPartition.asInstanceOf[ArrowFilePartition].filePartition.files.map(file => file.toString()).mkString("Array(", ", ", ")")}")
       compute(arrowPartition, context)
     }
     case _ => throw new IllegalArgumentException(s"ArrowRDD can only accept ArrowPartitions, not ${split.getClass.getName}")

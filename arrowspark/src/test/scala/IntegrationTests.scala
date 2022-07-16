@@ -461,6 +461,7 @@ class IntegrationTests extends AnyFunSuite {
 
     // Perform ColumnarSort
     val new_df = df.sort("numA", "numB")
+//    val new_df = df
 
     val rdd = new_df.queryExecution.executedPlan.execute()
     val func: Iterator[InternalRow] => Int = { case iter: Iterator[ArrowColumnarBatchRow] =>
