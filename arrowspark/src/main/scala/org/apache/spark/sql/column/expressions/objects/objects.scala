@@ -1,11 +1,12 @@
 package org.apache.spark.sql.column.expressions.objects
 
+import nl.liacs.mijpelaar.utils.Resources
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.Block.BlockHelper
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, FalseLiteral}
 import org.apache.spark.sql.catalyst.expressions.{Expression, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.column.expressions.{GenericColumn, GenericColumnBatch}
-import org.apache.spark.sql.column.{ColumnBatch, TColumn}
+import org.apache.spark.sql.column.{ArrowColumnarBatchRow, ColumnBatch, TColumn}
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.types.{DataType, ObjectType}
 
@@ -15,9 +16,10 @@ case class CreateExternalColumn(child: Expression) extends UnaryExpression with 
 
   override def nullable: Boolean = false
 
-  override def eval(input: InternalRow): Any = {
-    val values = children.map(_.eval(input)).toArray
-    new GenericColumn(values)
+  override def eval(input: InternalRow): Any = input match {
+    case batch: ArrowColumnarBatchRow =>
+      val values = children.map(_.eval(batch)).toArray
+      new GenericColumn(values)
   }
 
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
@@ -65,15 +67,20 @@ case class CreateExternalColumnBatch(children: Seq[Expression]) extends Expressi
 
   override def nullable: Boolean = false
 
-  override def eval(input: InternalRow): Any = {
-    val values = children.map(_.eval(input)).toArray.asInstanceOf[Array[TColumn]]
-    new GenericColumnBatch(values)
+  override def eval(input: InternalRow): Any = input match {
+    case batch: ArrowColumnarBatchRow =>
+      Resources.autoCloseTryGet(batch) { batch =>
+        val values = children.map(_.eval(batch)).toArray.asInstanceOf[Array[TColumn]]
+        new GenericColumnBatch(values)
+      }
   }
 
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
     val columnBatchClass = classOf[GenericColumnBatch].getName
     val columnClass = classOf[TColumn].getName
     val values = ctx.freshName("values")
+
+    assert(ctx.INPUT_ROW != null)
 
     val childrenCodes = children.zipWithIndex.map { case (e, i) =>
       val eval = e.genCode(ctx)
@@ -92,11 +99,13 @@ case class CreateExternalColumnBatch(children: Seq[Expression]) extends Expressi
       funcName = "createExternalColumnBatch",
       extraArguments = "Object[]" -> values :: Nil)
 
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
     val code =
       code"""
             |$columnClass[] $values = new $columnClass[${children.size}];
             |$childrenCode
             |final ${classOf[ColumnBatch].getName} ${ev.value} = new $columnBatchClass($values);
+            |(($batchClass)${ctx.INPUT_ROW}).close();
        """.stripMargin
 
     ev.copy(code = code, isNull = FalseLiteral)
