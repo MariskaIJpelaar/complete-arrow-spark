@@ -18,7 +18,19 @@ Its Main class can be used for evaluations.
 
 > Note: currently, we are still in the evaluation-stage, meaning that the main class is still under development
 > Note: tests in the test-directory pass, unless we run them through mvn package...
- 
+
+### Dependencies
+ArrowSpark needs `libarrow_dataset_jni.so` to successfully read in Parquet files to the in-memory Arrow-format. 
+This library can be retrieved after building Apache Arrow. For this, you require: 
+`gcc, CMake, make or ninja, at least 1GB RAM`
+
+Then, clone the Arrow repository using:
+```bash
+git clone https://github.com/apache/arrow.git
+```
+And navigate to `arrow/cpp`
+
+
 ### Usage
 Build the jar with dependencies with
 ```bash
