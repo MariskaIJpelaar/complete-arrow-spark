@@ -14,6 +14,7 @@ import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.parquet.io.api.{GroupConverter, PrimitiveConverter}
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName
+import org.apache.spark.TaskContext
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.datasources.PartitionedFile
@@ -26,20 +27,10 @@ import scala.collection.JavaConverters.asScalaBufferConverter
  * Note: according to https://arrow.apache.org/docs/java/memory.html#bufferallocator,
  * each application should "create one RootAllocator at the start of the program,
  * and use it through the BufferAllocator interface"
- * So, we ask the caller for it
+ * So, we ask the caller for it.
  * Implementation of the Iterator is according to the ParquetToArrowConverter,
  * this converter in turn is according to:
  * https://gist.github.com/animeshtrivedi/76de64f9dab1453958e1d4f8eca1605f */
-private class DumpConverter extends PrimitiveConverter {
-  final override def asGroupConverter = new DumpGroupConverter
-}
-
-private class DumpGroupConverter extends GroupConverter {
-  final def start(): Unit = {}
-  final def end(): Unit = {}
-  final def getConverter(fieldIndex: Int) = new DumpConverter
-}
-
 // FIXME: if we ask only for one row, then it still reads in the whole partition. Perhaps we could prevent this in any way?
 class ParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] {
   if (file.length > Integer.MAX_VALUE)
@@ -47,13 +38,17 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
 
 
   /** with help from: https://blog.actorsfit.com/a?ID=01000-cf624b9b-13ce-4228-9acb-29b722aec266 */
-  private lazy val reader = {
-    // make sure the reader conforms to our limits :)
+  private lazy val reader = { //TODO: Read from arrow instead of parquet libs
+    // make sure the reader conforms to our limits
     val options = ParquetReadOptions.builder()
       .withMaxAllocationInBytes(Integer.MAX_VALUE)
       .withMetadataFilter(ParquetMetadataConverter.range(file.start, file.start+file.length)).build()
-    ParquetFileReader.open(HadoopInputFile.fromPath(new Path(file.filePath), new Configuration()), options)
+    val reader = ParquetFileReader.open(HadoopInputFile.fromPath(new Path(file.filePath), new Configuration()), options)
+    val tc = Option(TaskContext.get())
+    tc.getOrElse( throw new RuntimeException("Not in a Spark Context") ).addTaskCompletionListener[Unit](_ => reader.close())
+    reader
   }
+
   private var pageReadStore = reader.readNextRowGroup()
   private lazy val parquetSchema = reader.getFileMetaData.getSchema
   private lazy val schema: Schema = {
@@ -118,5 +113,16 @@ class ParquetReaderIterator(protected val file: PartitionedFile, protected val r
       }
     }
   }
+
+}
+
+private class DumpConverter extends PrimitiveConverter {
+  final override def asGroupConverter = new DumpGroupConverter
+}
+
+private class DumpGroupConverter extends GroupConverter {
+  final def start(): Unit = {}
+  final def end(): Unit = {}
+  final def getConverter(fieldIndex: Int) = new DumpConverter
 }
 

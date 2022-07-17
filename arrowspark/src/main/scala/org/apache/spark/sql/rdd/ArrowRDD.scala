@@ -6,7 +6,6 @@ import org.apache.spark.rdd.{RDD, RDDOperationScope}
 import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowUtils}
-import org.apache.spark.sql.execution.datasources.ArrowFilePartition
 import org.apache.spark.{ArrowPartition, Partition, TaskContext}
 
 import scala.collection.mutable.ArrayBuffer

@@ -37,6 +37,7 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
       sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType,
       requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String],
       hadoopConf: Configuration): (PartitionedFile, RootAllocator) => Iterator[ArrowColumnarBatchRow] = {
-    (file: PartitionedFile, root: RootAllocator) => { new ParquetReaderIterator(file, root)}
+    (file: PartitionedFile, root: RootAllocator) => {
+      new ParquetReaderIterator(file, root) }
   }
 }

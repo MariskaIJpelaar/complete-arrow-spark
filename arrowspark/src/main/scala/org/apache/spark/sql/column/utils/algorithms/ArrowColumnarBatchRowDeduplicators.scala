@@ -28,7 +28,7 @@ object ArrowColumnarBatchRowDeduplicators {
       Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(union) { union =>
         val comparator = ArrowColumnarBatchRowUtils.getComparator(union, sortOrders)
         Resources.autoCloseTryGet(createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowDeduplicator::indexVector")) { indexAllocator =>
-          ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(allocator, comparator, union))
+          ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(indexAllocator, comparator, union))
         }
       })
     }

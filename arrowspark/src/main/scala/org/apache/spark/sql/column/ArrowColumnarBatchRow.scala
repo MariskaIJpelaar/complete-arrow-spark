@@ -66,9 +66,11 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
     copyToAllocator(newAllocator, range)
   }
 
-  /** Uses slicing instead of complete copy,
+  /**
+   * Uses slicing instead of complete copy,
    * according to: https://arrow.apache.org/docs/java/vector.html#slicing
-   * Caller is responsible for both this batch and copied-batch */
+   * Caller is responsible for both this batch and copied-batch
+   */
   def copyToAllocator(newAllocator: BufferAllocator, range: Range = 0 until numRows): ArrowColumnarBatchRow = {
     if (range.isEmpty) {
       return ArrowColumnarBatchRow.empty(newAllocator)
@@ -121,7 +123,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
   override def close(): Unit = {
     columns foreach( column => column.close() )
     // TODO: tmp release-on-demand?
-    columns foreach{ column =>
+    columns foreach { column =>
       val childAllocator = column.getValueVector.getAllocator
       try {
         childAllocator.close()
