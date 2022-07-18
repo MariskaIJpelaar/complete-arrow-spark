@@ -22,6 +22,7 @@
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
     <maven.compiler.release>8</maven.compiler.release>
+<!--    <arrow.dataset.lib.folder>$basedir</arrow.dataset.lib.folder>-->
   </properties>
 
   <repositories>
@@ -166,6 +167,25 @@
   <!--  https://stackoverflow.com/questions/24448582/my-mixed-scala-java-maven-project-doesnt-compile-->
   <build>
     <plugins>
+<!--      &lt;!&ndash;   verify properties, source: https://stackoverflow.com/a/12389296 &ndash;&gt;-->
+<!--      <plugin>-->
+<!--        <groupId>org.apache.maven.plugins</groupId>-->
+<!--        <artifactId>maven-antrun-plugin</artifactId>-->
+<!--        <version>1.7</version>-->
+<!--        <executions>-->
+<!--          <execution>-->
+<!--            <phase>validate</phase>-->
+<!--            <goals>-->
+<!--              <goal>run</goal>-->
+<!--            </goals>-->
+<!--            <configuration>-->
+<!--              <tasks>-->
+<!--                <echoproperties />-->
+<!--              </tasks>-->
+<!--            </configuration>-->
+<!--          </execution>-->
+<!--        </executions>-->
+<!--      </plugin>-->
       <plugin>
         <!--    Plugin to build scala source files    -->
         <groupId>org.scala-tools</groupId>
@@ -244,6 +264,11 @@
               <goal>shade</goal>
             </goals>
             <configuration>
+<!--              <transformers>-->
+<!--                <transformer implementation="org.apache.maven.plugins.shade.resource.DontIncludeResourceTransformer">-->
+<!--                  <resource>.so</resource>-->
+<!--                </transformer>-->
+<!--              </transformers>-->
               <artifactSet>
                 <includes>
                   <include>info.picocli:picocli</include>
@@ -260,5 +285,15 @@
         </executions>
       </plugin>
     </plugins>
+    <!-- inspiration from arrow-dataset/pom.xml   -->
+    <resources>
+      <resource>
+        <!-- NOTE: should be relative to root of subproject-->
+        <directory>${arrow.dataset.lib.folder}</directory>
+        <includes>
+          <include>**/libarrow_dataset_jni.*</include>
+        </includes>
+      </resource>
+    </resources>
   </build>
 </project>

@@ -22,21 +22,20 @@ Its Main class can be used for evaluations.
 ### Dependencies
 ArrowSpark needs `libarrow_dataset_jni.so` to successfully read in Parquet files to the in-memory Arrow-format. 
 Arrow started to provide these files in their jar from a certain version onwards. 
-For Ubuntu 21.10, it is provided in the `arrow-dataset-6.0.1.jar`, so we have a dependency on that version. 
+The version in the jar `arrow-dataset-6.0.1.jar` is compatible with Ubuntu 21.10. 
+If your system is compatible as well, then this should go well automatically. 
+If not, you need to retrieve the right `libarrow_dataset_jni.so` (named specifically that)
 If your version is not supported, please check:
  - [Arrow-Install](https://arrow.apache.org/install/) to install Arrow manually
- - [JFrog-Arrow](https://apache.jfrog.io/ui/native/arrow/) to extract the right file (e.g. for centos: https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-dataset-libs-6.0.0-1.el8.x86_64.rpm)
+ - [Apache-JFrog-Arrow](https://apache.jfrog.io/ui/native/arrow/) to extract the right file (e.g. for centos8: https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-dataset-libs-6.0.1-1.el8.x86_64.rpm)
+If you got the right file, you can ship it with the jar by building with `-Darrow.dataset.lib.folder`.
+> NOTE: `-Darrow.dataset.lib.folder` should be relative to the subproject directory
 
 You can check that all library-dependencies are resolved using:
 ```bash
 ldd libarrow_dataset_jni.so
 ```
-
-In particular, you may want to use: 
-```bash
--Djava.library.path=path/to/lib1:path/to/lib2
-```
-and set `LD_LIBRARY_PATH` correctly
+You can set `LD_LIBRARY_PATH` if your libraries reside at a custom path.
 
 ### Usage
 Build the jar with dependencies with
