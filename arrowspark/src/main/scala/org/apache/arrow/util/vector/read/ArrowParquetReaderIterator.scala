@@ -15,20 +15,28 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.util
 import scala.collection.JavaConverters.asScalaBufferConverter
+import scala.collection.mutable.ArrayBuffer
+import scala.reflect.io.File
 
 /** inspired from: https://arrow.apache.org/cookbook/java/dataset.html#query-parquet-file */
-class ArrowParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] {
+class ArrowParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] with AutoCloseable {
   if (file.length > column.AllocationManager.perAllocatorSize)
     throw new RuntimeException("[ArrowParquetReaderIterator] Partition is too large")
 
+  private val closeables: ArrayBuffer[AutoCloseable] = ArrayBuffer.empty
+  def close(): Unit = {
+    closeables.foreach(_.close())
+  }
   private def scheduleClose[T <: AutoCloseable](closeables: T*): Unit = {
-    Option(TaskContext.get()).getOrElse(throw new RuntimeException("[ArrowParquetReaderIterator] Not in a Spark Context")).addTaskCompletionListener[Unit](_ => {
+    closeables.foreach(this.closeables.append(_))
+    Option(TaskContext.get()).foreach(_.addTaskCompletionListener[Unit](_ => {
       closeables.foreach(_.close())
-    })
+    }))
   }
 
   val scanner: Scanner = {
-    Resources.autoCloseTryGet(new FileSystemDatasetFactory(rootAllocator, NativeMemoryPool.getDefault, FileFormat.PARQUET, file.filePath)) { factory =>
+    val uri = File(file.filePath).toURI
+    Resources.autoCloseTryGet(new FileSystemDatasetFactory(rootAllocator, NativeMemoryPool.getDefault, FileFormat.PARQUET, uri.toString)) { factory =>
       val dataset = factory.finish()
       // TODO: make configurable?
       val scanner = dataset.newScan(new ScanOptions(Integer.MAX_VALUE))

@@ -1,5 +1,5 @@
 import nl.liacs.mijpelaar.utils.Resources
-import org.apache.arrow.util.vector.read.{ArrowParquetReaderIterator, ParquetReaderIterator}
+import org.apache.arrow.util.vector.read.ArrowParquetReaderIterator
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.execution.datasources.PartitionedFile
@@ -21,6 +21,7 @@ class ArrowParquetReaderTests extends AnyFunSuite {
           Resources.autoCloseTryGet(batch) { batch =>
             batch.numRows
           }).sum
+        iter.close()
       }
     }
     assert(true)
@@ -39,6 +40,7 @@ class ArrowParquetReaderTests extends AnyFunSuite {
             Resources.autoCloseTryGet(batch) { batch =>
               batch.numRows
             }).sum
+          iter.close()
         }
       }
 

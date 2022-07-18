@@ -21,13 +21,14 @@ Its Main class can be used for evaluations.
 
 ### Dependencies
 ArrowSpark needs `libarrow_dataset_jni.so` to successfully read in Parquet files to the in-memory Arrow-format. 
-Please check [Arrow-Install](https://arrow.apache.org/install/), or download packages manually from 
-[JFrog-Arrow](https://apache.jfrog.io/ui/native/arrow/), e.g. from 
-https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-dataset-libs-6.0.0-1.el8.x86_64.rpm
+It should be provided in the `arrow-dataset-6.0.1.jar`, but if not, please check the following sources to either 
+install arrow manually, or extract the right so file:
+ - [Arrow-Install](https://arrow.apache.org/install/)
+ - [JFrog-Arrow](https://apache.jfrog.io/ui/native/arrow/) (e.g. for centos: https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-dataset-libs-6.0.0-1.el8.x86_64.rpm)
 
-Make sure you set the arrow-build-flag properly:
+Check that all dependencies are resolved using (linux):
 ```bash
--Darrow.cpp.build.dir=path/to/arrow/libraries
+ldd libarrow_dataset_jni.so
 ```
 
 ### Usage
