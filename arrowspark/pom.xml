@@ -248,6 +248,10 @@
                 <includes>
                   <include>info.picocli:picocli</include>
                   <include>org.apache.arrow:arrow-algorithm</include>
+<!--                  <include>org.apache.arrow:arrow-vector</include>-->
+<!--                  <include>org.apache.arrow:arrow-memory-unsafe</include>-->
+<!--                  <include>org.apache.arrow:arrow-memory-netty</include>-->
+                  <include>org.apache.arrow:arrow-dataset</include>
                   <include>org.apache.parquet:parquet-arrow</include>
                 </includes>
               </artifactSet>
@@ -258,4 +262,3 @@
     </plugins>
   </build>
 </project>
-
