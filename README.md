@@ -31,6 +31,13 @@ Check that all dependencies are resolved using (linux):
 ldd libarrow_dataset_jni.so
 ```
 
+> Note: below is not verified to work yet
+
+In particular, you may want to use: 
+```bash
+-Djava.library.path=path/to/lib1:path/to/lib2
+```
+
 ### Usage
 Build the jar with dependencies with
 ```bash
