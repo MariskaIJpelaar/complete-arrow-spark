@@ -34,6 +34,8 @@ class ArrowParquetReaderIterator(protected val file: PartitionedFile, protected 
   }
 
   val scanner: Scanner = {
+    // TODO: tmp:
+    println(System.getProperty("java.library.path"))
     Resources.autoCloseTryGet(new FileSystemDatasetFactory(rootAllocator, NativeMemoryPool.getDefault, FileFormat.PARQUET, file.filePath)) { factory =>
       val dataset = factory.finish()
       // TODO: make configurable?
