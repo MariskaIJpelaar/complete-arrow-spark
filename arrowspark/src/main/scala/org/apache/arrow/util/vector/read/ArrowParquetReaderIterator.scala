@@ -16,7 +16,6 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 import java.util
 import scala.collection.JavaConverters.asScalaBufferConverter
 import scala.collection.mutable.ArrayBuffer
-import scala.reflect.io.File
 
 /** inspired from: https://arrow.apache.org/cookbook/java/dataset.html#query-parquet-file */
 class ArrowParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] with AutoCloseable {
@@ -35,8 +34,7 @@ class ArrowParquetReaderIterator(protected val file: PartitionedFile, protected 
   }
 
   val scanner: Scanner = {
-    val uri = File(file.filePath).toURI
-    Resources.autoCloseTryGet(new FileSystemDatasetFactory(rootAllocator, NativeMemoryPool.getDefault, FileFormat.PARQUET, uri.toString)) { factory =>
+    Resources.autoCloseTryGet(new FileSystemDatasetFactory(rootAllocator, NativeMemoryPool.getDefault, FileFormat.PARQUET, file.filePath)) { factory =>
       val dataset = factory.finish()
       // TODO: make configurable?
       val scanner = dataset.newScan(new ScanOptions(Integer.MAX_VALUE))

@@ -5,7 +5,7 @@ import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.execution.datasources.PartitionedFile
 import org.scalatest.funsuite.AnyFunSuite
 
-import scala.reflect.io.Directory
+import scala.reflect.io.{Directory, File}
 
 /** These tests can be used to monitor memory usage when reading in parquet files */
 class ArrowParquetReaderTests extends AnyFunSuite {
@@ -15,7 +15,7 @@ class ArrowParquetReaderTests extends AnyFunSuite {
 
     Resources.autoCloseTryGet(newRoot()) { root =>
       dir.files foreach { file =>
-        val partition = PartitionedFile(InternalRow.empty, file.path, 0, file.length)
+        val partition = PartitionedFile(InternalRow.empty, File(file.path).toURI.toString, 0, file.length)
         val iter = new ArrowParquetReaderIterator(partition, root)
         iter.map( batch =>
           Resources.autoCloseTryGet(batch) { batch =>
@@ -34,7 +34,7 @@ class ArrowParquetReaderTests extends AnyFunSuite {
     0 until numReads foreach { _ =>
       Resources.autoCloseTryGet(newRoot()) { root =>
         dir.files foreach { file =>
-          val partition = PartitionedFile(InternalRow.empty, file.path, 0, file.length)
+          val partition = PartitionedFile(InternalRow.empty, File(file.path).toURI.toString, 0, file.length)
           val iter = new ArrowParquetReaderIterator(partition, root)
           iter.map( batch =>
             Resources.autoCloseTryGet(batch) { batch =>

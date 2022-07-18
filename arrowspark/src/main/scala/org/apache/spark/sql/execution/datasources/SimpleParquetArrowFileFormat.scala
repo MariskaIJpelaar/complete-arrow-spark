@@ -1,7 +1,7 @@
 package org.apache.spark.sql.execution.datasources
 
 import org.apache.arrow.memory.RootAllocator
-import org.apache.arrow.util.vector.read.ParquetReaderIterator
+import org.apache.arrow.util.vector.read.ArrowParquetReaderIterator
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce.Job
@@ -38,6 +38,6 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
       requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String],
       hadoopConf: Configuration): (PartitionedFile, RootAllocator) => Iterator[ArrowColumnarBatchRow] = {
     (file: PartitionedFile, root: RootAllocator) => {
-      new ParquetReaderIterator(file, root) }
+      new ArrowParquetReaderIterator(file, root) }
   }
 }
