@@ -50,7 +50,7 @@ git clone https://github.com/apache/arrow.git -b release-6.0.1
 2. Build
 ```bash
   cd arrow/cpp
-  cmake . -DARROW_PARQUET=ON -DARROW_DATASET=ON -DARROW_JNI=ON
+  cmake . -DARROW_PARQUET=ON -DARROW_DATASET=ON -DARROW_JNI=ON -DARROW_WITH_SNAPPY=ON
   sudo make install -j8
 ```
 > Note: if you run `make` without `sudo` then make fails at the end. However, it was still able to 
