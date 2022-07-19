@@ -27,6 +27,7 @@ If your system is compatible as well, then this should go well automatically.
 If not, you need to retrieve the right `libarrow_dataset_jni.so` (named specifically that)
 If your version is not supported, please check:
  - [Arrow-Install](https://arrow.apache.org/install/) to install Arrow manually
+ - [Arrow-Build](https://arrow.apache.org/docs/developers/cpp/building.html) to build Arrow manually
  - [Apache-JFrog-Arrow](https://apache.jfrog.io/ui/native/arrow/) to extract the right file (e.g. for centos8: https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-dataset-libs-6.0.1-1.el8.x86_64.rpm)
 If you got the right file, you can ship it with the jar by building with `-Darrow.dataset.lib.folder`.
 > NOTE: `-Darrow.dataset.lib.folder` should be relative to the subproject directory
