@@ -37,6 +37,20 @@ ldd libarrow_dataset_jni.so
 ```
 You can set `LD_LIBRARY_PATH` if your libraries reside at a custom path.
 
+#### Example -- DAS6
+> Note: description is not complete
+
+For the DAS6 system, I had to download the right rpm from [JFROG-dataset-rpm](https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-dataset-libs-6.0.1-1.el8.x86_64.rpm).
+I added this to the jar with the `-Darrow.dataset.lib.folder` option. 
+Then, I had to ensure the right libraries were available. For das-6, this was required for: `libparquet.so.600`, `libarrow.so.600` and `libre2.so.0`
+For this, I created a local_libs_dir in the home directory, which is available to all nodes. 
+In there, I downloaded the required rpms: 
+ 1. [libparquet.so.600](https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/parquet-libs-6.0.1-1.el8.x86_64.rpm)
+ 2. [libarrow.so.600](https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-libs-6.0.1-1.el8.x86_64.rpm)
+ 3. [libre2.so.0](https://download-ib01.fedoraproject.org/pub/epel/8/Everything/x86_64/Packages/r/re2-20190801-1.el8.x86_64.rpm)
+And 'unpacked' them through `rpm2cpio rpms/library.rpm | cpio -idv`.
+Finally, I prepended this local_lib_dir to `LD_LIBRARY_PATH`.
+
 ### Usage
 Build the jar with dependencies with
 ```bash
