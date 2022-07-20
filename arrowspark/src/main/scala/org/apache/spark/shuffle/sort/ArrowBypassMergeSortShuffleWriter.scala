@@ -150,9 +150,13 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
         (key, value) match {
           case (partitionIds: Array[Int], partition: ArrowColumnarBatchRow) =>
             try {
-              ArrowColumnarBatchRowDistributors.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
+              ArrowColumnarBatchRowDistributors.distributeBySort(partition.copyFromCaller("tmpWriter"), partitionIds, numPartitions) foreach { case (partitionId, batch) =>
                 Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
               }
+
+//              ArrowColumnarBatchRowDistributors.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
+//                Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
+//              }
             } finally {
               partition.close()
             }

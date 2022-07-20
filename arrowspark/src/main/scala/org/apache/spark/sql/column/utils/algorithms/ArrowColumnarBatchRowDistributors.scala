@@ -2,7 +2,7 @@ package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.search.BucketSearcher
-import org.apache.arrow.algorithm.sort.ExtendedIndexSorter
+import org.apache.arrow.algorithm.sort.{DefaultVectorComparators, ExtendedIndexSorter}
 import org.apache.arrow.vector.IntVector
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.AllocationManager.createAllocator
@@ -38,18 +38,45 @@ object ArrowColumnarBatchRowDistributors {
     })
   }
 
-  def distributeBySort(batch: ArrowColumnarBatchRow, partitionIds: Array[Int]): ArrowColumnarBatchRow = {
+  /**
+   * Distributes a batch to a mapping (partitionId, Batch), according to the provided Array of Ints
+   * @param batch [[ArrowColumnarBatchRow]] to distribute, and close
+   * @param partitionIds Array of Ints, which represent which index should go to which partition
+   * @param numPartitions Number of partitions to distribute on
+   *                      We assume for all ids in partitionIds: 0 <= id < numPartitions
+   *                      Additionally, we assume there exists at least one id for each partition in partitionIds
+   * @return [[Map]] mapping partitionIds ([[Int]]) to batches ([[ArrowColumnarBatchRow]])
+   */
+  def distributeBySort(batch: ArrowColumnarBatchRow, partitionIds: Array[Int], numPartitions: Int): Map[Int, ArrowColumnarBatchRow]  = {
     Resources.autoCloseTryGet(batch) { _ =>
-      Resources.autoCloseTryGet(new IntVector("ArrowColumnarBatchRowDistributors::partitionIds", batch.allocator)) { partitions =>
-        partitions.setInitialCapacity(batch.numRows)
-        partitions.allocateNew()
-        0 until batch.numRows foreach (index => partitions.set(index, partitionIds(index)))
-        partitions.setValueCount(batch.numRows)
+      Resources.autoCloseTryGet(createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distributeBySort::partitionIds")) { partitionAllocator =>
+        Resources.autoCloseTryGet(new IntVector("partitionIds", partitionAllocator)) { partitions =>
+          partitions.setInitialCapacity(batch.numRows)
+          partitions.allocateNew()
+          0 until batch.numRows foreach (index => partitions.set(index, partitionIds(index)))
+          partitions.setValueCount(batch.numRows)
 
-        // TODO:
-        val t1 = System.nanoTime()
-//        ExtendedIndexSorter.
-
+          // TODO: make sure tests pass
+          val t1 = System.nanoTime()
+          Resources.autoCloseTryGet(createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distributeBySort::indices")) { indexAllocator =>
+            val (indices, borders) = ExtendedIndexSorter.sortManyDuplicates(partitions, DefaultVectorComparators.createDefaultComparator(partitions), indexAllocator)
+            Resources.autoCloseTryGet(indices) { _ =>
+              Resources.autoCloseTryGet(ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)) { sorted =>
+                val distributed = mutable.Map[Int, ArrowColumnarBatchRow]()
+                0 until numPartitions foreach { partitionId =>
+                  val end = if (partitionId+1 >= borders.length) sorted.numRows else borders(partitionId+1)
+                  distributed(partitionId) = sorted
+                    .copyFromCaller(s"ArrowColumnarBatchRowDistributors::distributeBySort::copy::$partitionId",
+                      borders(partitionId) until end)
+                }
+                val t2 = System.nanoTime()
+                val time = (t2 - t1) / 1e9d
+                println("ArrowColumnarBatchRowDistributors::distributeBySort: %04.3f".format(time))
+                distributed.toMap
+              }
+            }
+          }
+        }
       }
     }
   }

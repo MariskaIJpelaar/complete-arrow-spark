@@ -1,23 +1,35 @@
 package org.apache.arrow.algorithm.sort
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{IntVector, ValueVector}
 
 import scala.collection.mutable
 
 object ExtendedIndexSorter {
-  def sortManyDuplicates[V <: ValueVector](vector: V, comparator: VectorValueComparator[V]): (IntVector, Seq[Int]) = {
+  /**
+   * Sorts a vector through a provided comparator, tailored at many duplicates
+   * @param vector [[ValueVector]] containing values to sort. We assume this vector contains many duplicates.
+   *               Otherwise, expect a performance bottleneck.
+   *               We do not close the vector
+   * @param comparator [[VectorValueComparator]] on which we attach the vector, to compare its values
+   * @param allocator [[BufferAllocator]] to allocate index-vector with
+   * @return A Tuple2 of [[IntVector]] and a sequence of Ints
+   *         The vector represents the permutation to create the sorted vector
+   *         The sequence represents the borders for the duplicate values
+   */
+  def sortManyDuplicates[V <: ValueVector](vector: V, comparator: VectorValueComparator[V], allocator: BufferAllocator): (IntVector, Seq[Int]) = {
     comparator.attachVector(vector)
-    Resources.closeOnFailGet(new IntVector("sortManyDuplicates::indices", vector.getAllocator)) { indices =>
+    Resources.closeOnFailGet(new IntVector("sortManyDuplicates::indices", allocator)) { indices =>
       indices.setInitialCapacity(vector.getValueCount)
       indices.allocateNew()
       0 until vector.getValueCount foreach (index => indices.set(index, index))
       indices.setValueCount(vector.getValueCount)
-      quickSort(indices, comparator)
+      quickSort(vector, indices, comparator)
     }
   }
 
-  private def quickSort[V <: ValueVector](indices: IntVector, comparator: VectorValueComparator[V]): (IntVector, Seq[Int] )= {
+  private def quickSort[V <: ValueVector](vector: V, indices: IntVector, comparator: VectorValueComparator[V]): (IntVector, Seq[Int]) = {
     val borders = mutable.SortedSet[Int]()
     Resources.autoCloseTryGet(new OffHeapIntStack(indices.getAllocator)) { rangeStack =>
       rangeStack.push(0)
@@ -28,24 +40,24 @@ object ExtendedIndexSorter {
         val low = rangeStack.pop()
 
         if (low < high) {
-          val (lt, gt) = threeWayPartition(low, high, indices, comparator)
-          borders += lt
-          borders += gt
+          val (lte, gte) = threeWayPartition(low, high, indices, comparator)
+          borders += lte
+          borders + gte
 
           // push the larger part to the stack first,
           // to reduce the required stack size
-          if (high - gt < lt - low) {
+          if (high - gte < lte - low) {
             rangeStack.push(low)
-            rangeStack.push(lt)
+            rangeStack.push(lte-1)
 
-            rangeStack.push(gt)
+            rangeStack.push(gte+1)
             rangeStack.push(high)
           } else {
-            rangeStack.push(gt)
+            rangeStack.push(gte+1)
             rangeStack.push(high)
 
             rangeStack.push(low)
-            rangeStack.push(lt)
+            rangeStack.push(lte-1)
           }
         }
       }
