@@ -2,7 +2,8 @@ package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.search.BucketSearcher
-import org.apache.arrow.vector.complex.MapVector
+import org.apache.arrow.algorithm.sort.ExtendedIndexSorter
+import org.apache.arrow.vector.IntVector
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -37,7 +38,21 @@ object ArrowColumnarBatchRowDistributors {
     })
   }
 
-  def distributeByMap(batch: ArrowColumnarBatchRow, partitionIds: Array[Int]): MapVector = ???
+  def distributeBySort(batch: ArrowColumnarBatchRow, partitionIds: Array[Int]): ArrowColumnarBatchRow = {
+    Resources.autoCloseTryGet(batch) { _ =>
+      Resources.autoCloseTryGet(new IntVector("ArrowColumnarBatchRowDistributors::partitionIds", batch.allocator)) { partitions =>
+        partitions.setInitialCapacity(batch.numRows)
+        partitions.allocateNew()
+        0 until batch.numRows foreach (index => partitions.set(index, partitionIds(index)))
+        partitions.setValueCount(batch.numRows)
+
+        // TODO:
+        val t1 = System.nanoTime()
+//        ExtendedIndexSorter.
+
+      }
+    }
+  }
 
   /**
    * @param key ArrowColumnarBatchRow to distribute and close
@@ -67,7 +82,7 @@ object ArrowColumnarBatchRowDistributors {
         distributed.foreach ( item => item._2.close() )
         val t2 = System.nanoTime()
         val time = (t2 - t1) / 1e9d
-        println("Distributor::distribute: %04.3f".format(time))
+        println("ArrowColumnarBatchRowDistributors::distribute: %04.3f\n".format(time))
       }
     }
   }
