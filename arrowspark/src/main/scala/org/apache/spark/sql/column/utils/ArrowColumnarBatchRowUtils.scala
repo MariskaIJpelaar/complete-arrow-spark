@@ -6,7 +6,7 @@ import org.apache.arrow.memory.{BufferAllocator, RootAllocator}
 import org.apache.arrow.vector.complex.UnionVector
 import org.apache.arrow.vector.{ValueVector, ZeroVector}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
-import org.apache.spark.sql.column.AllocationManager.{createAllocator, newRoot}
+import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
@@ -32,6 +32,8 @@ object ArrowColumnarBatchRowUtils {
     new SparkUnionComparator(comparators)
   }
 
+  var totalTime: Long = 0L
+
   /**
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
    * @param rootAllocator [[RootAllocator]] to allocate with
@@ -53,6 +55,7 @@ object ArrowColumnarBatchRowUtils {
   def take(rootAllocator: RootAllocator, batches: Iterator[Any], numCols: Option[Int] = None, numRows: Option[Int] = None,
            extraTaker: Any => (Any, ArrowColumnarBatchRow) = batch => (None, batch.asInstanceOf[ArrowColumnarBatchRow]),
            extraCollector: (Any, Option[Any]) => Any = (_: Any, _: Option[Any]) => None): (Any, Array[ArrowColumnVector], BufferAllocator) = {
+    val t1 = System.nanoTime()
     Resources.closeOnFailGet(createAllocator(rootAllocator, "ArrowColumnarBatchRowUtils::take")) { allocator =>
       if (!batches.hasNext) {
         if (numCols.isDefined)
@@ -77,6 +80,8 @@ object ArrowColumnarBatchRowUtils {
       } finally {
         /** clear up the remainder */
         batches.foreach( extraTaker(_)._2.close() )
+        val t2 = System.nanoTime()
+        totalTime += (t2 - t1)
       }
     }
   }

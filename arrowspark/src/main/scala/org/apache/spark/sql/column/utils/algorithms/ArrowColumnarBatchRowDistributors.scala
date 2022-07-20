@@ -2,6 +2,7 @@ package org.apache.spark.sql.column.utils.algorithms
 
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.search.BucketSearcher
+import org.apache.arrow.vector.complex.MapVector
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -36,6 +37,8 @@ object ArrowColumnarBatchRowDistributors {
     })
   }
 
+  def distributeByMap(batch: ArrowColumnarBatchRow, partitionIds: Array[Int]): MapVector = ???
+
   /**
    * @param key ArrowColumnarBatchRow to distribute and close
    * @param partitionIds Array containing which row corresponds to which partition
@@ -44,6 +47,7 @@ object ArrowColumnarBatchRowDistributors {
    * Caller should close the batches in the returned map
    */
   def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
+    val t1 = System.nanoTime()
     Resources.autoCloseTryGet(key) { key =>
       // FIXME: close builder if we return earlier than expected
       val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
@@ -61,6 +65,9 @@ object ArrowColumnarBatchRowDistributors {
           (items._1, items._2.build(createAllocator(key.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
       } finally {
         distributed.foreach ( item => item._2.close() )
+        val t2 = System.nanoTime()
+        val time = (t2 - t1) / 1e9d
+        println("Distributor::distribute: %04.3f".format(time))
       }
     }
   }

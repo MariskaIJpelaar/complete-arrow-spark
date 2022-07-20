@@ -442,7 +442,6 @@ class IntegrationTests extends AnyFunSuite {
     spark.sparkContext.runJob(rdd, func).sum
     assert(column.AllocationManager.isCleaned)
     column.AllocationManager.reset()
-
     directory.deleteRecursively()
   }
 

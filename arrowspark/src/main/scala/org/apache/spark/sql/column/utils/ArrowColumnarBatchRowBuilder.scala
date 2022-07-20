@@ -10,6 +10,9 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 import java.io.Closeable
 import scala.collection.immutable.NumericRange
 
+object ArrowColumnarBatchRowBuilder {
+  var totalTime: Long = 0L
+}
 
 /** Note: closes first, and copies data to RootAllocator
  * Caller should close after use */
@@ -19,10 +22,11 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
   def getRootAllocator: RootAllocator = rootAllocator
   protected val numBytes: Array[Long] = Array.tabulate(first.numFields) { _ => 0 }
   protected[column] val columns: Array[ArrowColumnVector] = {
+    val t1 = System.nanoTime()
     Resources.autoCloseTryGet(first) { first =>
       size = first.numRows.min(numRows.getOrElse(Integer.MAX_VALUE))
 
-      first.columns.slice(0, numCols.getOrElse(first.numFields)).zipWithIndex map[ArrowColumnVector, Array[ArrowColumnVector]] { case (column: ArrowColumnVector, colIndex: Int) =>
+      val ret = first.columns.slice(0, numCols.getOrElse(first.numFields)).zipWithIndex map[ArrowColumnVector, Array[ArrowColumnVector]] { case (column: ArrowColumnVector, colIndex: Int) =>
         val vector = column.getValueVector
         val tp = vector.getTransferPair(rootAllocator)
         // we copy type and size
@@ -43,6 +47,9 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
         // return an ArrowColumnVector of copied data
         new ArrowColumnVector(newVector)
       }
+      val t2 = System.nanoTime()
+      ArrowColumnarBatchRowBuilder.totalTime += (t2 - t1)
+      ret
     }
   }
 
@@ -82,6 +89,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
 
   /** Note: closes batch */
   def append(batch: ArrowColumnarBatchRow): ArrowColumnarBatchRowBuilder = {
+    val t1 = System.nanoTime()
     Resources.autoCloseTryGet(batch) { batch =>
       var current_size = 0
       // the columns we want
@@ -104,6 +112,8 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
 
       }
       size += current_size
+      val t2 = System.nanoTime()
+      ArrowColumnarBatchRowBuilder.totalTime += (t2 - t1)
       this
     }
   }
