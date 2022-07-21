@@ -77,6 +77,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
     // TODO: perhaps do https://en.wikipedia.org/wiki/Timsort ?
     // https://www.geeksforgeeks.org/timsort/
+    // spark uses it as well, source: https://databricks.com/blog/2014/10/10/spark-petabyte-sort.html
     val quickSort = getQuickSortFunc(ctx)
     val insertionSort = getInsertionSortFunc(ctx)
 
