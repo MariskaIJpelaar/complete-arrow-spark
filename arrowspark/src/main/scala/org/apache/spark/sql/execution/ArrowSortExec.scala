@@ -1,7 +1,9 @@
 package org.apache.spark.sql.execution
 
 import nl.liacs.mijpelaar.utils.Resources
+import org.apache.arrow.algorithm.sort.PublicOffHeapIntStack
 import org.apache.arrow.memory.RootAllocator
+import org.apache.arrow.vector.IntVector
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenerator, CodegenContext, ExprCode}
@@ -62,12 +64,17 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val col = ctx.freshName("col")
     val root = ctx.freshName("root")
     val builder = ctx.freshName("builder")
+    val indices = ctx.freshName("indices")
+    val index = ctx.freshName("index")
 
     val staticBatch = classOf[ArrowColumnarBatchRow].getName + "$.MODULE$"
     val staticSorter = ArrowColumnarBatchRowSorters.getClass.getName + ".MODULE$"
     val builderClass = classOf[ArrowColumnarBatchRowBuilder].getName
     val allocatorClass = classOf[RootAllocator].getName
     val staticManager = column.AllocationManager.getClass.getName + ".MODULE$"
+    val indicesClass = classOf[IntVector].getName
+
+    val quickSort = getQuickSortFunc(ctx)
 
     val code =
       s"""
@@ -80,6 +87,20 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  $builder.close();
        |  ${classOf[ArrowColumnarBatchRow].getName} $newBatch = null;
        |
+       |  long t1 = System.nanoTime();
+       |  try ($indicesClass $indices = new $indicesClass("indices", $staticManager.createAllocator($root, "IndicesAllocator"))) {
+       |    $indices.setInitialCapacity($batch.numRows);
+       |    $indices.allocateNew();
+       |    for (int $index = 0; $index < $batch.numRows; ++$index)
+       |      $indices.set($index, $index);
+       |    $indices.setValueCount($batch.numRows);
+       |    $quickSort($batch, $indices);
+       |  }
+       |  long t2 = System.nanoTime();
+       |  int time = (t2 - t1) / 1e9d;
+       |  System.out.print("ArrowSortExec::quickSort: " + time);
+       |
+       |  long t3 = System.nanoTime();
        |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
        |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());
        |    int $col = $thisPlan.attributeReferenceToCol($order);
@@ -87,6 +108,9 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  } else {
        |    $newBatch = $staticSorter.multiColumnSort($batch, $orders);
        |  }
+       |  long t4 = System.nanoTime();
+       |  int time2 = (t4 - t3) / 1e9d;
+       |  System.out.print("ArrowSortExec::arrowSort: " + time2);
        |
        |  $needToSort = false;
        |  ${consume(ctx, null, newBatch)}
@@ -141,21 +165,42 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   // Caller should close
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowSortExec = copy(child = newChild)
 
-
+  var quickSortFunc: Option[String] = None
+  private def getQuickSortFunc(ctx: CodegenContext): String = {
+    quickSortFunc.getOrElse {
+      val quickSort = ctx.freshName("quickSort")
+      val func = ctx.addNewFunction(quickSort, produceQuickSort(ctx, quickSort))
+      quickSortFunc = Option(func)
+      func
+    }
+  }
 
 
   /** modified from: org.apache.arrow.algorithm.sort.IndexSorter */
-  def produceQuickSort(ctx: CodegenContext, funcName: String, indices: String, batch: String): String = {
+  def produceQuickSort(ctx: CodegenContext, funcName: String): String = {
+    // local variables
     val rangeStack = ctx.freshName("rangeStack")
     val high = ctx.freshName("high")
     val low = ctx.freshName("low")
     val mid = ctx.freshName("mid")
 
-    // TODO:
+    // parameters
+    val indices = ctx.freshName("indices")
+    val batch = ctx.freshName("batch")
+
+    // types
+    val indicesClass = classOf[IntVector].getName
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
+    // Arrow does not give us access :(
+    val stackClass = classOf[PublicOffHeapIntStack].getName
+
+    // function names
+    val partition = getPartitionFunc(ctx)
+
     val code =
       s"""
-         | private void $funcName() {
-         |    try (OffHeapIntStack $rangeStack = new OffHeapIntStack($indices.getAllocator())) {
+         | private void $funcName($batchClass $batch, $indicesClass $indices) {
+         |    try ($stackClass $rangeStack = new $stackClass($indices.getAllocator())) {
          |      $rangeStack.push(0);
          |      $rangeStack.push($indices.getValueCount() - 1);
          |
@@ -164,8 +209,21 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          |        int $low = $rangeStack.pop();
          |
          |        if (low < high) {
+         |          int $mid = $partition($batch, $indices, $low, $high);
          |
+         |          if ($high - $mid < $mid - $low) {
+         |            $rangeStack.push($low);
+         |            $rangeStack.push($mid -1);
          |
+         |            $rangeStack.push($mid +1);
+         |            $rangeStack.push($high);
+         |          } else {
+         |            $rangeStack.push($mid +1);
+         |            $rangeStack.push($high);
+         |
+         |            $rangeStack.push($low);
+         |            $rangeStack.push($mid -1);
+         |          }
          |        }
          |      }
          |    }
@@ -175,49 +233,141 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     code
   }
 
-  def producePartition(ctx: CodegenContext, funcName: String, indices: String, batch: String): String = {
+  var partitionFunc: Option[String] = None
+  private def getPartitionFunc(ctx: CodegenContext): String = {
+    partitionFunc.getOrElse {
+      val partition = ctx.freshName("partition")
+      val func = ctx.addNewFunction(partition, producePartition(ctx, partition))
+      partitionFunc = Option(func)
+      func
+    }
+  }
+
+  def producePartition(ctx: CodegenContext, funcName: String): String = {
+    // parameters
     val low = ctx.freshName("low")
     val high = ctx.freshName("high")
+    val indices = ctx.freshName("indices")
+    val indicesClass = classOf[IntVector].getName
+    val batch = ctx.freshName("batch")
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
 
-    // TODO:
+    // function names
+    val compare = getCompareFunc(ctx)
+    val choosePivot = getChoosePivotFunc(ctx)
+
+    // local variables
+    val pivotIndex = ctx.freshName("pivotIndex")
+
     val code =
       s"""
-         | private int $funcName(int $low, int $high) {
+         | private int $funcName($batchClass $batch, $indicesClass $indices, int $low, int $high) {
+         |    int $pivotIndex = $choosePivot($batch, $indices, $low, $high);
          |
+         |    while ($low < $high) {
+         |      while ($low < $high && $compare($indices.get($high), $pivotIndex) >= 0) {
+         |        $high -= 1;
+         |      }
+         |      $indices.set($low, $indices.get($high));
+         |
+         |      while ($low < $high && $compare($indices.get($low), $pivotIndex) <= 0) {
+         |        $low += 1;
+         |      }
+         |      $indices.set($high, $indices.get($low));
+         |    }
+         |
+         |    $indices.set($low, $pivotIndex);
+         |    return $low;
          | }
          |""".stripMargin
     code
   }
 
-  def produceChoosePivot(ctx: CodegenContext, funcName: String, indices: String, batch: String): String = {
+  var choosePivotFunc: Option[String] = None
+  private def getChoosePivotFunc(ctx: CodegenContext): String = {
+    choosePivotFunc.getOrElse {
+      val choosePivot = ctx.freshName("choosePivot")
+      val func = ctx.addNewFunction(choosePivot, produceChoosePivot(ctx, choosePivot))
+      choosePivotFunc = Option(func)
+      func
+    }
+  }
+
+  def produceChoosePivot(ctx: CodegenContext, funcName: String): String = {
+    // local vars
     val low = ctx.freshName("low")
     val high = ctx.freshName("high")
     val mid = ctx.freshName("mid")
     val medianIdx = ctx.freshName("medianIdx")
+    val tmp = ctx.freshName("tmp")
+    val midHigh = ctx.freshName("midHigh")
+    val lowHigh = ctx.freshName("lowHigh")
 
+    // 'constant'
     val stopChoosingPivotThreshold = 3;
 
-    // TODO:
+    // parameters
+    val indices = ctx.freshName("indices")
+    val indicesClass = classOf[IntVector].getName
+    val batch = ctx.freshName("batch")
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
+
+    // function names
+    val compare = getCompareFunc(ctx)
+
     val code =
       s"""
-         | private int $funcName(int $low, int $high) {
-         |  if ($high - $low + 1 < ${stopChoosingPivotThreshold} {
+         | private int $funcName($batchClass $batch, $indicesClass $indices, int $low, int $high) {
+         |  if ($high - $low + 1 < ${stopChoosingPivotThreshold}) {
          |    return $indices.get($low);
          |  }
          |
          |  int $mid = $low + ($high - $low) / 2;
          |
+         |  int $midHigh = $compare($batch, $indices.get($mid), $indices.get($high));
+         |  int $lowHigh = $compare($batch, $indices.get($low), $indices.get($high));
+         |
          |  int $medianIdx;
+         |  if ($compare($batch, $indices.get($low), $indices.get($mid)) < 0) {
+         |    if ($midHigh < 0) {
+         |      $medianIdx = $mid;
+         |    } else {
+         |      $medianIdx = ($lowHigh < 0) ? $high : $low;
+         |    }
+         |  } else {
+         |    if ($midHigh > 0) {
+         |      $medianIdx = $mid;
+         |    } else {
+         |      $medianIdx = ($lowHigh < 0) ? $low : $high;
+         |    }
+         |  }
          |
-         |
+         |  if ($medianIdx == $low) return $indices.get($low);
+         |  int $tmp = $indices.get($medianIdx);
+         |  $indices.set($medianIdx, $indices.get($low));
+         |  $indices.set($low, $tmp);
+         |  return $tmp;
          | }
          |""".stripMargin
     code
   }
 
-  def produceCompare(ctx: CodegenContext, funcName: String, batch: String): String = {
+  var compareFunc: Option[String] = None
+  private def getCompareFunc(ctx: CodegenContext): String = {
+    compareFunc.getOrElse {
+      val compare = ctx.freshName("compare")
+      val func = ctx.addNewFunction(compare, produceCompare(ctx, compare))
+      compareFunc = Option(func)
+      func
+    }
+  }
+
+  def produceCompare(ctx: CodegenContext, funcName: String): String = {
     val index1 = ctx.freshName("index")
     val index2 = ctx.freshName("index")
+
+    val batch = ctx.freshName("batch")
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
 
     val comparators = sortOrder.map { order =>
       val col = attributeReferenceToCol(order)
@@ -245,7 +395,8 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
         case other => throw new RuntimeException(s"[ArrowSortExec] ${other.typeName} is not supported (yet)")
       }
 
-      val returnValue = if (order.isAscending) s"$compare" else s"-$compare"
+      compString += compare
+      val returnValue = if (order.isAscending) s"$comp" else s"-$comp"
       compString +=
         s"""
            | if ($comp != 0)
@@ -257,7 +408,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
     val code =
       s"""
-         | private int $funcName($index1, $index2) {
+         | private int $funcName($batchClass $batch, int $index1, int $index2) {
          |    ${comparators.mkString("\n")}
          |    return 0;
          | }
