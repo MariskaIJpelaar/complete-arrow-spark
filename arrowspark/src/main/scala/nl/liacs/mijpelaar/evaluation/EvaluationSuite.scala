@@ -64,12 +64,12 @@ object EvaluationSuite {
     spark.sparkContext.runJob(rdd, func).sum
     val n3 = System.nanoTime()
     val vanilla_stop = System.nanoTime()
-    fw.write("Vanilla compute: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
-    fw.flush()
-
     val readingTimeVan = (n2 - n1) / 1e9d
     val sortingTimeVan = (n3 - n2) / 1e9d
-//    println("Vanilla: reading: %04.3f, sorting: %04.3f".format(readingTimeVan, sortingTimeVan))
+    fw.write("Vanilla stage 1: %04.3f\n".format(readingTimeVan))
+    fw.write("Vanilla stage 2: %04.3f\n".format(sortingTimeVan))
+    fw.write("Vanilla total: %04.3f\n".format((vanilla_stop-vanilla_start)/1e9d))
+    fw.flush()
 
     val cdf: ColumnDataFrame =
       new ColumnDataFrameReader(spark).format("org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat")
@@ -94,13 +94,12 @@ object EvaluationSuite {
     spark.sparkContext.runJob(arrowRDD, arrowFunc).sum
     val t3 = System.nanoTime()
     val cas_stop = System.nanoTime()
-    fw.write("CAS compute: %04.3f\n".format((cas_stop-cas_start)/1e9d))
-    fw.flush()
-
-
     val readingTime = (t2 - t1) / 1e9d
     val sortingTime = (t3 - t2) / 1e9d
-//    println("CAS: reading: %04.3f, sorting: %04.3f".format(readingTime, sortingTime))
+    fw.write("CAS stage 1: %04.3f\n".format(readingTime))
+    fw.write("CAS stage 2: %04.3f\n".format(sortingTime))
+    fw.write("CAS total: %04.3f\n".format((cas_stop-cas_start)/1e9d))
+    fw.flush()
   }
 
 
