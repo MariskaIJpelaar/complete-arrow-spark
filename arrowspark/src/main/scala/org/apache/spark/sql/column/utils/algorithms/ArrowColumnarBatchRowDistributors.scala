@@ -56,18 +56,18 @@ object ArrowColumnarBatchRowDistributors {
           0 until batch.numRows foreach (index => partitions.set(index, partitionIds(index)))
           partitions.setValueCount(batch.numRows)
 
-          // TODO: make sure tests pass
           val t1 = System.nanoTime()
           Resources.autoCloseTryGet(createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distributeBySort::indices")) { indexAllocator =>
             val (indices, borders) = ExtendedIndexSorter.sortManyDuplicates(partitions, DefaultVectorComparators.createDefaultComparator(partitions), indexAllocator)
             Resources.autoCloseTryGet(indices) { _ =>
               Resources.autoCloseTryGet(ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)) { sorted =>
                 val distributed = mutable.Map[Int, ArrowColumnarBatchRow]()
+                var start = 0
                 0 until numPartitions foreach { partitionId =>
-                  val end = if (partitionId+1 >= borders.length) sorted.numRows else borders(partitionId+1)
                   distributed(partitionId) = sorted
                     .copyFromCaller(s"ArrowColumnarBatchRowDistributors::distributeBySort::copy::$partitionId",
-                      borders(partitionId) until end)
+                      start to borders(partitionId))
+                  start = borders(partitionId) + 1
                 }
                 val t2 = System.nanoTime()
                 val time = (t2 - t1) / 1e9d
