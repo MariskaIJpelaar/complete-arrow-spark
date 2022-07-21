@@ -10,7 +10,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenerator, Codegen
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, NullsFirst, SortOrder}
 import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowBuilder
+import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowSorters
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.types.{ArrayType, IntegerType}
@@ -73,8 +73,12 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val allocatorClass = classOf[RootAllocator].getName
     val staticManager = column.AllocationManager.getClass.getName + ".MODULE$"
     val indicesClass = classOf[IntVector].getName
+    val staticTransformers = ArrowColumnarBatchRowTransformers.getClass.getName + ".MODULE$"
 
+    // TODO: perhaps do https://en.wikipedia.org/wiki/Timsort ?
+    // https://www.geeksforgeeks.org/timsort/
     val quickSort = getQuickSortFunc(ctx)
+    val insertionSort = getInsertionSortFunc(ctx)
 
     val code =
       s"""
@@ -88,17 +92,27 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  ${classOf[ArrowColumnarBatchRow].getName} $newBatch = null;
        |
        |  long t1 = System.nanoTime();
-       |  try ($indicesClass $indices = new $indicesClass("indices", $staticManager.createAllocator($root, "IndicesAllocator"))) {
-       |    $indices.setInitialCapacity($batch.numRows);
+       |  $indicesClass $indices = new $indicesClass("indices", $staticManager.createAllocator($root, "IndicesAllocator"));
+       |  try {
+       |    $indices.setInitialCapacity($batch.length());
        |    $indices.allocateNew();
-       |    for (int $index = 0; $index < $batch.numRows; ++$index)
+       |    for (int $index = 0; $index < $batch.length(); ++$index)
        |      $indices.set($index, $index);
-       |    $indices.setValueCount($batch.numRows);
-       |    $quickSort($batch, $indices);
+       |    $indices.setValueCount($batch.length());
+       |    $insertionSort($batch, $indices);
+       |
+       |    $staticTransformers.applyIndices($batch.copy(), $indices).close();
+       |
+       |  } finally {
+       |    try {
+       |      $indices.close();
+       |    } catch (Exception e) {
+       |      e.printStackTrace();
+       |    }
        |  }
        |  long t2 = System.nanoTime();
-       |  int time = (t2 - t1) / 1e9d;
-       |  System.out.print("ArrowSortExec::quickSort: " + time);
+       |  double time = (t2 - t1) / 1e9d;
+       |  System.out.println(String.format("ArrowSortExec::ourSort: %04.3f", time));
        |
        |  long t3 = System.nanoTime();
        |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
@@ -109,8 +123,8 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |    $newBatch = $staticSorter.multiColumnSort($batch, $orders);
        |  }
        |  long t4 = System.nanoTime();
-       |  int time2 = (t4 - t3) / 1e9d;
-       |  System.out.print("ArrowSortExec::arrowSort: " + time2);
+       |  double time2 = (t4 - t3) / 1e9d;
+       |  System.out.println(String.format("ArrowSortExec::arrowSort: %04.3f", time2));
        |
        |  $needToSort = false;
        |  ${consume(ctx, null, newBatch)}
@@ -165,6 +179,53 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   // Caller should close
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowSortExec = copy(child = newChild)
 
+  var insertionSortFunc: Option[String] = None
+  private def getInsertionSortFunc(ctx: CodegenContext): String = {
+    insertionSortFunc.getOrElse {
+      val insertionSort = ctx.freshName("insertionSort")
+      val func = ctx.addNewFunction(insertionSort, produceQuickSort(ctx, insertionSort))
+      insertionSortFunc = Option(func)
+      func
+    }
+  }
+
+  /** from: org.apache.arrow.algorithm.sort.InsertionSorter */
+  def produceInsertionSort(ctx: CodegenContext, funcName: String): String = {
+    // parameters
+    val indices = ctx.freshName("indices")
+    val batch = ctx.freshName("batch")
+    val head = ctx.freshName("head")
+    val last = ctx.freshName("last")
+
+    // types
+    val indicesClass = classOf[IntVector].getName
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
+
+    // local variables
+    val index = ctx.freshName("index")
+    val key = ctx.freshName("key")
+    val index2 = ctx.freshName("index")
+
+    // function names
+    val compare = getCompareFunc(ctx)
+
+    val code =
+      s"""
+         | private void $funcName($batchClass $batch, $indicesClass $indices, int $head, int $last) {
+         |  for (int $index = $head+1; $index <= $last; ++$index) {
+         |    int $key = $indices.get($index);
+         |    int $index2 = $index - 1;
+         |    while ($index2 >= $head && $compare($indices.get($index2), $key) > 0) {
+         |      $indices.set($index2 + 1, $indices.get($index2));
+         |      $index2 = $index2 -1;
+         |    }
+         |    $indices.set($index2 + 1, $key);
+         |  }
+         | }
+         |""".stripMargin
+    code
+  }
+
   var quickSortFunc: Option[String] = None
   private def getQuickSortFunc(ctx: CodegenContext): String = {
     quickSortFunc.getOrElse {
@@ -200,7 +261,8 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val code =
       s"""
          | private void $funcName($batchClass $batch, $indicesClass $indices) {
-         |    try ($stackClass $rangeStack = new $stackClass($indices.getAllocator())) {
+         |    $stackClass $rangeStack = new $stackClass($indices.getAllocator());
+         |    try {
          |      $rangeStack.push(0);
          |      $rangeStack.push($indices.getValueCount() - 1);
          |
@@ -208,7 +270,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          |        int $high = $rangeStack.pop();
          |        int $low = $rangeStack.pop();
          |
-         |        if (low < high) {
+         |        if ($low < $high) {
          |          int $mid = $partition($batch, $indices, $low, $high);
          |
          |          if ($high - $mid < $mid - $low) {
@@ -226,6 +288,13 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          |          }
          |        }
          |      }
+         |    } finally {
+         |      try {
+         |        $rangeStack.close();
+         |      } catch(Exception e) {
+         |        e.printStackTrace();
+         |      }
+         |
          |    }
          | }
          |""".stripMargin
@@ -265,12 +334,12 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          |    int $pivotIndex = $choosePivot($batch, $indices, $low, $high);
          |
          |    while ($low < $high) {
-         |      while ($low < $high && $compare($indices.get($high), $pivotIndex) >= 0) {
+         |      while ($low < $high && $compare($batch, $indices.get($high), $pivotIndex) >= 0) {
          |        $high -= 1;
          |      }
          |      $indices.set($low, $indices.get($high));
          |
-         |      while ($low < $high && $compare($indices.get($low), $pivotIndex) <= 0) {
+         |      while ($low < $high && $compare($batch, $indices.get($low), $pivotIndex) <= 0) {
          |        $low += 1;
          |      }
          |      $indices.set($high, $indices.get($low));
@@ -373,7 +442,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
       val col = attributeReferenceToCol(order)
       val arrowColumnarArray = ctx.freshName("arrowColumnarArray")
       val arrowColumnarArrayType = classOf[ArrowColumnarArray].getName
-      var compString = s"$arrowColumnarArrayType $arrowColumnarArray = $batch.getArray($col);\n"
+      var compString = s"$arrowColumnarArrayType $arrowColumnarArray = ($arrowColumnarArrayType)($batch.getArray($col));\n"
 
       if (order.nullable) {
         val isNull1 = ctx.freshName("isNull")

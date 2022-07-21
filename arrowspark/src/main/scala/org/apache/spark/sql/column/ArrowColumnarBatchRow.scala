@@ -26,7 +26,7 @@ import java.io._
 class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transient protected[column] val columns: Array[ArrowColumnVector], val numRows: Int) extends InternalRow with Closeable {
   override def numFields: Int = columns.length
 
-  def length: Long = numRows
+  def length: Int = numRows
 
   override def isNullAt(ordinal: Int): Boolean = ordinal < 0 || ordinal >= numFields
 
