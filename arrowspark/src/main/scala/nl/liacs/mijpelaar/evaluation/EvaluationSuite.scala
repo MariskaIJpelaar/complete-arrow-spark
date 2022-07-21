@@ -3,7 +3,6 @@ package nl.liacs.mijpelaar.evaluation
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column._
-import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowUtils}
 
 import java.io.FileWriter
 import java.nio.file.Paths
@@ -70,7 +69,7 @@ object EvaluationSuite {
 
     val readingTimeVan = (n2 - n1) / 1e9d
     val sortingTimeVan = (n3 - n2) / 1e9d
-    println("reading: %04.3f, sorting: %04.3f\n".format(readingTimeVan, sortingTimeVan))
+//    println("Vanilla: reading: %04.3f, sorting: %04.3f".format(readingTimeVan, sortingTimeVan))
 
     val cdf: ColumnDataFrame =
       new ColumnDataFrameReader(spark).format("org.apache.spark.sql.execution.datasources.SimpleParquetArrowFileFormat")
@@ -101,12 +100,7 @@ object EvaluationSuite {
 
     val readingTime = (t2 - t1) / 1e9d
     val sortingTime = (t3 - t2) / 1e9d
-    println("reading: %04.3f, sorting: %04.3f\n".format(readingTime, sortingTime))
-
-    val building = ArrowColumnarBatchRowBuilder.totalTime / 1e9d
-    println("building: %04.3f".format(building))
-    val taking = ArrowColumnarBatchRowUtils.totalTime / 1e9d
-    println("taking: %04.3f".format(taking))
+//    println("CAS: reading: %04.3f, sorting: %04.3f".format(readingTime, sortingTime))
   }
 
 

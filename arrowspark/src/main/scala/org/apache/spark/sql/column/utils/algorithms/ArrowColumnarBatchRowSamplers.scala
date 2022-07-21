@@ -71,7 +71,6 @@ object ArrowColumnarBatchRowSamplers {
    */
   def sampleAndCount(rootAllocator: RootAllocator, input: Iterator[ArrowColumnarBatchRow], k: Int, seed: Long = Random.nextLong()):
   (ArrowColumnarBatchRow, Long) = {
-    val t1 = System.nanoTime()
     Resources.autoCloseTraversableTryGet(input) { input =>
       if (k < 1) return (ArrowColumnarBatchRow.empty(rootAllocator), 0)
 
@@ -126,9 +125,6 @@ object ArrowColumnarBatchRowSamplers {
         }
       } finally {
         remainderBatch.foreach(_.close())
-        val t2 = System.nanoTime()
-        val time = (t2 - t1) / 1e9d
-        println("Samplers::sampleAndCount: %04.3f".format(time))
       }
     }
   }

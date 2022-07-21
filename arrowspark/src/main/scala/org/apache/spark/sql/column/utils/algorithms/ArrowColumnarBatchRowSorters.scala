@@ -22,8 +22,6 @@ object ArrowColumnarBatchRowSorters {
     if (batch.numFields < 1)
       return batch
 
-    val t1 = System.nanoTime()
-
     Resources.autoCloseTryGet(batch) { batch =>
       // Indices for permutations
       Resources.autoCloseTryGet(new IntVector("indexHolder", batch.allocator.getRoot)) { indices =>
@@ -43,11 +41,7 @@ object ArrowColumnarBatchRowSorters {
           (new IndexSorter).sort(union, indices, comparator)
 
           /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
-          val ret = ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
-          val t2 = System.nanoTime()
-          val time = (t2 - t1) / 1e9d
-          println("Sorters::multiColumnSort: %04.3f".format(time))
-          ret
+          ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
         })
       }
     }

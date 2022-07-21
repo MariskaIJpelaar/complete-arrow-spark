@@ -45,18 +45,13 @@ object ArrowColumnarBatchRowDistributors {
    */
   def distributeBySort(batch: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow]  = {
     Resources.autoCloseTryGet(batch) { _ =>
-      val t1 = System.nanoTime()
       Resources.autoCloseTryGet(createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distributeBySort::indices")) { indexAllocator =>
         val (indices, borders) = IndexIntSorters.sortManyDuplicates(partitionIds, indexAllocator)
         Resources.autoCloseTryGet(indices) { _ =>
           Resources.autoCloseTryGet(ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)) { sorted =>
-            val distributed: Map[Int, ArrowColumnarBatchRow] = borders.map { case (partitionId, range) =>
+            borders.map { case (partitionId, range) =>
               (partitionId, sorted.copyFromCaller(s"ArrowColumnarBatchRowDistributors::distributeBySort::copy::$partitionId", range))
             }
-            val t2 = System.nanoTime()
-            val time = (t2 - t1) / 1e9d
-            println("ArrowColumnarBatchRowDistributors::distributeBySort: %04.3f".format(time))
-            distributed
           }
         }
       }
@@ -71,7 +66,6 @@ object ArrowColumnarBatchRowDistributors {
    * Caller should close the batches in the returned map
    */
   def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
-    val t1 = System.nanoTime()
     Resources.autoCloseTryGet(key) { key =>
       // FIXME: close builder if we return earlier than expected
       val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
@@ -89,9 +83,6 @@ object ArrowColumnarBatchRowDistributors {
           (items._1, items._2.build(createAllocator(key.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
       } finally {
         distributed.foreach ( item => item._2.close() )
-        val t2 = System.nanoTime()
-        val time = (t2 - t1) / 1e9d
-        println("ArrowColumnarBatchRowDistributors::distribute: %04.3f\n".format(time))
       }
     }
   }
