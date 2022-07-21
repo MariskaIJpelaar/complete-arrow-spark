@@ -5,12 +5,14 @@ import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenerator, CodegenContext, ExprCode}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, SortOrder}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, NullsFirst, SortOrder}
 import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowBuilder
 import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowSorters
 import org.apache.spark.sql.rdd.ArrowRDD
+import org.apache.spark.sql.types.{ArrayType, IntegerType}
+import org.apache.spark.sql.vectorized.ArrowColumnarArray
 
 /** copied and adapted from org.apache.spark.sql.execution.SortExec
  * Caller is responsible for closing returned batches from this plan */
@@ -138,4 +140,130 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
   // Caller should close
   override protected def withNewChildInternal(newChild: SparkPlan): ArrowSortExec = copy(child = newChild)
+
+
+
+
+  /** modified from: org.apache.arrow.algorithm.sort.IndexSorter */
+  def produceQuickSort(ctx: CodegenContext, funcName: String, indices: String, batch: String): String = {
+    val rangeStack = ctx.freshName("rangeStack")
+    val high = ctx.freshName("high")
+    val low = ctx.freshName("low")
+    val mid = ctx.freshName("mid")
+
+    // TODO:
+    val code =
+      s"""
+         | private void $funcName() {
+         |    try (OffHeapIntStack $rangeStack = new OffHeapIntStack($indices.getAllocator())) {
+         |      $rangeStack.push(0);
+         |      $rangeStack.push($indices.getValueCount() - 1);
+         |
+         |      while (!$rangeStack.isEmpty()) {
+         |        int $high = $rangeStack.pop();
+         |        int $low = $rangeStack.pop();
+         |
+         |        if (low < high) {
+         |
+         |
+         |        }
+         |      }
+         |    }
+         | }
+         |""".stripMargin
+
+    code
+  }
+
+  def producePartition(ctx: CodegenContext, funcName: String, indices: String, batch: String): String = {
+    val low = ctx.freshName("low")
+    val high = ctx.freshName("high")
+
+    // TODO:
+    val code =
+      s"""
+         | private int $funcName(int $low, int $high) {
+         |
+         | }
+         |""".stripMargin
+    code
+  }
+
+  def produceChoosePivot(ctx: CodegenContext, funcName: String, indices: String, batch: String): String = {
+    val low = ctx.freshName("low")
+    val high = ctx.freshName("high")
+    val mid = ctx.freshName("mid")
+    val medianIdx = ctx.freshName("medianIdx")
+
+    val stopChoosingPivotThreshold = 3;
+
+    // TODO:
+    val code =
+      s"""
+         | private int $funcName(int $low, int $high) {
+         |  if ($high - $low + 1 < ${stopChoosingPivotThreshold} {
+         |    return $indices.get($low);
+         |  }
+         |
+         |  int $mid = $low + ($high - $low) / 2;
+         |
+         |  int $medianIdx;
+         |
+         |
+         | }
+         |""".stripMargin
+    code
+  }
+
+  def produceCompare(ctx: CodegenContext, funcName: String, batch: String): String = {
+    val index1 = ctx.freshName("index")
+    val index2 = ctx.freshName("index")
+
+    val comparators = sortOrder.map { order =>
+      val col = attributeReferenceToCol(order)
+      val arrowColumnarArray = ctx.freshName("arrowColumnarArray")
+      val arrowColumnarArrayType = classOf[ArrowColumnarArray].getName
+      var compString = s"$arrowColumnarArrayType $arrowColumnarArray = $batch.getArray($col);\n"
+
+      if (order.nullable) {
+        val isNull1 = ctx.freshName("isNull")
+        val isNull2 = ctx.freshName("isNull")
+        compString +=
+          s"""
+             | boolean $isNull1 = $arrowColumnarArray.isNullAt($index1);
+             | boolean $isNull2 = $arrowColumnarArray.isNullAt($index2);
+             | if ($isNull1 && $isNull2) return 0;
+             | else if ($isNull1) return ${if (order.nullOrdering == NullsFirst) "-1" else "1"};
+             | else if ($isNull2) return ${if (order.nullOrdering == NullsFirst) "1" else "-1"};
+             |""".stripMargin
+      }
+
+      val dt = schema.fields(col).dataType.asInstanceOf[ArrayType].elementType
+      val comp = ctx.freshName("comp")
+      val compare: String = dt match {
+        case _: IntegerType => s"int $comp = $arrowColumnarArray.getInt($index1) - $arrowColumnarArray.getInt($index2);"
+        case other => throw new RuntimeException(s"[ArrowSortExec] ${other.typeName} is not supported (yet)")
+      }
+
+      val returnValue = if (order.isAscending) s"$compare" else s"-$compare"
+      compString +=
+        s"""
+           | if ($comp != 0)
+           |  return $returnValue;
+           |""".stripMargin
+
+      compString
+    }
+
+    val code =
+      s"""
+         | private int $funcName($index1, $index2) {
+         |    ${comparators.mkString("\n")}
+         |    return 0;
+         | }
+         |""".stripMargin
+    code
+  }
+
+
 }
