@@ -93,7 +93,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  $builder.close();
        |  ${classOf[ArrowColumnarBatchRow].getName} $newBatch = null;
        |
-       |  long t1 = System.nanoTime();
        |  $indicesClass $indices = new $indicesClass("indices", $staticManager.createAllocator($root, "IndicesAllocator"));
        |  try {
        |    $indices.setInitialCapacity($batch.length());
@@ -103,7 +102,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |    $indices.setValueCount($batch.length());
        |    $timSort($batch, $indices);
        |
-       |    $staticTransformers.applyIndices($batch.copy(), $indices).close();
+       |    $newBatch = $staticTransformers.applyIndices($batch, $indices);
        |
        |  } finally {
        |    try {
@@ -112,21 +111,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |      e.printStackTrace();
        |    }
        |  }
-       |  long t2 = System.nanoTime();
-       |  double time = (t2 - t1) / 1e9d;
-       |  System.out.println(String.format("ArrowSortExec::ourSort: %04.3f", time));
        |
-       |  long t3 = System.nanoTime();
-       |  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
-       |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());
-       |    int $col = $thisPlan.attributeReferenceToCol($order);
-       |    $newBatch = $staticSorter.sort($batch, $col, $order);
-       |  } else {
-       |    $newBatch = $staticSorter.multiColumnSort($batch, $orders);
-       |  }
-       |  long t4 = System.nanoTime();
-       |  double time2 = (t4 - t3) / 1e9d;
-       |  System.out.println(String.format("ArrowSortExec::arrowSort: %04.3f", time2));
        |
        |  $needToSort = false;
        |  ${consume(ctx, null, newBatch)}
@@ -136,6 +121,21 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |""".stripMargin
     code
   }
+
+  /** Old:
+  long t3 = System.nanoTime();
+  if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
+    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());
+    int $col = $thisPlan.attributeReferenceToCol($order);
+    $newBatch = $staticSorter.sort($batch, $col, $order);
+  } else {
+    $newBatch = $staticSorter.multiColumnSort($batch, $orders);
+  }
+  long t4 = System.nanoTime();
+  double time2 = (t4 - t3) / 1e9d;
+  System.out.println(String.format("ArrowSortExec::arrowSort: %04.3f", time2));
+   * */
+
 
   override def doConsume(ctx: CodegenContext, input: Seq[ExprCode], row: ExprCode): String = {
     val temp = ctx.freshName("temp")
