@@ -17,6 +17,8 @@ import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 /** Methods that convert an ArrowColumnarBatchRows to another type, and taking care of closing of the input */
 object ArrowColumnarBatchRowConverters {
+  var totalTimeToRecordBatch = 0
+
   /**
    * copied from org.apache.arrow.vector.VectorUnloader
    * Caller should close the ArrowRecordBatch
@@ -28,6 +30,7 @@ object ArrowColumnarBatchRowConverters {
    * @return The generated ArrowRecordBatch together with its allocator and the number of rows converted
    */
   def toArrowRecordBatch(batch: ArrowColumnarBatchRow, numCols: Int, numRows: Option[Int] = None): (ArrowRecordBatch, Int) = {
+    val t1 = System.nanoTime()
     val nodes = new util.ArrayList[ArrowFieldNode]
     val buffers = new util.ArrayList[ArrowBuf]
     val codec = NoCompressionCodec.INSTANCE
@@ -50,9 +53,13 @@ object ArrowColumnarBatchRowConverters {
     batch.columns.slice(0, numCols).foreach { column =>
       appendNodes(column.getValueVector.asInstanceOf[FieldVector], nodes, buffers)
     }
-    (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
-
+    val ret = (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
+    val t2 = System.nanoTime()
+    totalTimeToRecordBatch += (t2 - t1)
+    ret
   }
+
+  var totalTimeToRoot = 0
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
    * Returns the root with its allocator and the number of rows transferred
@@ -60,18 +67,24 @@ object ArrowColumnarBatchRowConverters {
    */
   def toRoot(batch: ArrowColumnarBatchRow, numCols: Option[Int] = None, numRows: Option[Int] = None): (VectorSchemaRoot, BufferAllocator, Int) = {
     Resources.autoCloseTryGet(batch) { batch =>
+      val t1 = System.nanoTime()
       val rowCount = numRows.getOrElse(batch.numRows)
       val columns = batch.columns.slice(0, numCols.getOrElse(batch.numFields))
       val allocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowConverters::toRoot")
-      (VectorSchemaRoot.of(columns.map(column => {
+      val ret = (VectorSchemaRoot.of(columns.map(column => {
         val vector = column.getValueVector
         // NOTE: we do not create a new allocator here to ease allocator management
         val tp = vector.getTransferPair(allocator)
         tp.splitAndTransfer(0, rowCount)
         tp.getTo.asInstanceOf[FieldVector]
       }).toSeq: _*), allocator, rowCount)
+      val t2 = System.nanoTime()
+      totalTimeToRoot += (t2 - t1)
+      ret
     }
   }
+
+  var totalTimeToSplit = 0
 
   /**
    * Splits a single batch into two
@@ -84,11 +97,18 @@ object ArrowColumnarBatchRowConverters {
    */
   def split(batch: ArrowColumnarBatchRow, firstLength: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     Resources.autoCloseTryGet(batch) { batch =>
+      val t1 = System.nanoTime()
       val splitPoint = firstLength.min(batch.numRows)
-      (batch.copyFromCaller("ArrowColumnarBatchRowConverters::split::first", 0 until splitPoint),
+      val ret = (batch.copyFromCaller("ArrowColumnarBatchRowConverters::split::first", 0 until splitPoint),
         batch.copyFromCaller("ArrowColumnarBatchRowConverters::split::second", splitPoint until batch.numRows))
+
+      val t2 = System.nanoTime()
+      totalTimeToSplit += (t2 - t1)
+      ret
     }
   }
+
+  var totalTimeToSplitColumns = 0
 
   /**
    * Splits the current batch on its columns into two batches
@@ -100,6 +120,7 @@ object ArrowColumnarBatchRowConverters {
    */
   def splitColumns(batch: ArrowColumnarBatchRow, col: Int): (ArrowColumnarBatchRow, ArrowColumnarBatchRow) = {
     Resources.autoCloseTryGet(batch) { batch =>
+      val t1 = System.nanoTime()
       val root = batch.allocator.getRoot
       val firstBatch = {
         val firstAllocator = createAllocator(root, "ArrowColumnarBatchRowConverters::splitColumns::first")
@@ -121,10 +142,15 @@ object ArrowColumnarBatchRowConverters {
           tp.splitAndTransfer(0, vector.getValueCount)
           new ArrowColumnVector(tp.getTo)
         }
-        (firstBatch, new ArrowColumnarBatchRow(secondAllocator, columns, batch.numRows))
+        val ret = (firstBatch, new ArrowColumnarBatchRow(secondAllocator, columns, batch.numRows))
+        val t2 = System.nanoTime()
+        totalTimeToSplitColumns += (t2 - t1)
+        ret
       }
     }
   }
+
+  var totalTimeToUnionVector = 0
 
   /**
    * Creates an UnionVector from the provided batch
@@ -135,6 +161,7 @@ object ArrowColumnarBatchRowConverters {
    */
   def toUnionVector(batch: ArrowColumnarBatchRow): (UnionVector, BufferAllocator) = {
     Resources.autoCloseTryGet(batch) { batch =>
+      val t1 = System.nanoTime()
       val allocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowConverters::toUnionVector::union")
       Resources.closeOnFailGet(new UnionVector("Combiner", allocator, FieldType.nullable(Struct.INSTANCE), null)) { union =>
         batch.columns foreach { column =>
@@ -146,10 +173,15 @@ object ArrowColumnarBatchRowConverters {
         }
         union.setValueCount(batch.numRows)
 
-        (union, allocator)
+        val ret = (union, allocator)
+        val t2 = System.nanoTime()
+        totalTimeToUnionVector += (t2 - t1)
+        ret
       }
     }
   }
+
+  var totalTimeToMakeFresh = 0
 
   /**
    * Creates an array of fresh ArrowColumnVectors with the same type as the given batch
@@ -161,7 +193,8 @@ object ArrowColumnarBatchRowConverters {
    */
   def makeFresh(parentAllocator: BufferAllocator, batch: ArrowColumnarBatchRow): Array[ArrowColumnVector] = {
     Resources.closeOnFailGet(batch) { batch =>
-      Array.tabulate[ArrowColumnVector](batch.numFields) { i =>
+      val t1 = System.nanoTime()
+      val ret = Array.tabulate[ArrowColumnVector](batch.numFields) { i =>
         val vector = batch.columns(i).getValueVector
         val tp = vector.getTransferPair(createAllocator(parentAllocator, vector.getName))
         // we 'copy' the content of the first batch ...
@@ -172,6 +205,9 @@ object ArrowColumnarBatchRowConverters {
         new_vec.allocateNew()
         new ArrowColumnVector(new_vec)
       }
+      val t2 = System.nanoTime()
+      totalTimeToMakeFresh += (t2 - t1)
+      ret
     }
   }
 }

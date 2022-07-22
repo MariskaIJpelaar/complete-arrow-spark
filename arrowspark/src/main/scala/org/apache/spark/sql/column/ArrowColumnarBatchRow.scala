@@ -6,6 +6,7 @@ import org.apache.arrow.vector.ValueVector
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.column.AllocationManager.createAllocator
+import org.apache.spark.sql.column.ArrowColumnarBatchRow.totalTimeCopy
 import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowUtils
 import org.apache.spark.sql.types.{DataType, Decimal}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ArrowColumnarArray, ColumnarArray}
@@ -76,14 +77,19 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
       return ArrowColumnarBatchRow.empty(newAllocator)
     }
 
+    val t1 = System.nanoTime()
+
     // copy of the whole column
     if (range.length == numRows) {
-      return new ArrowColumnarBatchRow(newAllocator, columns map { v =>
+      val ret =  new ArrowColumnarBatchRow(newAllocator, columns map { v =>
         val vector = v.getValueVector
         val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
         tp.splitAndTransfer(0, vector.getValueCount)
         new ArrowColumnVector(tp.getTo)
       }, range.length)
+      val t2 = System.nanoTime()
+      totalTimeCopy += (t2 - t1)
+      return ret
     }
 
     // if we are a strict subset of the batch,
@@ -97,7 +103,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
     }
 
     // then we copy to the fresh batch
-    Resources.autoCloseArrayTryGet(subset) { subset =>
+    val ret = Resources.autoCloseArrayTryGet(subset) { subset =>
       new ArrowColumnarBatchRow(newAllocator, subset map { v =>
         val vector = v.getValueVector
         val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
@@ -105,6 +111,9 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
         new ArrowColumnVector(tp.getTo)
       }, range.length)
     }
+    val t2 = System.nanoTime()
+    totalTimeCopy += (t2 - t1)
+    ret
   }
 
   /**
@@ -189,6 +198,8 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
 }
 
 object ArrowColumnarBatchRow {
+  var totalTimeCopy = 0
+
   /** Creates an empty ArrowColumnarBatchRow */
   def empty(parent: BufferAllocator): ArrowColumnarBatchRow =
     new ArrowColumnarBatchRow(createAllocator(parent, "ArrowColumnarBatchRow::empty"), Array.empty, 0)
@@ -203,12 +214,15 @@ object ArrowColumnarBatchRow {
     ArrowColumnarBatchRow.create(decoded._3, decoded._2)
   }
 
+  var totalTransferTime = 0
+
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors
    * Transfers the vectors to a new-allocator with given name
    * Closes the vector afterwards
    * Caller is responsible for closing the generated batch */
   def transfer(root: RootAllocator, name: String, cols: Array[ValueVector]): ArrowColumnarBatchRow = {
-    Resources.autoCloseArrayTryGet(cols) { cols =>
+    val t1 = System.nanoTime()
+    val ret = Resources.autoCloseArrayTryGet(cols) { cols =>
       if (cols.isEmpty)
         return ArrowColumnarBatchRow.empty(root)
 
@@ -221,7 +235,9 @@ object ArrowColumnarBatchRow {
       }
       new ArrowColumnarBatchRow(allocator, newCols, size)
     }
-
+    val t2 = System.nanoTime()
+    totalTransferTime += (t2 - t1)
+    ret
   }
 
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors

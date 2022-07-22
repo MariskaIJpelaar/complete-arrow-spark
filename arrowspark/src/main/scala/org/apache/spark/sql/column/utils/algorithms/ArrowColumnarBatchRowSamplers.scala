@@ -11,6 +11,8 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 object ArrowColumnarBatchRowSamplers {
+  var totalTimeSample = 0
+
   /**
    * Sample rows from batches where the sample-size is determined by probability
    * @param rootAllocator [[RootAllocator]] to use for allocation
@@ -49,13 +51,14 @@ object ArrowColumnarBatchRowSamplers {
           array foreach ( column => column.getValueVector.setValueCount(i) )
           val ret = new ArrowColumnarBatchRow(freshAllocator, array, i)
           val t2 = System.nanoTime()
-          val time = (t2 - t1) / 1e9d
-          println("Samplers::sample: %04.3f".format(time))
+          totalTimeSample += (t2 - t1)
           ret
         }
       }
     }
   }
+
+  var totalTimeSampleAndCount = 0
 
   /**
    * Reservoir sampling implementation that also returns the input size
@@ -73,6 +76,8 @@ object ArrowColumnarBatchRowSamplers {
   (ArrowColumnarBatchRow, Long) = {
     Resources.autoCloseTraversableTryGet(input) { input =>
       if (k < 1) return (ArrowColumnarBatchRow.empty(rootAllocator), 0)
+
+      val t1 = System.nanoTime()
 
       // First, we fill the reservoir with k elements
       var inputSize = 0L
@@ -125,6 +130,8 @@ object ArrowColumnarBatchRowSamplers {
         }
       } finally {
         remainderBatch.foreach(_.close())
+        val t2 = System.nanoTime()
+        totalTimeSampleAndCount += (t2 - t1)
       }
     }
   }

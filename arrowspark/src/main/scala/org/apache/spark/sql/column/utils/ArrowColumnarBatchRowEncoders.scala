@@ -17,6 +17,8 @@ import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 object ArrowColumnarBatchRowEncoders {
+  var totalTimeEncode = 0
+
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
    * Encodes the first numRows rows of the first numCols columns of a series of ArrowColumnarBatchRows
    * according to: https://arrow.apache.org/docs/java/ipc.html#writing-and-reading-streaming-format
@@ -39,6 +41,7 @@ object ArrowColumnarBatchRowEncoders {
       return Iterator(Array.emptyByteArray)
 
     // FIXME: make iter an Iterator of Closeables?
+    val t1 = System.nanoTime()
     try {
       // how many rows are left to read?
       var left = numRows
@@ -90,8 +93,12 @@ object ArrowColumnarBatchRowEncoders {
       Iterator(bos.toByteArray)
     } finally {
       iter.foreach( extraEncoder(_)._2.close() )
+      val t2 = System.nanoTime()
+      totalTimeEncode += (t2 - t1)
     }
   }
+
+  var totalTimeDecode = 0
 
   /** Note: similar to decodeUnsafeRows
    *
@@ -114,6 +121,7 @@ object ArrowColumnarBatchRowEncoders {
       private val reader = new ArrowStreamReader(ois, allocator)
 
       override protected def getNext(): Any = {
+        val t1 = System.nanoTime()
         if (!reader.loadNextBatch()) {
           finished = true
           return null
@@ -127,11 +135,14 @@ object ArrowColumnarBatchRowEncoders {
             val array = new Array[Byte](arr_length)
             ois.readFully(array)
 
-            extraDecoder(array, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
+            val ret = extraDecoder(array, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
               val tp = vector.getTransferPair(createAllocator(batchAllocator, vector.getName))
               tp.splitAndTransfer(0, vector.getValueCount)
               new ArrowColumnVector(tp.getTo)
             }).toArray, length))
+            val t2 = System.nanoTime()
+            totalTimeDecode += (t2 -t1)
+            ret
           }
         }
       }

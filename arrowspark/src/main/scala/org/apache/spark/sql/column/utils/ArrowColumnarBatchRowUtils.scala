@@ -12,6 +12,7 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 /** Methods that do not fit into the other categories */
 object ArrowColumnarBatchRowUtils {
+  var totalTimeGetComparator = 0
 
   /**
    * Get the SparkUnionComparator corresponding to given UnionVector and SortOrders
@@ -20,6 +21,7 @@ object ArrowColumnarBatchRowUtils {
    * @return a fresh Comparator, does not require any closing
    */
   def getComparator(union: UnionVector, sortOrders: Seq[SortOrder]): SparkUnionComparator = {
+    val t1 = System.nanoTime()
     val comparators = union.getChildrenFromFields.toArray.map { vector =>
       val valueVector = vector.asInstanceOf[ValueVector]
       val name = valueVector.getName
@@ -29,10 +31,13 @@ object ArrowColumnarBatchRowUtils {
           sortOrder.getOrElse(throw new RuntimeException("ArrowColumnarBatchRowUtils::getComparator SortOrders do not match UnionVector")),
           DefaultVectorComparators.createDefaultComparator(valueVector)))
     }
-    new SparkUnionComparator(comparators)
+    val ret = new SparkUnionComparator(comparators)
+    val t2 = System.nanoTime()
+    totalTimeGetComparator += (t2 - t1)
+    ret
   }
 
-  var totalTime: Long = 0L
+  var totalTimeTake: Long = 0L
 
   /**
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
@@ -81,7 +86,7 @@ object ArrowColumnarBatchRowUtils {
         /** clear up the remainder */
         batches.foreach( extraTaker(_)._2.close() )
         val t2 = System.nanoTime()
-        totalTime += (t2 - t1)
+        totalTimeTake += (t2 - t1)
       }
     }
   }

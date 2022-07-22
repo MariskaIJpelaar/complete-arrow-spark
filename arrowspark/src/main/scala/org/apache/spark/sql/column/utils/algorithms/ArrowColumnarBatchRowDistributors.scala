@@ -11,6 +11,8 @@ import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowCol
 import scala.collection.mutable
 
 object ArrowColumnarBatchRowDistributors {
+  var totalTimeBucketDistributor = 0
+
   /**
    * @param key ArrowColumnarBatchRow to define distribution for, and close
    * @param rangeBounds ArrowColumnarBatchRow containing ranges on which distribution is based, and close
@@ -22,6 +24,7 @@ object ArrowColumnarBatchRowDistributors {
       if (key.numFields < 1 || rangeBounds.numFields < 1)
         return Array.empty
 
+      val t1 = System.nanoTime()
       val names: Array[String] = sortOrders.map( order => order.child.asInstanceOf[AttributeReference].name ).toArray
       val (keyUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
         ArrowColumnarBatchRowTransformers.getColumns(key.copyFromCaller("ArrowColumnarBatchRowDistributors::bucketDistributor::keyUnion"), names)
@@ -30,12 +33,17 @@ object ArrowColumnarBatchRowDistributors {
         val comparator = ArrowColumnarBatchRowUtils.getComparator(keyUnion, sortOrders)
         val (rangeUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
           ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copyFromCaller("ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion"), names))
-        Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(rangeUnion)
+        val ret = Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(rangeUnion)
           { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distribute() }
         )
+        val t2 = System.nanoTime()
+        totalTimeBucketDistributor += (t2-t1)
+        ret
       })
     })
   }
+
+  var totalTimeDistributeBySort = 0
 
   /**
    * Distributes a batch to a mapping (partitionId, Batch), according to the provided Array of Ints
@@ -45,18 +53,24 @@ object ArrowColumnarBatchRowDistributors {
    */
   def distributeBySort(batch: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow]  = {
     Resources.autoCloseTryGet(batch) { _ =>
+      val t1 = System.nanoTime()
       Resources.autoCloseTryGet(createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distributeBySort::indices")) { indexAllocator =>
         val (indices, borders) = IndexIntSorters.sortManyDuplicates(partitionIds, indexAllocator)
         Resources.autoCloseTryGet(indices) { _ =>
           Resources.autoCloseTryGet(ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)) { sorted =>
-            borders.map { case (partitionId, range) =>
+            val ret = borders.map { case (partitionId, range) =>
               (partitionId, sorted.copyFromCaller(s"ArrowColumnarBatchRowDistributors::distributeBySort::copy::$partitionId", range))
             }
+            val t2 = System.nanoTime()
+            totalTimeBucketDistributor += (t2-t1)
+            ret
           }
         }
       }
     }
   }
+
+  var totalTimeDistribute = 0
 
   /**
    * @param key ArrowColumnarBatchRow to distribute and close
@@ -67,6 +81,7 @@ object ArrowColumnarBatchRowDistributors {
    */
   def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
     Resources.autoCloseTryGet(key) { key =>
+      val t1 = System.nanoTime()
       // FIXME: close builder if we return earlier than expected
       val distributed = mutable.Map[Int, ArrowColumnarBatchRowBuilder]()
       try {
@@ -83,6 +98,8 @@ object ArrowColumnarBatchRowDistributors {
           (items._1, items._2.build(createAllocator(key.allocator.getRoot, "ArrowColumnarBatchRowDistributors::distribute::build"))) ).toMap
       } finally {
         distributed.foreach ( item => item._2.close() )
+        val t2 = System.nanoTime()
+        totalTimeDistribute += (t2 - t1)
       }
     }
   }

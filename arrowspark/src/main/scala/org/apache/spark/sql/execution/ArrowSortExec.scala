@@ -32,10 +32,6 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   private val partitions: Option[ArrowColumnarBatchRowBuilder] = Option.empty
   private var partitionsIdx: Int = _
   private var thisPartitions: String = _
-  // FIXME: For now, we assume that we won't return too early, and that sortedBatch will be consumed by caller
-//  private var sortedIdx: Int = _
-//  private val sortedBatch: ArrowColumnarBatchRow = ArrowColumnarBatchRow.empty()
-//  private var thisSorted: String = _
 
   override protected def doProduce(ctx: CodegenContext): String = {
     val needToSort =

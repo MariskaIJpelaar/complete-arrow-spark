@@ -9,6 +9,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
+import org.apache.spark.sql.column.utils.ArrowColumnarBatchRowSerializerInstance.{totalTimeDeserialize, totalTimeSerialize}
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.NextIterator
@@ -29,6 +30,11 @@ class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extend
   def attachAllocator(root: RootAllocator): Unit = { rootAllocator = Option(root) }
   override def newInstance(): SerializerInstance = new ArrowColumnarBatchRowSerializerInstance(dataSize, rootAllocator)
   override def supportsRelocationOfSerializedObjects: Boolean = true
+}
+
+object ArrowColumnarBatchRowSerializerInstance {
+  var totalTimeSerialize = 0
+  var totalTimeDeserialize = 0
 }
 
 private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric], rootAllocator: Option[RootAllocator]) extends SerializerInstance {
@@ -82,12 +88,15 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
     }
 
     override def writeValue[T](value: T)(implicit evidence$6: ClassTag[T]): SerializationStream = {
+      val t1 = System.nanoTime()
       Resources.autoCloseTryGet(value.asInstanceOf[ArrowColumnarBatchRow]) { batch =>
         dataSize.foreach( metric => metric.add(batch.getSizeInBytes))
 
         getWriter(batch).writeBatch()
         getOos.writeInt(batch.numRows)
       }
+      val t2 = System.nanoTime()
+      totalTimeSerialize += (t2 - t1)
       this
     }
     override def writeKey[T](key: T)(implicit evidence$5: ClassTag[T]): SerializationStream = this
@@ -109,6 +118,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
   override def deserializeStream(s: InputStream): DeserializationStream = new DeserializationStream {
     /** Currently, we read in everything.
      * FIXME: read in batches :) */
+    private val t1 = System.nanoTime()
     private val all = new ArrayBuffer[Byte]()
     private val batchSizes = 65536 // 64k
     private val batch = new Array[Byte](batchSizes)
@@ -117,6 +127,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       all ++= batch.slice(0, reader)
       reader = s.read(batch)
     }
+    totalTimeDeserialize += (System.nanoTime() - t1)
 
 
     /** Caller should close batches in iterator */
@@ -151,6 +162,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
 
       // Caller should close
       override protected def getNext(): (Int, ArrowColumnarBatchRow) = {
+        val q1 = System.nanoTime()
         if (reader.isEmpty) {
           finished = true
           return null
@@ -167,7 +179,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
             throw new RuntimeException("[ArrowColumnarBatchRowSerializer] Corrupted Stream")
         }
 
-        Resources.autoCloseTraversableTryGet(reader.get.getVectorSchemaRoot.getFieldVectors.toIterator) { columns =>
+        val ret = Resources.autoCloseTraversableTryGet(reader.get.getVectorSchemaRoot.getFieldVectors.toIterator) { columns =>
           val batchAllocator = createAllocator(allocator, "ArrowColumnarBatchRowSerializer::getNext")
           val length = ois.get.readInt()
           (0, new ArrowColumnarBatchRow(batchAllocator, (columns map { vector =>
@@ -182,6 +194,9 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
             }
           }).toArray, length))
         }
+        val q2 = System.nanoTime()
+        totalTimeDeserialize += (q2 - q1)
+        ret
       }
 
 

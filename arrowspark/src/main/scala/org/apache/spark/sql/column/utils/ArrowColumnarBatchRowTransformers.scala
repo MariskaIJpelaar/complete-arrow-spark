@@ -11,6 +11,8 @@ import org.apache.spark.util.random.XORShiftRandom
 
 /** Methods mapping an ArrowColumnarBatchRow to another ArrowColumnarBatchRow, also taking care of closing of the input */
 object ArrowColumnarBatchRowTransformers {
+  var totalTimeProjection = 0
+
   /**
    * Perform a projection on the batch given some expressions
    * @param batch batch to project and close
@@ -19,7 +21,8 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing returned batch
    */
   def projection(batch: ArrowColumnarBatchRow, indices: Seq[Int]): ArrowColumnarBatchRow = {
-    Resources.autoCloseTryGet(batch) { batch =>
+    val t1 = System.nanoTime()
+    val ret = Resources.autoCloseTryGet(batch) { batch =>
       val batchAllocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowTransformers::projection")
       new ArrowColumnarBatchRow(batchAllocator, indices.toArray map ( index => {
         val vector = batch.columns(index).getValueVector
@@ -28,7 +31,12 @@ object ArrowColumnarBatchRowTransformers {
         new ArrowColumnVector(tp.getTo)
       }), batch.numRows)
     }
+    val t2 = System.nanoTime()
+    totalTimeProjection += (t2 - t1)
+    ret
   }
+
+  var totalTimeTake = 0
 
   /**
    * Takes a range of rows from the batch
@@ -38,7 +46,8 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing returned batch
    */
   def take(batch: ArrowColumnarBatchRow, range: Range): ArrowColumnarBatchRow = {
-    Resources.autoCloseTryGet(batch) { batch =>
+    val t1 = System.nanoTime()
+    val ret = Resources.autoCloseTryGet(batch) { batch =>
       // first we transfer our subset to the RootAllocator
       // but only if we require a strict subset
       val root = batch.allocator.getRoot
@@ -64,7 +73,12 @@ object ArrowColumnarBatchRowTransformers {
         }), range.length)
       }
     }
+    val t2 = System.nanoTime()
+    totalTimeTake += (t2 - t1)
+    ret
   }
+
+  var totalTimeSample = 0
 
   /**
    * Samples a random range from a batch
@@ -74,13 +88,19 @@ object ArrowColumnarBatchRowTransformers {
    *        Callers should close returned batch
    */
   def sample(batch: ArrowColumnarBatchRow, seed: Long = System.nanoTime()): ArrowColumnarBatchRow = {
-    Resources.autoCloseTryGet(batch) { batch =>
+    val t1 = System.nanoTime()
+    val ret = Resources.autoCloseTryGet(batch) { batch =>
       val rand = new RandomUtils(new XORShiftRandom(seed))
       val start: Int = rand.generateRandomNumber(end = batch.numRows-1)
       val end = rand.generateRandomNumber(start, batch.numRows)
       take(batch, start until end)
     }
+    val t2 = System.nanoTime()
+    totalTimeSample += (t2 - t1)
+    ret
   }
+
+  var totalTimeAppendColumns = 0
 
   /**
    * Appends the columns of two batches and creates a new batch with it
@@ -90,7 +110,8 @@ object ArrowColumnarBatchRowTransformers {
    * @return the newly created batch
    */
   def appendColumns(first: ArrowColumnarBatchRow, second: ArrowColumnarBatchRow, newAllocator: BufferAllocator): ArrowColumnarBatchRow = {
-    Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
+    val t1 = System.nanoTime()
+    val ret = Resources.autoCloseTryGet(first) ( first => Resources.autoCloseTryGet(second) { second =>
       val firstCols = first.columns map { column =>
         val vector = column.getValueVector
         val tp = vector.getTransferPair(createAllocator(newAllocator, vector.getName))
@@ -105,8 +126,12 @@ object ArrowColumnarBatchRowTransformers {
       }
       new ArrowColumnarBatchRow(newAllocator, firstCols ++ secondCols, first.numRows)
     })
-
+    val t2 = System.nanoTime()
+    totalTimeAppendColumns += (t2 - t1)
+    ret
   }
+
+  var totalTimeGetColumns = 0
 
   /**
    * Returns a new batch containing the columns with the given names from the given batch
@@ -116,7 +141,8 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing the batch
    */
   def getColumns(batch: ArrowColumnarBatchRow, names: Array[String]): ArrowColumnarBatchRow = {
-    Resources.autoCloseTryGet(batch) { batch =>
+    val t1 = System.nanoTime()
+    val ret = Resources.autoCloseTryGet(batch) { batch =>
       val allocator = createAllocator(batch.allocator.getRoot, "ArrowColumnarBatchRowTransformers::getColumns")
       val cols = names.flatMap { name =>
         batch.columns.find(vector => vector.getValueVector.getName.equals(name))
@@ -128,7 +154,12 @@ object ArrowColumnarBatchRowTransformers {
       }
       new ArrowColumnarBatchRow(allocator, cols, batch.numRows)
     }
+    val t2 = System.nanoTime()
+    totalTimeGetColumns += (t2 - t1)
+    ret
   }
+
+  var totalTimeApplyIndices = 0
 
   /**
    * Creates a new ArrowColumnarBatchRow from the given ArrowColumnarBatchRow,
@@ -140,7 +171,8 @@ object ArrowColumnarBatchRowTransformers {
    *         Caller is responsible for closing returned batch
    */
   def applyIndices(batch: ArrowColumnarBatchRow, indices: IntVector): ArrowColumnarBatchRow = {
-    Resources.autoCloseTryGet(batch) (batch => Resources.autoCloseTryGet(indices) { indices =>
+    val t1 = System.nanoTime()
+    val ret = Resources.autoCloseTryGet(batch) (batch => Resources.autoCloseTryGet(indices) { indices =>
       assert(indices.getValueCount > 0)
 
       // FIXME: clean up if exception is thrown within map
@@ -167,5 +199,8 @@ object ArrowColumnarBatchRowTransformers {
         }
       }, indices.getValueCount)
     })
+    val t2 = System.nanoTime()
+    totalTimeApplyIndices += (t2 - t1)
+    ret
   }
 }

@@ -8,6 +8,7 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
 object ArrowColumnarBatchRowSorters {
+  var totalTimeMultiColumnSort = 0
 
   /**
    * Performs a multi-columns sort on a batch
@@ -23,6 +24,8 @@ object ArrowColumnarBatchRowSorters {
       return batch
 
     Resources.autoCloseTryGet(batch) { batch =>
+      val t1 = System.nanoTime()
+
       // Indices for permutations
       Resources.autoCloseTryGet(new IntVector("indexHolder", batch.allocator.getRoot)) { indices =>
         // UnionVector representing our batch with columns from sortOrder
@@ -41,7 +44,10 @@ object ArrowColumnarBatchRowSorters {
           (new IndexSorter).sort(union, indices, comparator)
 
           /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
-          ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
+          val ret = ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
+          val t2 = System.nanoTime()
+          totalTimeMultiColumnSort += (t2 - t1)
+          ret
         })
       }
     }
@@ -60,6 +66,8 @@ object ArrowColumnarBatchRowSorters {
   //    }
   // Note: worst case: 0 + 1 + 2 + ... + (n-1) = ((n-1) * n) / 2 = O(n*n) + time to sort (n log n)
 
+  var totalTimeSort = 0
+
   /**
    * @param batch an ArrowColumnarBatchRow to be sorted
    * @param col the column to sort on
@@ -75,6 +83,8 @@ object ArrowColumnarBatchRowSorters {
       return batch
 
     Resources.autoCloseTryGet(batch) { batch =>
+      val t1 = System.nanoTime()
+
       val vector = batch.columns(col).getValueVector
       Resources.autoCloseTryGet(new IntVector("indexHolder", batch.allocator.getRoot)) { indices =>
         assert(vector.getValueCount > 0)
@@ -86,7 +96,10 @@ object ArrowColumnarBatchRowSorters {
 
         // sort by permutation
         /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
-        ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
+        val ret = ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
+        val t2 = System.nanoTime()
+        totalTimeSort += (t2 - t1)
+        ret
       }
     }
   }
