@@ -8,6 +8,14 @@ class BucketSearcher[V <: ValueVector](
      private val bucketVector: V,
      private val comparator: VectorValueComparator[V]) {
 
+  def distributeParallel(): Array[Int] = {
+    assert(keyVector.getValueCount > 0)
+    assert(bucketVector.getValueCount > 0)
+    comparator.attachVectors(keyVector, bucketVector)
+
+    (0 until keyVector.getValueCount).toArray.par.map ( i => binary_search(i) ).toArray
+  }
+
   def distribute(): Array[Int] = {
     assert(keyVector.getValueCount > 0)
     assert(bucketVector.getValueCount > 0)

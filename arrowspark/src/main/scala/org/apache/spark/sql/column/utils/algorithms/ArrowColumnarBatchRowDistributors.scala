@@ -34,7 +34,7 @@ object ArrowColumnarBatchRowDistributors {
         val (rangeUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
           ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copyFromCaller("ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion"), names))
         val ret = Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(rangeUnion)
-          { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distribute() }
+          { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distributeParallel() }
         )
         val t2 = System.nanoTime()
         totalTimeBucketDistributor += (t2-t1)
