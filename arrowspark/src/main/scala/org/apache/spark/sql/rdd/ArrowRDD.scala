@@ -1,5 +1,6 @@
 package org.apache.spark.sql.rdd
 
+import nl.liacs.mijpelaar.utils.Reporter
 import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.internal.config.RDD_LIMIT_SCALE_UP_FACTOR
 import org.apache.spark.rdd.{RDD, RDDOperationScope}
@@ -29,6 +30,7 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
         try {
 //          println(s"close: ${arrowPartition.asInstanceOf[ArrowFilePartition].filePartition.files.map(file => file.toString()).mkString("Array(", ", ", ")")}")
           arrowPartition.allocator.close()
+          Reporter.report(id=split.toString)
         } catch {
           case e: Throwable =>
             println("---------------DEBUG------------------")

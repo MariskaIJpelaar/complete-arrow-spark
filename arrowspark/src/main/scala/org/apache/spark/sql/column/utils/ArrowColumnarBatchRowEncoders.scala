@@ -17,7 +17,7 @@ import java.nio.channels.Channels
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 object ArrowColumnarBatchRowEncoders {
-  var totalTimeEncode = 0
+  var totalTimeEncode = 0L
 
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
    * Encodes the first numRows rows of the first numCols columns of a series of ArrowColumnarBatchRows
@@ -98,7 +98,7 @@ object ArrowColumnarBatchRowEncoders {
     }
   }
 
-  var totalTimeDecode = 0
+  var totalTimeDecode = 0L
 
   /** Note: similar to decodeUnsafeRows
    *

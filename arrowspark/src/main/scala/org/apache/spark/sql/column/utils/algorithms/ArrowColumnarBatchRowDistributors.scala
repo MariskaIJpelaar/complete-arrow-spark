@@ -11,7 +11,7 @@ import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowCol
 import scala.collection.mutable
 
 object ArrowColumnarBatchRowDistributors {
-  var totalTimeBucketDistributor = 0
+  var totalTimeBucketDistributor = 0L
 
   /**
    * @param key ArrowColumnarBatchRow to define distribution for, and close
@@ -43,7 +43,7 @@ object ArrowColumnarBatchRowDistributors {
     })
   }
 
-  var totalTimeDistributeBySort = 0
+  var totalTimeDistributeBySort = 0L
 
   /**
    * Distributes a batch to a mapping (partitionId, Batch), according to the provided Array of Ints
@@ -70,7 +70,7 @@ object ArrowColumnarBatchRowDistributors {
     }
   }
 
-  var totalTimeDistribute = 0
+  var totalTimeDistribute = 0L
 
   /**
    * @param key ArrowColumnarBatchRow to distribute and close

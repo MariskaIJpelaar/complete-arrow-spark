@@ -8,7 +8,7 @@ import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
 object ArrowColumnarBatchRowDeduplicators {
-  var totalTime = 0
+  var totalTime = 0L
 
   /**
    * @param batch batch to gather unique values from, and close

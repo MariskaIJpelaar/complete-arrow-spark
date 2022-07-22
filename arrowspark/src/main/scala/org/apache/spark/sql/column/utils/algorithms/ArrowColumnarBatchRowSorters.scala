@@ -8,7 +8,7 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
 object ArrowColumnarBatchRowSorters {
-  var totalTimeMultiColumnSort = 0
+  var totalTimeMultiColumnSort = 0L
 
   /**
    * Performs a multi-columns sort on a batch
@@ -66,7 +66,7 @@ object ArrowColumnarBatchRowSorters {
   //    }
   // Note: worst case: 0 + 1 + 2 + ... + (n-1) = ((n-1) * n) / 2 = O(n*n) + time to sort (n log n)
 
-  var totalTimeSort = 0
+  var totalTimeSort = 0L
 
   /**
    * @param batch an ArrowColumnarBatchRow to be sorted

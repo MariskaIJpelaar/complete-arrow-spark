@@ -12,7 +12,7 @@ import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 /** Methods that do not fit into the other categories */
 object ArrowColumnarBatchRowUtils {
-  var totalTimeGetComparator = 0
+  var totalTimeGetComparator = 0L
 
   /**
    * Get the SparkUnionComparator corresponding to given UnionVector and SortOrders

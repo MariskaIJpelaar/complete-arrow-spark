@@ -11,7 +11,7 @@ import org.apache.spark.util.random.XORShiftRandom
 
 /** Methods mapping an ArrowColumnarBatchRow to another ArrowColumnarBatchRow, also taking care of closing of the input */
 object ArrowColumnarBatchRowTransformers {
-  var totalTimeProjection = 0
+  var totalTimeProjection = 0L
 
   /**
    * Perform a projection on the batch given some expressions
@@ -36,7 +36,7 @@ object ArrowColumnarBatchRowTransformers {
     ret
   }
 
-  var totalTimeTake = 0
+  var totalTimeTake = 0L
 
   /**
    * Takes a range of rows from the batch
@@ -78,7 +78,7 @@ object ArrowColumnarBatchRowTransformers {
     ret
   }
 
-  var totalTimeSample = 0
+  var totalTimeSample = 0L
 
   /**
    * Samples a random range from a batch
@@ -100,7 +100,7 @@ object ArrowColumnarBatchRowTransformers {
     ret
   }
 
-  var totalTimeAppendColumns = 0
+  var totalTimeAppendColumns = 0L
 
   /**
    * Appends the columns of two batches and creates a new batch with it
@@ -131,7 +131,7 @@ object ArrowColumnarBatchRowTransformers {
     ret
   }
 
-  var totalTimeGetColumns = 0
+  var totalTimeGetColumns = 0L
 
   /**
    * Returns a new batch containing the columns with the given names from the given batch
@@ -159,7 +159,7 @@ object ArrowColumnarBatchRowTransformers {
     ret
   }
 
-  var totalTimeApplyIndices = 0
+  var totalTimeApplyIndices = 0L
 
   /**
    * Creates a new ArrowColumnarBatchRow from the given ArrowColumnarBatchRow,

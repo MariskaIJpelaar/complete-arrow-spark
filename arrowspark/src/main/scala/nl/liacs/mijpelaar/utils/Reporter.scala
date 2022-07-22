@@ -3,9 +3,10 @@ package nl.liacs.mijpelaar.utils
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowSerializerInstance, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
+import org.apache.spark.sql.execution.ArrowSortExec
 
 object Reporter {
-  def report(): Unit = {
+  def report(id: String = ""): Unit = {
     val report =
       s"""
          | builder:           ${"%04.3f".format(ArrowColumnarBatchRowBuilder.totalTime / 1e9d)}
@@ -37,9 +38,10 @@ object Reporter {
          | take:              ${"%04.3f".format(ArrowColumnarBatchRowUtils.totalTimeTake / 1e9d)}
          | copy:              ${"%04.3f".format(ArrowColumnarBatchRow.totalTimeCopy / 1e9d)}
          | transfer:          ${"%04.3f".format(ArrowColumnarBatchRow.totalTransferTime / 1e9d)}
+         | sort exec:         ${"%04.3f".format(ArrowSortExec.totalTime / 1e9d)}
          |""".stripMargin
 
-    println(s"REPORT: \n$report")
+    println(s"REPORT $id: $report")
   }
 
 }

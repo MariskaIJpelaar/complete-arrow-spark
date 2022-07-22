@@ -33,8 +33,8 @@ class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extend
 }
 
 object ArrowColumnarBatchRowSerializerInstance {
-  var totalTimeSerialize = 0
-  var totalTimeDeserialize = 0
+  var totalTimeSerialize = 0L
+  var totalTimeDeserialize = 0L
 }
 
 private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric], rootAllocator: Option[RootAllocator]) extends SerializerInstance {

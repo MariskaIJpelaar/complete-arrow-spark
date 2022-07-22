@@ -11,7 +11,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 object ArrowColumnarBatchRowSamplers {
-  var totalTimeSample = 0
+  var totalTimeSample = 0L
 
   /**
    * Sample rows from batches where the sample-size is determined by probability
@@ -58,7 +58,7 @@ object ArrowColumnarBatchRowSamplers {
     }
   }
 
-  var totalTimeSampleAndCount = 0
+  var totalTimeSampleAndCount = 0L
 
   /**
    * Reservoir sampling implementation that also returns the input size

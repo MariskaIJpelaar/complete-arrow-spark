@@ -17,7 +17,7 @@ import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 /** Methods that convert an ArrowColumnarBatchRows to another type, and taking care of closing of the input */
 object ArrowColumnarBatchRowConverters {
-  var totalTimeToRecordBatch = 0
+  var totalTimeToRecordBatch = 0L
 
   /**
    * copied from org.apache.arrow.vector.VectorUnloader
@@ -59,7 +59,7 @@ object ArrowColumnarBatchRowConverters {
     ret
   }
 
-  var totalTimeToRoot = 0
+  var totalTimeToRoot = 0L
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
    * Returns the root with its allocator and the number of rows transferred
@@ -84,7 +84,7 @@ object ArrowColumnarBatchRowConverters {
     }
   }
 
-  var totalTimeToSplit = 0
+  var totalTimeToSplit = 0L
 
   /**
    * Splits a single batch into two
@@ -108,7 +108,7 @@ object ArrowColumnarBatchRowConverters {
     }
   }
 
-  var totalTimeToSplitColumns = 0
+  var totalTimeToSplitColumns = 0L
 
   /**
    * Splits the current batch on its columns into two batches
@@ -150,7 +150,7 @@ object ArrowColumnarBatchRowConverters {
     }
   }
 
-  var totalTimeToUnionVector = 0
+  var totalTimeToUnionVector = 0L
 
   /**
    * Creates an UnionVector from the provided batch
@@ -181,7 +181,7 @@ object ArrowColumnarBatchRowConverters {
     }
   }
 
-  var totalTimeToMakeFresh = 0
+  var totalTimeToMakeFresh = 0L
 
   /**
    * Creates an array of fresh ArrowColumnVectors with the same type as the given batch

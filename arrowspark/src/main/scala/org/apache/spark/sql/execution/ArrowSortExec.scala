@@ -16,6 +16,11 @@ import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.types.{ArrayType, IntegerType}
 import org.apache.spark.sql.vectorized.ArrowColumnarArray
 
+object ArrowSortExec {
+  var totalTime = 0L
+  def incrementTotalTime(inc: Long): Unit = totalTime += inc
+}
+
 /** copied and adapted from org.apache.spark.sql.execution.SortExec
  * Caller is responsible for closing returned batches from this plan */
 case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: SparkPlan)
@@ -70,6 +75,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val staticManager = column.AllocationManager.getClass.getName + ".MODULE$"
     val indicesClass = classOf[IntVector].getName
     val staticTransformers = ArrowColumnarBatchRowTransformers.getClass.getName + ".MODULE$"
+    val staticSortExec = ArrowSortExec.getClass.getName + ".MODULE$"
 
     // TODO: perhaps do https://en.wikipedia.org/wiki/Timsort ?
     // https://www.geeksforgeeks.org/timsort/
@@ -89,6 +95,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  $builder.close();
        |  ${classOf[ArrowColumnarBatchRow].getName} $newBatch = null;
        |
+       |  long t1 = System.nanoTime();
        |  $indicesClass $indices = new $indicesClass("indices", $staticManager.createAllocator($root, "IndicesAllocator"));
        |  try {
        |    $indices.setInitialCapacity($batch.length());
@@ -103,6 +110,8 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  } finally {
        |    try {
        |      $indices.close();
+       |      long t2 = System.nanoTime();
+       |      ${staticSortExec}.incrementTotalTime(t2-t1);
        |    } catch (Exception e) {
        |      e.printStackTrace();
        |    }

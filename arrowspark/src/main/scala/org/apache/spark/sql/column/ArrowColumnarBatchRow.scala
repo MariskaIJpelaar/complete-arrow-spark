@@ -198,7 +198,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
 }
 
 object ArrowColumnarBatchRow {
-  var totalTimeCopy = 0
+  var totalTimeCopy = 0L
 
   /** Creates an empty ArrowColumnarBatchRow */
   def empty(parent: BufferAllocator): ArrowColumnarBatchRow =
@@ -214,7 +214,7 @@ object ArrowColumnarBatchRow {
     ArrowColumnarBatchRow.create(decoded._3, decoded._2)
   }
 
-  var totalTransferTime = 0
+  var totalTransferTime = 0L
 
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors
    * Transfers the vectors to a new-allocator with given name
