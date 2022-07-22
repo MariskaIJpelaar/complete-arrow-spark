@@ -80,6 +80,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     // spark uses it as well, source: https://databricks.com/blog/2014/10/10/spark-petabyte-sort.html
     val quickSort = getQuickSortFunc(ctx)
     val insertionSort = getInsertionSortFunc(ctx)
+    val timSort = getTimSort(ctx)
 
     val code =
       s"""
@@ -100,7 +101,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |    for (int $index = 0; $index < $batch.length(); ++$index)
        |      $indices.set($index, $index);
        |    $indices.setValueCount($batch.length());
-       |    $insertionSort($batch, $indices);
+       |    $timSort($batch, $indices);
        |
        |    $staticTransformers.applyIndices($batch.copy(), $indices).close();
        |
@@ -184,14 +185,14 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
   private def getInsertionSortFunc(ctx: CodegenContext): String = {
     insertionSortFunc.getOrElse {
       val insertionSort = ctx.freshName("insertionSort")
-      val func = ctx.addNewFunction(insertionSort, produceQuickSort(ctx, insertionSort))
+      val func = ctx.addNewFunction(insertionSort, produceInsertionSort(ctx, insertionSort))
       insertionSortFunc = Option(func)
       func
     }
   }
 
   /** from: org.apache.arrow.algorithm.sort.InsertionSorter */
-  def produceInsertionSort(ctx: CodegenContext, funcName: String): String = {
+  private def produceInsertionSort(ctx: CodegenContext, funcName: String): String = {
     // parameters
     val indices = ctx.freshName("indices")
     val batch = ctx.freshName("batch")
@@ -216,7 +217,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          |  for (int $index = $head+1; $index <= $last; ++$index) {
          |    int $key = $indices.get($index);
          |    int $index2 = $index - 1;
-         |    while ($index2 >= $head && $compare($indices.get($index2), $key) > 0) {
+         |    while ($index2 >= $head && $compare($batch, $indices.get($index2), $key) > 0) {
          |      $indices.set($index2 + 1, $indices.get($index2));
          |      $index2 = $index2 -1;
          |    }
@@ -226,6 +227,156 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
          |""".stripMargin
     code
   }
+
+  var mergeFunc: Option[String] = None
+  private def getMergeFunc(ctx: CodegenContext): String = {
+    mergeFunc.getOrElse {
+      val merge = ctx.freshName("merge")
+      val func = ctx.addNewFunction(merge, produceMerge(ctx, merge))
+      mergeFunc = Option(func)
+      func
+    }
+  }
+
+  private def produceMerge(ctx: CodegenContext, funcName: String): String = {
+    // parameters
+    val indices = ctx.freshName("indices")
+    val batch = ctx.freshName("batch")
+    val head = ctx.freshName("head")
+    val mid = ctx.freshName("mid")
+    val last = ctx.freshName("last")
+
+    // types
+    val indicesClass = classOf[IntVector].getName
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
+
+    // local variables
+    val leftLen = ctx.freshName("leftLen")
+    val rightLen = ctx.freshName("rightLen")
+    val leftIndices = ctx.freshName("leftIndices")
+    val rightIndices = ctx.freshName("rightIndices")
+    val leftIndex = ctx.freshName("leftIndex")
+    val rightIndex = ctx.freshName("rightIndex")
+    val index = ctx.freshName("index")
+    val i = ctx.freshName("i")
+
+    // function names
+    val compare = getCompareFunc(ctx)
+
+    val code =
+      s"""
+         | private void $funcName($batchClass $batch, $indicesClass $indices, int $head, int $mid, int $last) {
+         |  int $leftLen = $mid - $head + 1;
+         |  int $rightLen = $last - $mid;
+         |
+         |  $indicesClass $leftIndices = new $indicesClass("leftIndices", $indices.getAllocator());
+         |  $indicesClass $rightIndices = new $indicesClass("rightIndices", $indices.getAllocator());
+         |  try {
+         |    $leftIndices.setInitialCapacity($leftLen);
+         |    $leftIndices.allocateNew();
+         |    $rightIndices.setInitialCapacity($rightLen);
+         |    $rightIndices.allocateNew();
+         |    for (int $i = 0; $i < $leftLen; ++$i)
+         |      $leftIndices.set($i, $indices.get($head + $i));
+         |    for (int $i = 0; $i < $rightLen; ++$i)
+         |      $rightIndices.set($i, $indices.get($mid + 1 + $i));
+         |    $leftIndices.setValueCount($leftLen);
+         |    $rightIndices.setValueCount($rightLen);
+         |
+         |    int $leftIndex = 0;
+         |    int $rightIndex = 0;
+         |    int $index = $head;
+         |
+         |    while ($leftIndex < $leftLen && $rightIndex < $rightLen) {
+         |      if ($compare($batch, $leftIndices.get($leftIndex), $rightIndices.get($rightIndex)) <= 0) {
+         |        $indices.set($index, $leftIndices.get($leftIndex));
+         |        ++$leftIndex;
+         |      } else {
+         |        $indices.set($index, $rightIndices.get($rightIndex));
+         |        ++$rightIndex;
+         |      }
+         |      ++$index;
+         |    }
+         |
+         |    while ($leftIndex < $leftLen) {
+         |      $indices.set($index, $leftIndices.get($leftIndex));
+         |      ++$leftIndex;
+         |      ++$index;
+         |    }
+         |
+         |    while ($rightIndex < $rightLen) {
+         |      $indices.set($index, $rightIndices.get($rightIndex));
+         |      ++$rightIndex;
+         |      ++$index;
+         |    }
+         |  } finally {
+         |    try {
+         |      $leftIndices.close();
+         |      $rightIndices.close();
+         |    } catch (Exception e) {
+         |      e.printStackTrace();
+         |    }
+         |  }
+         | }
+         |""".stripMargin
+    code
+  }
+
+  var timSortFunc: Option[String] = None
+  private def getTimSort(ctx: CodegenContext): String = {
+    timSortFunc.getOrElse {
+      val timSort = ctx.freshName("timSort")
+      val func = ctx.addNewFunction(timSort, produceTimSort(ctx, timSort))
+      timSortFunc = Option(func)
+      func
+    }
+  }
+
+  private def produceTimSort(ctx: CodegenContext, funcName: String): String = {
+    // parameters
+    val indices = ctx.freshName("indices")
+    val batch = ctx.freshName("batch")
+
+    // types
+    val indicesClass = classOf[IntVector].getName
+    val batchClass = classOf[ArrowColumnarBatchRow].getName
+
+    // local variables
+    val i = ctx.freshName("i")
+    val size = ctx.freshName("size")
+    val head = ctx.freshName("head")
+    val mid = ctx.freshName("mid")
+    val last = ctx.freshName("last")
+
+    // 'constants'
+    val RUN = 32
+
+    // Function names
+    val insertionSort = getInsertionSortFunc(ctx)
+    val merge = getMergeFunc(ctx)
+
+    val code =
+      s"""
+         | private void $funcName($batchClass $batch, $indicesClass $indices) {
+         |    for (int $i = 0; $i < $batch.length(); $i += $RUN) {
+         |      $insertionSort($batch, $indices, $i, Math.min($i+$RUN-1, $batch.length()-1));
+         |    }
+         |
+         |    for (int $size = $RUN; $size < $batch.length(); $size = 2*$size) {
+         |      for (int $head = 0; $head < $batch.length(); $head += 2*$size) {
+         |        int $mid = $head + $size - 1;
+         |        int $last = Math.min($head + 2*$size - 1, $batch.length() - 1);
+         |
+         |        if ($mid < $last)
+         |          $merge($batch, $indices, $head, $mid, $last);
+         |      }
+         |    }
+         | }
+         |""".stripMargin
+    code
+  }
+
+
 
   var quickSortFunc: Option[String] = None
   private def getQuickSortFunc(ctx: CodegenContext): String = {
@@ -239,7 +390,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
 
 
   /** modified from: org.apache.arrow.algorithm.sort.IndexSorter */
-  def produceQuickSort(ctx: CodegenContext, funcName: String): String = {
+  private def produceQuickSort(ctx: CodegenContext, funcName: String): String = {
     // local variables
     val rangeStack = ctx.freshName("rangeStack")
     val high = ctx.freshName("high")
@@ -313,7 +464,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     }
   }
 
-  def producePartition(ctx: CodegenContext, funcName: String): String = {
+  private def producePartition(ctx: CodegenContext, funcName: String): String = {
     // parameters
     val low = ctx.freshName("low")
     val high = ctx.freshName("high")
@@ -363,7 +514,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     }
   }
 
-  def produceChoosePivot(ctx: CodegenContext, funcName: String): String = {
+  private def produceChoosePivot(ctx: CodegenContext, funcName: String): String = {
     // local vars
     val low = ctx.freshName("low")
     val high = ctx.freshName("high")
@@ -432,7 +583,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     }
   }
 
-  def produceCompare(ctx: CodegenContext, funcName: String): String = {
+  private def produceCompare(ctx: CodegenContext, funcName: String): String = {
     val index1 = ctx.freshName("index")
     val index2 = ctx.freshName("index")
 
