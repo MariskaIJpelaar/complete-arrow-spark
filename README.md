@@ -67,6 +67,7 @@ In there, I downloaded the required rpms:
  2. [libarrow.so.600](https://apache.jfrog.io/artifactory/arrow/centos/8/x86_64/Packages/arrow-libs-6.0.1-1.el8.x86_64.rpm)
  3. [libre2.so.0](https://download-ib01.fedoraproject.org/pub/epel/8/Everything/x86_64/Packages/r/re2-20190801-1.el8.x86_64.rpm)
  4. [libsnappy.so.1](https://dl.rockylinux.org/pub/rocky/8/BaseOS/x86_64/os/Packages/s/snappy-1.1.8-3.el8.x86_64.rpm)
+
 And 'unpacked' them through `rpm2cpio rpms/library.rpm | cpio -idv`.
 Finally, I prepended this local_lib_dir to `LD_LIBRARY_PATH`.
 
