@@ -7,8 +7,10 @@ import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
+import java.util.concurrent.atomic.AtomicLong
+
 object ArrowColumnarBatchRowSorters {
-  var totalTimeMultiColumnSort = 0L
+  var totalTimeMultiColumnSort: AtomicLong = new AtomicLong(0)
 
   /**
    * Performs a multi-columns sort on a batch
@@ -46,7 +48,7 @@ object ArrowColumnarBatchRowSorters {
           /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
           val ret = ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
           val t2 = System.nanoTime()
-          totalTimeMultiColumnSort += (t2 - t1)
+          totalTimeMultiColumnSort.addAndGet(t2 - t1)
           ret
         })
       }
@@ -66,7 +68,7 @@ object ArrowColumnarBatchRowSorters {
   //    }
   // Note: worst case: 0 + 1 + 2 + ... + (n-1) = ((n-1) * n) / 2 = O(n*n) + time to sort (n log n)
 
-  var totalTimeSort = 0L
+  var totalTimeSort: AtomicLong = new AtomicLong(0)
 
   /**
    * @param batch an ArrowColumnarBatchRow to be sorted
@@ -98,7 +100,7 @@ object ArrowColumnarBatchRowSorters {
         /** from IndexSorter: the following relations hold: v(indices[0]) <= v(indices[1]) <= ... */
         val ret = ArrowColumnarBatchRowTransformers.applyIndices(batch, indices)
         val t2 = System.nanoTime()
-        totalTimeSort += (t2 - t1)
+        totalTimeSort.addAndGet(t2 - t1)
         ret
       }
     }

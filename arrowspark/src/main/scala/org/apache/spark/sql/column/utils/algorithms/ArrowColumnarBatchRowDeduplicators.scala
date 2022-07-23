@@ -7,8 +7,10 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
+import java.util.concurrent.atomic.AtomicLong
+
 object ArrowColumnarBatchRowDeduplicators {
-  var totalTime = 0L
+  var totalTime: AtomicLong = new AtomicLong(0)
 
   /**
    * @param batch batch to gather unique values from, and close
@@ -34,7 +36,7 @@ object ArrowColumnarBatchRowDeduplicators {
           ArrowColumnarBatchRowTransformers.applyIndices(batch, VectorDeduplicator.uniqueIndices(indexAllocator, comparator, union))
         }
         val t2 = System.nanoTime()
-        totalTime += (t2-t1)
+        totalTime.addAndGet(t2 - t1)
         ret
       })
     }

@@ -10,9 +10,11 @@ import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
+import java.util.concurrent.atomic.AtomicLong
+
 /** Methods that do not fit into the other categories */
 object ArrowColumnarBatchRowUtils {
-  var totalTimeGetComparator = 0L
+  var totalTimeGetComparator: AtomicLong = new AtomicLong(0)
 
   /**
    * Get the SparkUnionComparator corresponding to given UnionVector and SortOrders
@@ -33,11 +35,11 @@ object ArrowColumnarBatchRowUtils {
     }
     val ret = new SparkUnionComparator(comparators)
     val t2 = System.nanoTime()
-    totalTimeGetComparator += (t2 - t1)
+    totalTimeGetComparator.addAndGet(t2 - t1)
     ret
   }
 
-  var totalTimeTake: Long = 0L
+  var totalTimeTake: AtomicLong = new AtomicLong(0)
 
   /**
    * Returns the merged arrays from multiple ArrowColumnarBatchRows
@@ -86,7 +88,7 @@ object ArrowColumnarBatchRowUtils {
         /** clear up the remainder */
         batches.foreach( extraTaker(_)._2.close() )
         val t2 = System.nanoTime()
-        totalTimeTake += (t2 - t1)
+        totalTimeTake.addAndGet(t2 - t1)
       }
     }
   }

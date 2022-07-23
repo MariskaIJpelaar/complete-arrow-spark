@@ -16,9 +16,11 @@ import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.types.{ArrayType, IntegerType}
 import org.apache.spark.sql.vectorized.ArrowColumnarArray
 
+import java.util.concurrent.atomic.AtomicLong
+
 object ArrowSortExec {
-  var totalTime = 0L
-  def incrementTotalTime(inc: Long): Unit = totalTime += inc
+  var totalTime: AtomicLong = new AtomicLong(0)
+  def incrementTotalTime(inc: Long): Unit = totalTime.addAndGet(inc)
 }
 
 /** copied and adapted from org.apache.spark.sql.execution.SortExec

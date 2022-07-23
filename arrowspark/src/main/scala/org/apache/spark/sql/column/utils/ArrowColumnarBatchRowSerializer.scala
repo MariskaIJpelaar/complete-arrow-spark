@@ -17,6 +17,7 @@ import org.apache.spark.util.NextIterator
 import java.io._
 import java.nio.ByteBuffer
 import java.nio.channels.Channels
+import java.util.concurrent.atomic.AtomicLong
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
@@ -33,8 +34,8 @@ class ArrowColumnarBatchRowSerializer(dataSize: Option[SQLMetric] = None) extend
 }
 
 object ArrowColumnarBatchRowSerializerInstance {
-  var totalTimeSerialize = 0L
-  var totalTimeDeserialize = 0L
+  var totalTimeSerialize: AtomicLong = new AtomicLong(0)
+  var totalTimeDeserialize: AtomicLong = new AtomicLong(0)
 }
 
 private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric], rootAllocator: Option[RootAllocator]) extends SerializerInstance {
@@ -96,7 +97,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
         getOos.writeInt(batch.numRows)
       }
       val t2 = System.nanoTime()
-      totalTimeSerialize += (t2 - t1)
+      totalTimeSerialize.addAndGet(t2 - t1)
       this
     }
     override def writeKey[T](key: T)(implicit evidence$5: ClassTag[T]): SerializationStream = this
@@ -127,7 +128,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
       all ++= batch.slice(0, reader)
       reader = s.read(batch)
     }
-    totalTimeDeserialize += (System.nanoTime() - t1)
+    totalTimeDeserialize.addAndGet(System.nanoTime() - t1)
 
 
     /** Caller should close batches in iterator */
@@ -195,7 +196,7 @@ private class ArrowColumnarBatchRowSerializerInstance(dataSize: Option[SQLMetric
           }).toArray, length))
         }
         val q2 = System.nanoTime()
-        totalTimeDeserialize += (q2 - q1)
+        totalTimeDeserialize.addAndGet(q2 - q1)
         ret
       }
 

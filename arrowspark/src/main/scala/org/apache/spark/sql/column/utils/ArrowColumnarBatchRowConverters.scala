@@ -13,11 +13,12 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.util
+import java.util.concurrent.atomic.AtomicLong
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 /** Methods that convert an ArrowColumnarBatchRows to another type, and taking care of closing of the input */
 object ArrowColumnarBatchRowConverters {
-  var totalTimeToRecordBatch = 0L
+  var totalTimeToRecordBatch: AtomicLong = new AtomicLong(0)
 
   /**
    * copied from org.apache.arrow.vector.VectorUnloader
@@ -55,11 +56,11 @@ object ArrowColumnarBatchRowConverters {
     }
     val ret = (new ArrowRecordBatch(rowCount, nodes, buffers, CompressionUtil.createBodyCompression(codec), true), rowCount)
     val t2 = System.nanoTime()
-    totalTimeToRecordBatch += (t2 - t1)
+    totalTimeToRecordBatch.addAndGet(t2 - t1)
     ret
   }
 
-  var totalTimeToRoot = 0L
+  var totalTimeToRoot: AtomicLong = new AtomicLong(0)
 
   /** Creates a VectorSchemaRoot from the provided batch and closes it
    * Returns the root with its allocator and the number of rows transferred
@@ -79,12 +80,12 @@ object ArrowColumnarBatchRowConverters {
         tp.getTo.asInstanceOf[FieldVector]
       }).toSeq: _*), allocator, rowCount)
       val t2 = System.nanoTime()
-      totalTimeToRoot += (t2 - t1)
+      totalTimeToRoot.addAndGet(t2 - t1)
       ret
     }
   }
 
-  var totalTimeToSplit = 0L
+  var totalTimeToSplit: AtomicLong = new AtomicLong(0)
 
   /**
    * Splits a single batch into two
@@ -103,12 +104,12 @@ object ArrowColumnarBatchRowConverters {
         batch.copyFromCaller("ArrowColumnarBatchRowConverters::split::second", splitPoint until batch.numRows))
 
       val t2 = System.nanoTime()
-      totalTimeToSplit += (t2 - t1)
+      totalTimeToSplit.addAndGet(t2 - t1)
       ret
     }
   }
 
-  var totalTimeToSplitColumns = 0L
+  var totalTimeToSplitColumns: AtomicLong = new AtomicLong(0)
 
   /**
    * Splits the current batch on its columns into two batches
@@ -144,13 +145,13 @@ object ArrowColumnarBatchRowConverters {
         }
         val ret = (firstBatch, new ArrowColumnarBatchRow(secondAllocator, columns, batch.numRows))
         val t2 = System.nanoTime()
-        totalTimeToSplitColumns += (t2 - t1)
+        totalTimeToSplitColumns.addAndGet(t2 - t1)
         ret
       }
     }
   }
 
-  var totalTimeToUnionVector = 0L
+  var totalTimeToUnionVector: AtomicLong = new AtomicLong(0)
 
   /**
    * Creates an UnionVector from the provided batch
@@ -175,13 +176,13 @@ object ArrowColumnarBatchRowConverters {
 
         val ret = (union, allocator)
         val t2 = System.nanoTime()
-        totalTimeToUnionVector += (t2 - t1)
+        totalTimeToUnionVector.addAndGet(t2 - t1)
         ret
       }
     }
   }
 
-  var totalTimeToMakeFresh = 0L
+  var totalTimeToMakeFresh: AtomicLong = new AtomicLong(0)
 
   /**
    * Creates an array of fresh ArrowColumnVectors with the same type as the given batch
@@ -206,7 +207,7 @@ object ArrowColumnarBatchRowConverters {
         new ArrowColumnVector(new_vec)
       }
       val t2 = System.nanoTime()
-      totalTimeToMakeFresh += (t2 - t1)
+      totalTimeToMakeFresh.addAndGet(t2 - t1)
       ret
     }
   }

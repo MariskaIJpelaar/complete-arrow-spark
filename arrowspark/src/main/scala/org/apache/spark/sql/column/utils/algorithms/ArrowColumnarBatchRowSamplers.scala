@@ -7,11 +7,12 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.util.random.XORShiftRandom
 
+import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 object ArrowColumnarBatchRowSamplers {
-  var totalTimeSample = 0L
+  var totalTimeSample: AtomicLong = new AtomicLong(0)
 
   /**
    * Sample rows from batches where the sample-size is determined by probability
@@ -51,14 +52,14 @@ object ArrowColumnarBatchRowSamplers {
           array foreach ( column => column.getValueVector.setValueCount(i) )
           val ret = new ArrowColumnarBatchRow(freshAllocator, array, i)
           val t2 = System.nanoTime()
-          totalTimeSample += (t2 - t1)
+          totalTimeSample.addAndGet(t2 - t1)
           ret
         }
       }
     }
   }
 
-  var totalTimeSampleAndCount = 0L
+  var totalTimeSampleAndCount: AtomicLong = new AtomicLong(0)
 
   /**
    * Reservoir sampling implementation that also returns the input size
@@ -131,7 +132,7 @@ object ArrowColumnarBatchRowSamplers {
       } finally {
         remainderBatch.foreach(_.close())
         val t2 = System.nanoTime()
-        totalTimeSampleAndCount += (t2 - t1)
+        totalTimeSampleAndCount.addAndGet(t2 - t1)
       }
     }
   }

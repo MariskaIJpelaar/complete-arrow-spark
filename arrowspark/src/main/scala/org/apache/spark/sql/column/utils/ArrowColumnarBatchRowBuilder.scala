@@ -8,10 +8,11 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 
 import java.io.Closeable
+import java.util.concurrent.atomic.AtomicLong
 import scala.collection.immutable.NumericRange
 
 object ArrowColumnarBatchRowBuilder {
-  var totalTime: Long = 0L
+  var totalTime: AtomicLong = new AtomicLong(0)
 }
 
 /** Note: closes first, and copies data to RootAllocator
@@ -48,7 +49,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
         new ArrowColumnVector(newVector)
       }
       val t2 = System.nanoTime()
-      ArrowColumnarBatchRowBuilder.totalTime += (t2 - t1)
+      ArrowColumnarBatchRowBuilder.totalTime.addAndGet(t2-t1)
       ret
     }
   }
@@ -113,7 +114,7 @@ class ArrowColumnarBatchRowBuilder(first: ArrowColumnarBatchRow, val numCols: Op
       }
       size += current_size
       val t2 = System.nanoTime()
-      ArrowColumnarBatchRowBuilder.totalTime += (t2 - t1)
+      ArrowColumnarBatchRowBuilder.totalTime.addAndGet(t2 - t1)
       this
     }
   }

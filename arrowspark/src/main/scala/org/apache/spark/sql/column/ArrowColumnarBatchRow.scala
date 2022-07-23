@@ -13,6 +13,7 @@ import org.apache.spark.sql.vectorized.{ArrowColumnVector, ArrowColumnarArray, C
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
 
 import java.io._
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * ArrowColumnarBatchRow as a wrapper around [[ArrowColumnVector]]s to be used as an [[InternalRow]]
@@ -88,7 +89,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
         new ArrowColumnVector(tp.getTo)
       }, range.length)
       val t2 = System.nanoTime()
-      totalTimeCopy += (t2 - t1)
+      totalTimeCopy.addAndGet(t2 - t1)
       return ret
     }
 
@@ -112,7 +113,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
       }, range.length)
     }
     val t2 = System.nanoTime()
-    totalTimeCopy += (t2 - t1)
+    totalTimeCopy.addAndGet(t2 - t1)
     ret
   }
 
@@ -198,7 +199,7 @@ class ArrowColumnarBatchRow(@transient val allocator: BufferAllocator, @transien
 }
 
 object ArrowColumnarBatchRow {
-  var totalTimeCopy = 0L
+  var totalTimeCopy: AtomicLong = new AtomicLong(0)
 
   /** Creates an empty ArrowColumnarBatchRow */
   def empty(parent: BufferAllocator): ArrowColumnarBatchRow =
@@ -214,7 +215,7 @@ object ArrowColumnarBatchRow {
     ArrowColumnarBatchRow.create(decoded._3, decoded._2)
   }
 
-  var totalTransferTime = 0L
+  var totalTransferTime: AtomicLong = new AtomicLong(0)
 
   /** Creates a fresh ArrowColumnarBatchRow from an array of ArrowColumnVectors
    * Transfers the vectors to a new-allocator with given name
@@ -236,7 +237,7 @@ object ArrowColumnarBatchRow {
       new ArrowColumnarBatchRow(allocator, newCols, size)
     }
     val t2 = System.nanoTime()
-    totalTransferTime += (t2 - t1)
+    totalTransferTime.addAndGet(t2 - t1)
     ret
   }
 

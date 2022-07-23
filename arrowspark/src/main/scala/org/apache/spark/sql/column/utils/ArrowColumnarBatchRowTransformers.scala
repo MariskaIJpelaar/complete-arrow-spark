@@ -8,10 +8,12 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.vectorized.ArrowColumnVector
 import org.apache.spark.util.random.XORShiftRandom
 
+import java.util.concurrent.atomic.AtomicLong
+
 
 /** Methods mapping an ArrowColumnarBatchRow to another ArrowColumnarBatchRow, also taking care of closing of the input */
 object ArrowColumnarBatchRowTransformers {
-  var totalTimeProjection = 0L
+  var totalTimeProjection: AtomicLong = new AtomicLong(0)
 
   /**
    * Perform a projection on the batch given some expressions
@@ -32,11 +34,11 @@ object ArrowColumnarBatchRowTransformers {
       }), batch.numRows)
     }
     val t2 = System.nanoTime()
-    totalTimeProjection += (t2 - t1)
+    totalTimeProjection.addAndGet(t2 - t1)
     ret
   }
 
-  var totalTimeTake = 0L
+  var totalTimeTake: AtomicLong = new AtomicLong(0)
 
   /**
    * Takes a range of rows from the batch
@@ -74,11 +76,11 @@ object ArrowColumnarBatchRowTransformers {
       }
     }
     val t2 = System.nanoTime()
-    totalTimeTake += (t2 - t1)
+    totalTimeTake.addAndGet(t2 - t1)
     ret
   }
 
-  var totalTimeSample = 0L
+  var totalTimeSample: AtomicLong = new AtomicLong(0)
 
   /**
    * Samples a random range from a batch
@@ -96,11 +98,11 @@ object ArrowColumnarBatchRowTransformers {
       take(batch, start until end)
     }
     val t2 = System.nanoTime()
-    totalTimeSample += (t2 - t1)
+    totalTimeSample.addAndGet(t2 - t1)
     ret
   }
 
-  var totalTimeAppendColumns = 0L
+  var totalTimeAppendColumns: AtomicLong = new AtomicLong(0)
 
   /**
    * Appends the columns of two batches and creates a new batch with it
@@ -127,11 +129,11 @@ object ArrowColumnarBatchRowTransformers {
       new ArrowColumnarBatchRow(newAllocator, firstCols ++ secondCols, first.numRows)
     })
     val t2 = System.nanoTime()
-    totalTimeAppendColumns += (t2 - t1)
+    totalTimeAppendColumns.addAndGet(t2 - t1)
     ret
   }
 
-  var totalTimeGetColumns = 0L
+  var totalTimeGetColumns: AtomicLong = new AtomicLong(0)
 
   /**
    * Returns a new batch containing the columns with the given names from the given batch
@@ -155,11 +157,11 @@ object ArrowColumnarBatchRowTransformers {
       new ArrowColumnarBatchRow(allocator, cols, batch.numRows)
     }
     val t2 = System.nanoTime()
-    totalTimeGetColumns += (t2 - t1)
+    totalTimeGetColumns.addAndGet(t2 - t1)
     ret
   }
 
-  var totalTimeApplyIndices = 0L
+  var totalTimeApplyIndices: AtomicLong = new AtomicLong(0)
 
   /**
    * Creates a new ArrowColumnarBatchRow from the given ArrowColumnarBatchRow,
@@ -200,7 +202,7 @@ object ArrowColumnarBatchRowTransformers {
       }, indices.getValueCount)
     })
     val t2 = System.nanoTime()
-    totalTimeApplyIndices += (t2 - t1)
+    totalTimeApplyIndices.addAndGet(t2 - t1)
     ret
   }
 }

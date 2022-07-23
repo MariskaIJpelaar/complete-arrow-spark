@@ -8,10 +8,11 @@ import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowConverters, ArrowColumnarBatchRowTransformers, ArrowColumnarBatchRowUtils}
 
+import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable
 
 object ArrowColumnarBatchRowDistributors {
-  var totalTimeBucketDistributor = 0L
+  var totalTimeBucketDistributor: AtomicLong = new AtomicLong(0)
 
   /**
    * @param key ArrowColumnarBatchRow to define distribution for, and close
@@ -37,13 +38,13 @@ object ArrowColumnarBatchRowDistributors {
           { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distributeParallel() }
         )
         val t2 = System.nanoTime()
-        totalTimeBucketDistributor += (t2-t1)
+        totalTimeBucketDistributor.addAndGet(t2 - t1)
         ret
       })
     })
   }
 
-  var totalTimeDistributeBySort = 0L
+  var totalTimeDistributeBySort: AtomicLong = new AtomicLong(0)
 
   /**
    * Distributes a batch to a mapping (partitionId, Batch), according to the provided Array of Ints
@@ -62,7 +63,7 @@ object ArrowColumnarBatchRowDistributors {
               (partitionId, sorted.copyFromCaller(s"ArrowColumnarBatchRowDistributors::distributeBySort::copy::$partitionId", range))
             }
             val t2 = System.nanoTime()
-            totalTimeBucketDistributor += (t2-t1)
+            totalTimeBucketDistributor.addAndGet(t2 - t1)
             ret
           }
         }
@@ -70,7 +71,7 @@ object ArrowColumnarBatchRowDistributors {
     }
   }
 
-  var totalTimeDistribute = 0L
+  var totalTimeDistribute: AtomicLong = new AtomicLong(0)
 
   /**
    * @param key ArrowColumnarBatchRow to distribute and close
@@ -99,7 +100,7 @@ object ArrowColumnarBatchRowDistributors {
       } finally {
         distributed.foreach ( item => item._2.close() )
         val t2 = System.nanoTime()
-        totalTimeDistribute += (t2 - t1)
+        totalTimeDistribute.addAndGet(t2 - t1)
       }
     }
   }

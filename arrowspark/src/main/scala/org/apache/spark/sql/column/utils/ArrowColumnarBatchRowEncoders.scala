@@ -14,10 +14,11 @@ import org.apache.spark.util.NextIterator
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.nio.channels.Channels
+import java.util.concurrent.atomic.AtomicLong
 import scala.collection.convert.ImplicitConversions.`collection AsScalaIterable`
 
 object ArrowColumnarBatchRowEncoders {
-  var totalTimeEncode = 0L
+  var totalTimeEncode: AtomicLong = new AtomicLong(0)
 
   /**  Note: similar to getByteArrayRdd(...) -- works like a 'flatten'
    * Encodes the first numRows rows of the first numCols columns of a series of ArrowColumnarBatchRows
@@ -94,11 +95,11 @@ object ArrowColumnarBatchRowEncoders {
     } finally {
       iter.foreach( extraEncoder(_)._2.close() )
       val t2 = System.nanoTime()
-      totalTimeEncode += (t2 - t1)
+      totalTimeEncode.addAndGet(t2 - t1)
     }
   }
 
-  var totalTimeDecode = 0L
+  var totalTimeDecode: AtomicLong = new AtomicLong(0)
 
   /** Note: similar to decodeUnsafeRows
    *
@@ -141,7 +142,7 @@ object ArrowColumnarBatchRowEncoders {
               new ArrowColumnVector(tp.getTo)
             }).toArray, length))
             val t2 = System.nanoTime()
-            totalTimeDecode += (t2 -t1)
+            totalTimeDecode.addAndGet(t2 - t1)
             ret
           }
         }
