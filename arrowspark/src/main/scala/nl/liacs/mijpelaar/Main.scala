@@ -38,6 +38,8 @@ class Main extends Callable[Unit] {
   private var log_dir: Path = Paths.get("", "output")
   @picocli.CommandLine.Option(names = Array("--log-file"))
   private var log_file: String = "exp" + ZonedDateTime.now().truncatedTo(ChronoUnit.MINUTES).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + ".log"
+  @picocli.CommandLine.Option(names = Array("--append"))
+  private var append: Boolean = true
   @picocli.CommandLine.Option(names = Array("--batch-size"))
   private var batch_size: String = ""
 
@@ -97,7 +99,7 @@ class Main extends Callable[Unit] {
       new File(log_dir.toAbsolutePath.toString).mkdir() // create directory if it does not exist yet
       val write_file = log_dir.resolve(log_file)
       // Files.write(write_file, "".getBytes(StandardCharsets.UTF_8)) // clear file
-      val fw = new FileWriter(write_file.toFile) 
+      val fw = new FileWriter(write_file.toFile, append)
       fw.write(s"# Experiment repeated $nr_runs times, with running times in seconds\n")
       if (data_file != "")
         fw.write(s"# File used: $data_file\n")
