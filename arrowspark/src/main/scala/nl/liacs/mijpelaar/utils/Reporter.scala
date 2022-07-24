@@ -1,11 +1,9 @@
 package nl.liacs.mijpelaar.utils
 
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
-import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.column.utils._
+import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.execution.ArrowSortExec
-import org.apache.spark.sql.internal.ArrowSQLConf
-import org.apache.spark.sql.internal.ArrowSQLConf.NATIVE_SCANNER_BATCHSIZE
 
 object Reporter {
 
@@ -48,7 +46,6 @@ object Reporter {
     report += reportSingle("transfer", ArrowColumnarBatchRow.totalTransferTime.get)
     report += reportSingle("sort-exec", ArrowSortExec.totalTime.get)
     println(s"REPORT $id:\n$report")
-    println(s"BATCHSIZE: ${ArrowSQLConf.get(NATIVE_SCANNER_BATCHSIZE)}")
   }
 
 }

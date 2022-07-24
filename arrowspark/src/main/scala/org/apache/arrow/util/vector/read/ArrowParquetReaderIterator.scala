@@ -18,7 +18,7 @@ import scala.collection.JavaConverters.asScalaBufferConverter
 import scala.collection.mutable.ArrayBuffer
 
 /** inspired from: https://arrow.apache.org/cookbook/java/dataset.html#query-parquet-file */
-class ArrowParquetReaderIterator(protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] with AutoCloseable {
+class ArrowParquetReaderIterator(batchSize: Long, protected val file: PartitionedFile, protected val rootAllocator: RootAllocator) extends Iterator[ArrowColumnarBatchRow] with AutoCloseable {
   if (file.length > column.AllocationManager.perAllocatorSize)
     throw new RuntimeException("[ArrowParquetReaderIterator] Partition is too large")
 
@@ -36,8 +36,7 @@ class ArrowParquetReaderIterator(protected val file: PartitionedFile, protected 
   val scanner: Scanner = {
     Resources.autoCloseTryGet(new FileSystemDatasetFactory(rootAllocator, NativeMemoryPool.getDefault, FileFormat.PARQUET, file.filePath)) { factory =>
       val dataset = factory.finish()
-      // TODO: make configurable?
-      val scanner = dataset.newScan(new ScanOptions(Integer.MAX_VALUE))
+      val scanner = dataset.newScan(new ScanOptions(batchSize))
       scheduleClose(dataset, scanner)
       scanner
     }

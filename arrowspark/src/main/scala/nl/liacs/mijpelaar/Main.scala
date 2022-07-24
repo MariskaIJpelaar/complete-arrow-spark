@@ -2,6 +2,7 @@ package nl.liacs.mijpelaar
 
 import nl.liacs.mijpelaar.evaluation.EvaluationSuite
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.internal.ArrowConf
 import org.apache.spark.sql.util.ArrowSparkExtensionWrapper
 import picocli.CommandLine
 
@@ -37,6 +38,8 @@ class Main extends Callable[Unit] {
   private var log_dir: Path = Paths.get("", "output")
   @picocli.CommandLine.Option(names = Array("--log-file"))
   private var log_file: String = "exp" + ZonedDateTime.now().truncatedTo(ChronoUnit.MINUTES).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + ".log"
+  @picocli.CommandLine.Option(names = Array("--batch-size"))
+  private var batch_size: String = ""
 
   private val num_part: Int = 10
 
@@ -69,6 +72,8 @@ class Main extends Callable[Unit] {
         .withExtensions(ArrowSparkExtensionWrapper.injectAll)
       if (local)
         builder.master("local[4]")
+      if (batch_size != "")
+        builder.config(ArrowConf.NATIVE_SCANNER_BATCHSIZE.key, batch_size)
       val spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("ERROR")
 

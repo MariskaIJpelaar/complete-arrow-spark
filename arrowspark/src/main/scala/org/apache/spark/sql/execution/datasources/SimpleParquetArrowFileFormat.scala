@@ -10,6 +10,8 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.ArrowFileFormat
 import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat, ParquetUtils}
+import org.apache.spark.sql.internal.ArrowConf
+import org.apache.spark.sql.internal.ArrowConf.NATIVE_SCANNER_BATCHSIZE
 import org.apache.spark.sql.sources.{DataSourceRegister, Filter}
 import org.apache.spark.sql.types.StructType
 
@@ -37,7 +39,7 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
       sparkSession: SparkSession, dataSchema: StructType, partitionSchema: StructType,
       requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String],
       hadoopConf: Configuration): (PartitionedFile, RootAllocator) => Iterator[ArrowColumnarBatchRow] = {
-    (file: PartitionedFile, root: RootAllocator) => {
-      new ArrowParquetReaderIterator(file, root) }
+    val batchSize = ArrowConf.get(sparkSession, NATIVE_SCANNER_BATCHSIZE)
+    (file: PartitionedFile, root: RootAllocator) => { new ArrowParquetReaderIterator(batchSize, file, root) }
   }
 }

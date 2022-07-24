@@ -16,7 +16,7 @@ class ArrowParquetReaderTests extends AnyFunSuite {
     Resources.autoCloseTryGet(newRoot()) { root =>
       dir.files foreach { file =>
         val partition = PartitionedFile(InternalRow.empty, File(file.path).toURI.toString, 0, file.length)
-        val iter = new ArrowParquetReaderIterator(partition, root)
+        val iter = new ArrowParquetReaderIterator(Integer.MAX_VALUE, partition, root)
         iter.map( batch =>
           Resources.autoCloseTryGet(batch) { batch =>
             batch.numRows
@@ -35,7 +35,7 @@ class ArrowParquetReaderTests extends AnyFunSuite {
       Resources.autoCloseTryGet(newRoot()) { root =>
         dir.files foreach { file =>
           val partition = PartitionedFile(InternalRow.empty, File(file.path).toURI.toString, 0, file.length)
-          val iter = new ArrowParquetReaderIterator(partition, root)
+          val iter = new ArrowParquetReaderIterator(Integer.MAX_VALUE, partition, root)
           iter.map( batch =>
             Resources.autoCloseTryGet(batch) { batch =>
               batch.numRows
