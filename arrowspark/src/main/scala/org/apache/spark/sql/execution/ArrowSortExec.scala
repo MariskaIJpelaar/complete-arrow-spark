@@ -12,6 +12,8 @@ import org.apache.spark.sql.column
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowColumnarBatchRowTransformers}
 import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowSorters
+import org.apache.spark.sql.internal.ArrowConf
+import org.apache.spark.sql.internal.ArrowConf.SortingAlgorithm.{CompiledInsertionsort, CompiledQuicksort, CompiledTomsort, GenericQuicksort}
 import org.apache.spark.sql.rdd.ArrowRDD
 import org.apache.spark.sql.types.{ArrayType, IntegerType}
 import org.apache.spark.sql.vectorized.ArrowColumnarArray
@@ -86,6 +88,52 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val insertionSort = getInsertionSortFunc(ctx)
     val timSort = getTimSort(ctx)
 
+    val sorting: String = ArrowConf.getSortingAlgorithm(sparkContext).getOrElse( throw new RuntimeException("No valid sorting algorithm chosen") ) match {
+      case GenericQuicksort =>
+        s"""
+           | if (((${classOf[Seq[SortOrder]].getName})$orders).length() == 1) {
+           |    ${classOf[SortOrder].getName} $order = (${classOf[SortOrder].getName})(((${classOf[Seq[SortOrder]].getName})$orders).head());
+           |    int $col = $thisPlan.attributeReferenceToCol($order);
+           |    $newBatch = $staticSorter.sort($batch, $col, $order);
+           |  } else {
+           |    $newBatch = $staticSorter.multiColumnSort($batch, $orders);
+           |  }
+           |""".stripMargin
+      case CompiledQuicksort =>
+        s"""
+           | $indices.setInitialCapacity($batch.length());
+           | $indices.allocateNew();
+           | for (int $index = 0; $index < $batch.length(); ++$index)
+           |   $indices.set($index, $index);
+           | $indices.setValueCount($batch.length());
+           | $quickSort($batch, $indices);
+           |
+           | $newBatch = $staticTransformers.applyIndices($batch, $indices);
+           |""".stripMargin
+      case CompiledInsertionsort =>
+        s"""
+           | $indices.setInitialCapacity($batch.length());
+           | $indices.allocateNew();
+           | for (int $index = 0; $index < $batch.length(); ++$index)
+           |   $indices.set($index, $index);
+           | $indices.setValueCount($batch.length());
+           | $insertionSort($batch, $indices);
+           |
+           | $newBatch = $staticTransformers.applyIndices($batch, $indices);
+           |""".stripMargin
+      case CompiledTomsort =>
+        s"""
+           | $indices.setInitialCapacity($batch.length());
+           | $indices.allocateNew();
+           | for (int $index = 0; $index < $batch.length(); ++$index)
+           |   $indices.set($index, $index);
+           | $indices.setValueCount($batch.length());
+           | $timSort($batch, $indices);
+           |
+           | $newBatch = $staticTransformers.applyIndices($batch, $indices);
+           |""".stripMargin
+    }
+
     val code =
       s"""
        | if ($needToSort) {
@@ -100,15 +148,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
        |  long t1 = System.nanoTime();
        |  $indicesClass $indices = new $indicesClass("indices", $staticManager.createAllocator($root, "IndicesAllocator"));
        |  try {
-       |    $indices.setInitialCapacity($batch.length());
-       |    $indices.allocateNew();
-       |    for (int $index = 0; $index < $batch.length(); ++$index)
-       |      $indices.set($index, $index);
-       |    $indices.setValueCount($batch.length());
-       |    $timSort($batch, $indices);
-       |
-       |    $newBatch = $staticTransformers.applyIndices($batch, $indices);
-       |
+       |    $sorting
        |  } finally {
        |    try {
        |      $indices.close();

@@ -44,6 +44,8 @@ class Main extends Callable[Unit] {
   private var batch_size: String = ""
   @picocli.CommandLine.Option(names = Array("--distribution-algorithm"))
   private var distribute_algorithm: String = ""
+  @picocli.CommandLine.Option(names = Array("--sorting-algorithm"))
+  private var sorting_algorithm: String = ""
   @picocli.CommandLine.Option(names = Array("--report-directory"))
   private var report_directory: String = ""
   @picocli.CommandLine.Option(names = Array("--only-vanilla"))
@@ -89,6 +91,8 @@ class Main extends Callable[Unit] {
         builder.config(ArrowConf.ARROWRDD_REPORT_DIRECTORY.key, report_directory)
       if (distribute_algorithm != "")
         builder.config(ArrowConf.DISTRIBUTOR_ALGORITHM.key, distribute_algorithm)
+      if (sorting_algorithm != "")
+        builder.config(ArrowConf.SORTING_ALGORITHM.key, sorting_algorithm)
       val spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("ERROR")
 

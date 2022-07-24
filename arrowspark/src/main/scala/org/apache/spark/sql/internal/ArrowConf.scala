@@ -2,7 +2,6 @@ package org.apache.spark.sql.internal
 
 import org.apache.spark.internal.config.ConfigEntry
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.internal.ArrowConf.DistributorAlgorithm.fromFunction
 import org.apache.spark.{SparkConf, SparkContext}
 
 import java.time.LocalDateTime
@@ -55,6 +54,34 @@ object ArrowConf {
     .stringConf
     .checkValue( distributorAlgorithms.contains(_), errorMsg = s"Value not one of $distributorAlgorithmsString" )
     .createWithDefault(distributorAlgorithms(2))
-  def getDistributorAlgorithm(sparkConf: SparkConf): Option[DistributorAlgorithm] = fromFunction(sparkConf.get(DISTRIBUTOR_ALGORITHM))
+  def getDistributorAlgorithm(sparkConf: SparkConf): Option[DistributorAlgorithm] = DistributorAlgorithm.fromFunction(sparkConf.get(DISTRIBUTOR_ALGORITHM))
+
+  /** Sorting-Algorithms */
+  abstract sealed class SortingAlgorithm(function: String)
+  object SortingAlgorithm {
+    case object GenericQuicksort extends SortingAlgorithm("genericQuicksort")
+    case object CompiledQuicksort extends SortingAlgorithm("compiledQuicksort")
+    case object CompiledInsertionsort extends SortingAlgorithm("compiledInsertionsort")
+    case object CompiledTomsort extends SortingAlgorithm("compiledTomsort")
+
+    def fromFunction(function: String): Option[SortingAlgorithm] = function match {
+      case "genericQuicksort" => Some(GenericQuicksort)
+      case "compiledQuicksort" => Some(CompiledQuicksort)
+      case "compiledInsertionsort" => Some(CompiledInsertionsort)
+      case "compiledTomsort" => Some(CompiledTomsort)
+      case _ => None
+    }
+  }
+  private val sortingAlgorithms: Array[String] = Array("genericQuicksort", "compiledQuicksort", "compiledInsertionsort", "compiledTomsort")
+  private val sortingAlgorithmString: String = sortingAlgorithms.map(alg => s"'$alg''").mkString(", ")
+  val SORTING_ALGORITHM: ConfigEntry[String] = SQLConf.buildConf("spark.arrow.sorting.algorithm")
+    .doc(s"The algorithm to use for sorting, choices: $sortingAlgorithmString")
+    .version(latestVersion)
+    .stringConf
+    .checkValue(sortingAlgorithms.contains(_), errorMsg = s"Value not one of $sortingAlgorithmString")
+    .createWithDefault(sortingAlgorithms(3))
+
+  def getSortingAlgorithm(sparkContext: SparkContext): Option[SortingAlgorithm] = getSortingAlgorithm(sparkContext.getConf)
+  def getSortingAlgorithm(sparkConf: SparkConf): Option[SortingAlgorithm] = SortingAlgorithm.fromFunction(sparkConf.get(SORTING_ALGORITHM))
 
 }
