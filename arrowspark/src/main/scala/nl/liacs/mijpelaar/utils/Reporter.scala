@@ -6,6 +6,7 @@ import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDedupl
 import org.apache.spark.sql.execution.ArrowSortExec
 
 import java.io.FileWriter
+import java.nio.file.{Files, Paths}
 import scala.reflect.io.Directory
 
 object Reporter {
@@ -52,11 +53,12 @@ object Reporter {
       .resolve(executorId.filterNot(_.isWhitespace))
       .resolve(stageId.filterNot(_.isWhitespace))
       .resolve(s"${partitionId.filterNot(_.isWhitespace)}.log")
-    // TODO: create directory recursively?
+
+    Files.createDirectories(Paths.get(path.parent.path))
     path.createFile(failIfExists = false)
 
     Resources.autoCloseTryGet(new FileWriter(path.path)) { writer =>
-      writer.write(s"# Executor ID: $executorId, Stage ID: $stageId, Partition ID: $partitionId")
+      writer.write(s"# Executor ID: $executorId, Stage ID: $stageId, Partition ID: $partitionId\n")
       writer.write(report)
     }
   }
