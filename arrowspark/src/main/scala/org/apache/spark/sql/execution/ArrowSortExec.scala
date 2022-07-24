@@ -396,7 +396,7 @@ case class ArrowSortExec(sortOrder: Seq[SortOrder], global: Boolean, child: Spar
     val last = ctx.freshName("last")
 
     // 'constants'
-    val RUN = 32
+    val RUN = ArrowConf.get(sparkContext, ArrowConf.TIMSORT_RUN)
 
     // Function names
     val insertionSort = getInsertionSortFunc(ctx)

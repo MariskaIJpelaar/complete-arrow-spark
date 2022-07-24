@@ -50,6 +50,8 @@ class Main extends Callable[Unit] {
   private var parquet_reader: String = ""
   @picocli.CommandLine.Option(names = Array("--bucketseach-parallel"))
   private var bucketsearch_parallel: Boolean = false
+  @picocli.CommandLine.Option(names = Array("--timsort-runs"))
+  private var timsort_runs: Int = -1
   @picocli.CommandLine.Option(names = Array("--report-directory"))
   private var report_directory: String = ""
   @picocli.CommandLine.Option(names = Array("--only-vanilla"))
@@ -100,6 +102,8 @@ class Main extends Callable[Unit] {
       if (parquet_reader != "")
         builder.config(ArrowConf.PARQUET_READER.key, parquet_reader)
       builder.config(ArrowConf.BUCKETSEARCH_PARALLEL.key, bucketsearch_parallel)
+      if (timsort_runs != -1)
+        builder.config(ArrowConf.TIMSORT_RUN.key, timsort_runs)
       val spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("ERROR")
 
