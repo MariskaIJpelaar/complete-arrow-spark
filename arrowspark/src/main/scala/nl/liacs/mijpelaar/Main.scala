@@ -44,6 +44,11 @@ class Main extends Callable[Unit] {
   private var batch_size: String = ""
   @picocli.CommandLine.Option(names = Array("--report-directory"))
   private var report_directory: String = ""
+  @picocli.CommandLine.Option(names = Array("--only-vanilla"))
+  private var only_vanilla: Boolean = false
+  @picocli.CommandLine.Option(names = Array("--only-cas"))
+  private var only_cas: Boolean = false
+
 
   private val num_part: Int = 10
 
@@ -102,7 +107,6 @@ class Main extends Callable[Unit] {
        */
       new File(log_dir.toAbsolutePath.toString).mkdir() // create directory if it does not exist yet
       val write_file = log_dir.resolve(log_file)
-      // Files.write(write_file, "".getBytes(StandardCharsets.UTF_8)) // clear file
       val fw = new FileWriter(write_file.toFile, append)
       fw.write(s"# Experiment repeated $nr_runs times, with running times in seconds\n")
       if (data_file != "")
@@ -116,7 +120,7 @@ class Main extends Callable[Unit] {
        */
       0 until nr_runs foreach { _ =>
         if (data_dir != "")
-          EvaluationSuite.sort(spark, fw, Directory(data_dir))
+          EvaluationSuite.sort(spark, fw, Directory(data_dir), onlyCas = only_cas, onlyVanilla = only_vanilla)
         else if (data_file != "")
           EvaluationSuite.sort(spark, fw, data_file)
       }
