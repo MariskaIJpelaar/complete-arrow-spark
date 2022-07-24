@@ -84,4 +84,27 @@ object ArrowConf {
   def getSortingAlgorithm(sparkContext: SparkContext): Option[SortingAlgorithm] = getSortingAlgorithm(sparkContext.getConf)
   def getSortingAlgorithm(sparkConf: SparkConf): Option[SortingAlgorithm] = SortingAlgorithm.fromFunction(sparkConf.get(SORTING_ALGORITHM))
 
+  /** Parquet Reader */
+  abstract sealed class ParquetReader(function: String)
+  object ParquetReader {
+    case object TrivediReader extends ParquetReader("trivedi")
+    case object NativeReader extends ParquetReader("native")
+
+    def fromFunction(function: String): Option[ParquetReader] = function match {
+      case "trivedi" => Some(TrivediReader)
+      case "native" => Some(NativeReader)
+      case _ => None
+    }
+  }
+  private val parquetReaders: Array[String] = Array("trivedi", "native")
+  private val parquetReaderString: String = parquetReaders.map(alg => s"'$alg''").mkString(", ")
+  val PARQUET_READER: ConfigEntry[String] = SQLConf.buildConf("spark.arrow.reader.parquet")
+    .doc(s"The reader-type to use for reading parquet, choices: $parquetReaderString")
+    .version(latestVersion)
+    .stringConf
+    .checkValue(parquetReaders.contains(_), errorMsg = s"Value not one of $parquetReaderString")
+    .createWithDefault(parquetReaders(1))
+  def getParquetReader(sparkSession: SparkSession): Option[ParquetReader] = getParquetReader(sparkSession.sparkContext.getConf)
+  def getParquetReader(sparkConf: SparkConf): Option[ParquetReader] = ParquetReader.fromFunction(sparkConf.get(PARQUET_READER))
+
 }

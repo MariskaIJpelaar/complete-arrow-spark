@@ -1,7 +1,7 @@
 package org.apache.spark.sql.execution.datasources
 
 import org.apache.arrow.memory.RootAllocator
-import org.apache.arrow.util.vector.read.ArrowParquetReaderIterator
+import org.apache.arrow.util.vector.read.{ArrowParquetReaderIterator, ParquetReaderIterator}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce.Job
@@ -11,7 +11,7 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.execution.ArrowFileFormat
 import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat, ParquetUtils}
 import org.apache.spark.sql.internal.ArrowConf
-import org.apache.spark.sql.internal.ArrowConf.NATIVE_SCANNER_BATCHSIZE
+import org.apache.spark.sql.internal.ArrowConf.{NATIVE_SCANNER_BATCHSIZE, ParquetReader}
 import org.apache.spark.sql.sources.{DataSourceRegister, Filter}
 import org.apache.spark.sql.types.StructType
 
@@ -40,6 +40,10 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
       requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String],
       hadoopConf: Configuration): (PartitionedFile, RootAllocator) => Iterator[ArrowColumnarBatchRow] = {
     val batchSize = ArrowConf.get(sparkSession, NATIVE_SCANNER_BATCHSIZE)
-    (file: PartitionedFile, root: RootAllocator) => { new ArrowParquetReaderIterator(batchSize, file, root) }
+    val readerType = ArrowConf.getParquetReader(sparkSession).getOrElse(throw new RuntimeException("No valid reader type was chosen"))
+    (file: PartitionedFile, root: RootAllocator) => readerType match {
+        case ParquetReader.TrivediReader => new ParquetReaderIterator(file, root)
+        case ParquetReader.NativeReader => new ArrowParquetReaderIterator(batchSize, file, root)
+      }
   }
 }

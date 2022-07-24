@@ -46,6 +46,8 @@ class Main extends Callable[Unit] {
   private var distribute_algorithm: String = ""
   @picocli.CommandLine.Option(names = Array("--sorting-algorithm"))
   private var sorting_algorithm: String = ""
+  @picocli.CommandLine.Option(names = Array("--parquet-reader"))
+  private var parquet_reader: String = ""
   @picocli.CommandLine.Option(names = Array("--report-directory"))
   private var report_directory: String = ""
   @picocli.CommandLine.Option(names = Array("--only-vanilla"))
@@ -93,6 +95,8 @@ class Main extends Callable[Unit] {
         builder.config(ArrowConf.DISTRIBUTOR_ALGORITHM.key, distribute_algorithm)
       if (sorting_algorithm != "")
         builder.config(ArrowConf.SORTING_ALGORITHM.key, sorting_algorithm)
+      if (parquet_reader != "")
+        builder.config(ArrowConf.PARQUET_READER.key, parquet_reader)
       val spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("ERROR")
 
