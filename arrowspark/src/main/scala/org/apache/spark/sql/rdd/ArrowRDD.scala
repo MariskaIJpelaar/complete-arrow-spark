@@ -7,13 +7,19 @@ import org.apache.spark.rdd.{RDD, RDDOperationScope}
 import org.apache.spark.sql.column.AllocationManager.newRoot
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowUtils}
-import org.apache.spark.{ArrowPartition, Partition, TaskContext}
+import org.apache.spark.sql.internal.ArrowConf
+import org.apache.spark.sql.internal.ArrowConf.ARROWRDD_REPORT_DIRECTORY
+import org.apache.spark.{ArrowPartition, Partition, SparkEnv, TaskContext}
 
+import java.io.File
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
+import scala.reflect.io.Directory
 
 // Caller should close batches in RDD
 trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
+  protected val reportDirectory: String = ArrowConf.get(sparkContext, ARROWRDD_REPORT_DIRECTORY)
+
   // Caller should close returned batches
   // Closes the batches in the RDD
   override def collect(): Array[ArrowColumnarBatchRow] = ArrowRDD.collect(this).map(_._2)
@@ -25,12 +31,13 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
   override def toLocalIterator: Iterator[ArrowColumnarBatchRow] = ArrowRDD.toLocalIterator(this)
 
   override def compute(split: Partition, context: TaskContext): Iterator[ArrowColumnarBatchRow] = split match {
-    case arrowPartition: ArrowPartition => {
+    case arrowPartition: ArrowPartition =>
+      val executorId = Option(SparkEnv.get).getOrElse( throw new RuntimeException("ArrowRDD: cannot get SparkEnv")).executorId
+      val stageId = context.stageId()
       context.addTaskCompletionListener[Unit]( _ =>
         try {
-//          println(s"close: ${arrowPartition.asInstanceOf[ArrowFilePartition].filePartition.files.map(file => file.toString()).mkString("Array(", ", ", ")")}")
           arrowPartition.allocator.close()
-          Reporter.report(id=split.toString)
+          Reporter.report(new Directory(new File(reportDirectory)), executorId = executorId, stageId = stageId.toString, partitionId=split.toString)
         } catch {
           case e: Throwable =>
             println("---------------DEBUG------------------")
@@ -40,9 +47,8 @@ trait ArrowRDD extends RDD[ArrowColumnarBatchRow] {
         }
 
       )
-//      println(s"compute: ${arrowPartition.asInstanceOf[ArrowFilePartition].filePartition.files.map(file => file.toString()).mkString("Array(", ", ", ")")}")
+      //      println(s"compute: ${arrowPartition.asInstanceOf[ArrowFilePartition].filePartition.files.map(file => file.toString()).mkString("Array(", ", ", ")")}")
       compute(arrowPartition, context)
-    }
     case _ => throw new IllegalArgumentException(s"ArrowRDD can only accept ArrowPartitions, not ${split.getClass.getName}")
   }
 

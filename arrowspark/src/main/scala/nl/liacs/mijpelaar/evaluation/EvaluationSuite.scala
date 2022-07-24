@@ -1,6 +1,5 @@
 package nl.liacs.mijpelaar.evaluation
 
-import nl.liacs.mijpelaar.utils.Reporter
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.column._
@@ -101,8 +100,6 @@ object EvaluationSuite {
     fw.write("CAS stage 2: %04.3f\n".format(sortingTime))
     fw.write("CAS total: %04.3f\n".format((cas_stop-cas_start)/1e9d))
     fw.flush()
-
-    Reporter.report(id="driver")
   }
 
 

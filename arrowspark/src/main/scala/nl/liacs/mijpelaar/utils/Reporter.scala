@@ -5,15 +5,17 @@ import org.apache.spark.sql.column.utils._
 import org.apache.spark.sql.column.utils.algorithms.{ArrowColumnarBatchRowDeduplicators, ArrowColumnarBatchRowDistributors, ArrowColumnarBatchRowSamplers, ArrowColumnarBatchRowSorters}
 import org.apache.spark.sql.execution.ArrowSortExec
 
-object Reporter {
+import java.io.FileWriter
+import scala.reflect.io.Directory
 
+object Reporter {
   private def reportSingle(name: String, value: Long): String = {
     val converted = value / 1e9d
     if (converted < 0.01) ""
     else "%s %04.3f\n".format(name, converted)
   }
 
-  def report(id: String = ""): Unit = {
+  def report(directory: Directory, executorId: String = "", stageId: String = "", partitionId: String = ""): Unit = {
     var report = ""
     report += reportSingle("builder", ArrowColumnarBatchRowBuilder.totalTime.get)
     report += reportSingle("unique", ArrowColumnarBatchRowDeduplicators.totalTime.get)
@@ -45,7 +47,18 @@ object Reporter {
     report += reportSingle("copy", ArrowColumnarBatchRow.totalTimeCopy.get)
     report += reportSingle("transfer", ArrowColumnarBatchRow.totalTransferTime.get)
     report += reportSingle("sort-exec", ArrowSortExec.totalTime.get)
-    println(s"REPORT $id:\n$report")
+
+    val path = directory
+      .resolve(executorId.filterNot(_.isWhitespace))
+      .resolve(stageId.filterNot(_.isWhitespace))
+      .resolve(s"${partitionId.filterNot(_.isWhitespace)}.log")
+    // TODO: create directory recursively?
+    path.createFile(failIfExists = false)
+
+    Resources.autoCloseTryGet(new FileWriter(path.path)) { writer =>
+      writer.write(s"# Executor ID: $executorId, Stage ID: $stageId, Partition ID: $partitionId")
+      writer.write(report)
+    }
   }
 
 }
