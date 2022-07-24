@@ -32,6 +32,12 @@ object ArrowConf {
     .intConf
     .createWithDefault(32)
 
+  val BUCKETSEARCH_PARALLEL: ConfigEntry[Boolean] = SQLConf.buildConf("spark.arrow.search.bucket.parallel")
+    .doc("Whether to run bucketsort in parallel or not")
+    .version(latestVersion)
+    .booleanConf
+    .createWithDefault(false)
+
   /** Distributor-Algorithms */
   abstract sealed class DistributorAlgorithm(function: String)
   object DistributorAlgorithm {

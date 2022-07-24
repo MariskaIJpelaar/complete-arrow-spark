@@ -13,6 +13,7 @@ import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowEncoders, ArrowColumnarBatchRowSerializer}
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
+import org.apache.spark.sql.internal.ArrowConf
 import org.apache.spark.util.MutablePair
 import org.apache.spark.{ArrowRangePartitioner, MapOutputStatistics, ShuffleDependency, TaskContext}
 
@@ -41,7 +42,8 @@ case class ArrowShuffleExchangeExec(override val outputPartitioning: Partitionin
       child.output,
       outputPartitioning,
       serializer,
-      writeMetrics)
+      writeMetrics,
+      ArrowConf.get(sparkContext, ArrowConf.BUCKETSEARCH_PARALLEL))
     metrics("numPartitions").set(dep.partitioner.numPartitions)
     val executionId = sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
     SQLMetrics.postDriverMetricUpdates(
@@ -84,7 +86,8 @@ object ArrowShuffleExchangeExec {
       outputAttributes: Seq[Attribute],
       newPartitioning: Partitioning,
       serializer: Serializer,
-      writeMetrics: Map[String, SQLMetric]) : ShuffleDependency[Array[Int], InternalRow, InternalRow] = {
+      writeMetrics: Map[String, SQLMetric],
+      parallel: Boolean) : ShuffleDependency[Array[Int], InternalRow, InternalRow] = {
     assert(newPartitioning.isInstanceOf[RangePartitioning])
 
     val RangePartitioning(sortingExpressions, numPartitions) = newPartitioning.asInstanceOf[RangePartitioning]
@@ -101,7 +104,7 @@ object ArrowShuffleExchangeExec {
       })
     }
 
-    val part = new ArrowRangePartitioner(numPartitions, rddForSampling, sortingExpressions, ascending = true)
+    val part = new ArrowRangePartitioner(numPartitions, rddForSampling, sortingExpressions, parallel, ascending = true)
     val rddWithPartitionIds = rdd.mapPartitionsWithIndexInternal( (_, iter) => {
       val projection = GenerateArrowColumnarBatchRowProjection.create(sortingExpressions.map(_.child), outputAttributes)
       val getPartitionKey: InternalRow => InternalRow = row => projection(row)

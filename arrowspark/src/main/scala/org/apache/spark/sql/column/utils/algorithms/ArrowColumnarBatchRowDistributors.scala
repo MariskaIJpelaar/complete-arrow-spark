@@ -20,9 +20,10 @@ object ArrowColumnarBatchRowDistributors {
    * @param key ArrowColumnarBatchRow to define distribution for, and close
    * @param rangeBounds ArrowColumnarBatchRow containing ranges on which distribution is based, and close
    * @param sortOrders SortOrders on which distribution is based
+   * @param parallel Whether to run the distributor in parallel or not
    * @return Indices containing the distribution for the key given the rangeBounds and sortOrders
    */
-  def bucketDistributor(key: ArrowColumnarBatchRow, rangeBounds: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder]): Array[Int] = {
+  def bucketDistributor(key: ArrowColumnarBatchRow, rangeBounds: ArrowColumnarBatchRow, sortOrders: Seq[SortOrder], parallel: Boolean): Array[Int] = {
     Resources.autoCloseTryGet(key) (key => Resources.autoCloseTryGet(rangeBounds) { rangeBounds =>
       if (key.numFields < 1 || rangeBounds.numFields < 1)
         return Array.empty
@@ -37,7 +38,10 @@ object ArrowColumnarBatchRowDistributors {
         val (rangeUnion, allocator) = ArrowColumnarBatchRowConverters.toUnionVector(
           ArrowColumnarBatchRowTransformers.getColumns(rangeBounds.copyFromCaller("ArrowColumnarBatchRowDistributors::bucketDistributor::rangeUnion"), names))
         val ret = Resources.autoCloseTryGet(allocator) ( _ => Resources.autoCloseTryGet(rangeUnion)
-          { rangeUnion => new BucketSearcher(keyUnion, rangeUnion, comparator).distribute() }
+          { rangeUnion =>
+            if (parallel) new BucketSearcher(keyUnion, rangeUnion, comparator).distributeParallel()
+            else new BucketSearcher(keyUnion, rangeUnion, comparator).distribute()
+          }
         )
         val t2 = System.nanoTime()
         totalTimeBucketDistributor.addAndGet(t2 - t1)

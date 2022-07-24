@@ -26,6 +26,7 @@ class ArrowRangePartitioner[V](
      partitions: Int,
      rdd: RDD[_ <: Product2[Array[Byte], V]],
      orders: Seq[SortOrder],
+     private var parallel: Boolean,
      private var ascending: Boolean = true,
      val samplePointsPerPartitionHint: Int = 20) extends ArrowPartitioner {
 
@@ -261,7 +262,7 @@ class ArrowRangePartitioner[V](
       Resources.autoCloseTryGet(newRoot()) { root =>
         val decoded = ArrowColumnarBatchRowUtils.take(root, ArrowColumnarBatchRowEncoders.decode(root, rangeBounds))
         Resources.autoCloseTryGet(ArrowColumnarBatchRow.create(decoded._3, decoded._2)) { ranges =>
-          ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders)
+          ArrowColumnarBatchRowDistributors.bucketDistributor(key, ranges, orders, parallel)
         }
       }
     }

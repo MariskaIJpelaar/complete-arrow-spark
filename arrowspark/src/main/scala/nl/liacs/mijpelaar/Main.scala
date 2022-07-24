@@ -48,6 +48,8 @@ class Main extends Callable[Unit] {
   private var sorting_algorithm: String = ""
   @picocli.CommandLine.Option(names = Array("--parquet-reader"))
   private var parquet_reader: String = ""
+  @picocli.CommandLine.Option(names = Array("--bucketseach-parallel"))
+  private var bucketsearch_parallel: Boolean = false
   @picocli.CommandLine.Option(names = Array("--report-directory"))
   private var report_directory: String = ""
   @picocli.CommandLine.Option(names = Array("--only-vanilla"))
@@ -97,6 +99,7 @@ class Main extends Callable[Unit] {
         builder.config(ArrowConf.SORTING_ALGORITHM.key, sorting_algorithm)
       if (parquet_reader != "")
         builder.config(ArrowConf.PARQUET_READER.key, parquet_reader)
+      builder.config(ArrowConf.BUCKETSEARCH_PARALLEL.key, bucketsearch_parallel)
       val spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("ERROR")
 
