@@ -40,8 +40,9 @@ class SimpleParquetArrowFileFormat extends ArrowFileFormat with DataSourceRegist
       requiredSchema: StructType, filters: Seq[Filter], options: Map[String, String],
       hadoopConf: Configuration): (PartitionedFile, RootAllocator) => Iterator[ArrowColumnarBatchRow] = {
     val batchSize = ArrowConf.get(sparkSession, NATIVE_SCANNER_BATCHSIZE)
-    val readerType = ArrowConf.getParquetReader(sparkSession).getOrElse(throw new RuntimeException("No valid reader type was chosen"))
-    (file: PartitionedFile, root: RootAllocator) => readerType match {
+    val readerType = ArrowConf.get(sparkSession, ArrowConf.PARQUET_READER)
+
+    (file: PartitionedFile, root: RootAllocator) => ArrowConf.ParquetReader.fromFunction(readerType).getOrElse(throw new RuntimeException("No valid reader type was chosen")) match {
         case ParquetReader.TrivediReader => new ParquetReaderIterator(file, root)
         case ParquetReader.NativeReader => new ArrowParquetReaderIterator(batchSize, file, root)
       }
