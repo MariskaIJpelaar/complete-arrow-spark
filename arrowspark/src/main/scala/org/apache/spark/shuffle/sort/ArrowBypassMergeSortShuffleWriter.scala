@@ -11,6 +11,8 @@ import org.apache.spark.shuffle.checksum.ShuffleChecksumSupport
 import org.apache.spark.shuffle.{ShuffleWriteMetricsReporter, ShuffleWriter}
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
 import org.apache.spark.sql.column.utils.algorithms.ArrowColumnarBatchRowDistributors
+import org.apache.spark.sql.internal.ArrowConf
+import org.apache.spark.sql.internal.ArrowConf.DistributorAlgorithm
 import org.apache.spark.storage.{BlockManager, DiskBlockObjectWriter, FileSegment}
 import org.apache.spark.util.Utils
 import org.slf4j.LoggerFactory
@@ -150,13 +152,20 @@ class ArrowBypassMergeSortShuffleWriter[K, V](
         (key, value) match {
           case (partitionIds: Array[Int], partition: ArrowColumnarBatchRow) =>
             try {
-              ArrowColumnarBatchRowDistributors.distributeBySort(partition.copyFromCaller("tmpWriter"), partitionIds) foreach { case (partitionId, batch) =>
-                Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
+              ArrowConf.getDistributorAlgorithm(sparkConf = conf).getOrElse(throw new RuntimeException("No valid distributor algorithm set")) match {
+                case DistributorAlgorithm.BySorting =>
+                  ArrowColumnarBatchRowDistributors.distributeBySort(partition.copyFromCaller("tmpWriter"), partitionIds) foreach { case (partitionId, batch) =>
+                    Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
+                  }
+                case DistributorAlgorithm.ByBuilders =>
+                  ArrowColumnarBatchRowDistributors.distributeByBuilder(partition.copyFromCaller("tmpWriter"), partitionIds) foreach { case (partitionId, batch) =>
+                    Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
+                  }
+                case DistributorAlgorithm.ByBatches =>
+                  ArrowColumnarBatchRowDistributors.distributeByBatches(partition.copyFromCaller("tmpWriter"), partitionIds) foreach { case (partitionId, batch) =>
+                    Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
+                  }
               }
-
-//              ArrowColumnarBatchRowDistributors.distribute(partition, partitionIds) foreach { case (partitionId, batch) =>
-//                Resources.autoCloseTry(batch) { partitionWriters.get(partitionId).write(partitionId, _) }
-//              }
             } finally {
               partition.close()
             }

@@ -42,6 +42,8 @@ class Main extends Callable[Unit] {
   private var append: Boolean = false
   @picocli.CommandLine.Option(names = Array("--batch-size"))
   private var batch_size: String = ""
+  @picocli.CommandLine.Option(names = Array("--distribution-algorithm"))
+  private var distribute_algorithm: String = ""
   @picocli.CommandLine.Option(names = Array("--report-directory"))
   private var report_directory: String = ""
   @picocli.CommandLine.Option(names = Array("--only-vanilla"))
@@ -85,6 +87,8 @@ class Main extends Callable[Unit] {
         builder.config(ArrowConf.NATIVE_SCANNER_BATCHSIZE.key, batch_size)
       if (report_directory != "")
         builder.config(ArrowConf.ARROWRDD_REPORT_DIRECTORY.key, report_directory)
+      if (distribute_algorithm != "")
+        builder.config(ArrowConf.DISTRIBUTOR_ALGORITHM.key, distribute_algorithm)
       val spark = builder.getOrCreate()
       spark.sparkContext.setLogLevel("ERROR")
 
