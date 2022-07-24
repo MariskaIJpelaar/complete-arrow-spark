@@ -3,6 +3,7 @@ package org.apache.spark.sql.column.utils.algorithms
 import nl.liacs.mijpelaar.utils.Resources
 import org.apache.arrow.algorithm.search.BucketSearcher
 import org.apache.arrow.algorithm.sort.IndexIntSorters
+import org.apache.arrow.memory.RootAllocator
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, SortOrder}
 import org.apache.spark.sql.column.AllocationManager.createAllocator
 import org.apache.spark.sql.column.ArrowColumnarBatchRow
@@ -10,6 +11,7 @@ import org.apache.spark.sql.column.utils.{ArrowColumnarBatchRowBuilder, ArrowCol
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 object ArrowColumnarBatchRowDistributors {
   var totalTimeBucketDistributor: AtomicLong = new AtomicLong(0)
@@ -80,7 +82,7 @@ object ArrowColumnarBatchRowDistributors {
    *
    * Caller should close the batches in the returned map
    */
-  def distribute(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
+  def distributeByBuilder(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
     Resources.autoCloseTryGet(key) { key =>
       val t1 = System.nanoTime()
       // FIXME: close builder if we return earlier than expected
@@ -102,6 +104,31 @@ object ArrowColumnarBatchRowDistributors {
         val t2 = System.nanoTime()
         totalTimeDistribute.addAndGet(t2 - t1)
       }
+    }
+  }
+
+  /**
+   * @param key ArrowColumnarBatchRow to distribute and close
+   * @param partitionIds Array containing which row corresponds to which partition
+   * @return A map from partitionId to its corresponding ArrowColumnarBatchRow
+   *
+   * Caller should close the batches in the returned map
+   */
+  def distributeByBatches(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
+    Resources.autoCloseTryGet(key) { key =>
+      val distributed = mutable.Map[Int, ArrayBuffer[ArrowColumnarBatchRow]]()
+
+      partitionIds.zipWithIndex foreach { case (partitionId, index) =>
+        val newRow = key.copyFromCaller("ArrowColumnarBatchRowDistributors::distributeByBatches", index until index+1)
+        if (distributed.contains(partitionId))
+          distributed(partitionId) += newRow
+        else
+          distributed(partitionId) = ArrayBuffer(newRow)
+      }
+
+      distributed.map ( items =>
+        (items._1, ArrowColumnarBatchRow.create(key.allocator.getRoot.asInstanceOf[RootAllocator], items._2.toIterator))
+      ).toMap
     }
   }
 }

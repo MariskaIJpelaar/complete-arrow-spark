@@ -29,4 +29,23 @@ object ArrowConf {
     .version(latestVersion)
     .intConf
     .createWithDefault(32)
+
+  abstract sealed class DistributorAlgorithm(function: String)
+  case object ByBatches extends DistributorAlgorithm("byBatches")
+  case object ByBuilders extends DistributorAlgorithm("byBuilders")
+  case object BySorting extends DistributorAlgorithm("bySorting")
+  def fromFunction(function: String): Option[DistributorAlgorithm] = function match {
+    case "byBatches" => Some(ByBatches)
+    case "byBuilders" => Some(ByBuilders)
+    case "bySorting" => Some(BySorting)
+    case _ => None
+  }
+  private val distributorAlgorithms: Array[String] = Array("byBatches", "byBuilders", "bySorting")
+  private val distributorAlgorithmsString: String = distributorAlgorithms.map(alg => s"'$alg''").mkString(", ")
+  val DISTRIBUTOR_ALGORITHM: ConfigEntry[String] = SQLConf.buildConf("spark.arrow.distributor.algorithm")
+    .doc(s"The algorithm to use for distribution, choices: $distributorAlgorithmsString")
+    .version(latestVersion)
+    .stringConf
+    .checkValue( distributorAlgorithms.contains(_), errorMsg = s"Value not one of $distributorAlgorithmsString" )
+    .createWithDefault(distributorAlgorithms(2))
 }
