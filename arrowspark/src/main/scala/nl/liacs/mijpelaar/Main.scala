@@ -39,7 +39,7 @@ class Main extends Callable[Unit] {
   @picocli.CommandLine.Option(names = Array("--log-file"))
   private var log_file: String = "exp" + ZonedDateTime.now().truncatedTo(ChronoUnit.MINUTES).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + ".log"
   @picocli.CommandLine.Option(names = Array("--append"))
-  private var append: Boolean = true
+  private var append: Boolean = false
   @picocli.CommandLine.Option(names = Array("--batch-size"))
   private var batch_size: String = ""
 
