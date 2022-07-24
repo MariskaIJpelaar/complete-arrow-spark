@@ -24,4 +24,9 @@ object ArrowConf {
     .stringConf
     .createWithDefault(s"/tmp/sparkarrow/${LocalDateTime.now()}")
 
+  val TIMSORT_RUN: ConfigEntry[Int] = SQLConf.buildConf("spark.arrow.sort.timsort.run")
+    .doc("RUN variable to use within TimSort")
+    .version(latestVersion)
+    .intConf
+    .createWithDefault(32)
 }
