@@ -46,8 +46,12 @@ object ArrowColumnarBatchRowTransformers {
    * @param range the range to take, assumes: 0 <= range < batch.numRows
    * @return a fresh batch
    *         Caller is responsible for closing returned batch
+   *         An empty Batch is returned if the range is empty
    */
   def take(batch: ArrowColumnarBatchRow, range: Range): ArrowColumnarBatchRow = {
+    if (range.isEmpty)
+      return ArrowColumnarBatchRow.empty(batch.allocator.getRoot)
+
     val t1 = System.nanoTime()
     val ret = Resources.autoCloseTryGet(batch) { batch =>
       // first we transfer our subset to the RootAllocator
