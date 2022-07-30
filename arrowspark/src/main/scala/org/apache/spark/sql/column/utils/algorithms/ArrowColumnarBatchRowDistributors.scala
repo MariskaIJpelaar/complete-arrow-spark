@@ -69,7 +69,7 @@ object ArrowColumnarBatchRowDistributors {
               (partitionId, sorted.copyFromCaller(s"ArrowColumnarBatchRowDistributors::distributeBySort::copy::$partitionId", range))
             }
             val t2 = System.nanoTime()
-            totalTimeBucketDistributor.addAndGet(t2 - t1)
+            totalTimeDistributeBySort.addAndGet(t2 - t1)
             ret
           }
         }
@@ -77,7 +77,7 @@ object ArrowColumnarBatchRowDistributors {
     }
   }
 
-  var totalTimeDistribute: AtomicLong = new AtomicLong(0)
+  var totalTimeDistributeByBuilder: AtomicLong = new AtomicLong(0)
 
   /**
    * @param key ArrowColumnarBatchRow to distribute and close
@@ -106,10 +106,12 @@ object ArrowColumnarBatchRowDistributors {
       } finally {
         distributed.foreach ( item => item._2.close() )
         val t2 = System.nanoTime()
-        totalTimeDistribute.addAndGet(t2 - t1)
+        totalTimeDistributeByBuilder.addAndGet(t2 - t1)
       }
     }
   }
+
+  var totalTimeDistributeByBatches: AtomicLong = new AtomicLong(0)
 
   /**
    * @param key ArrowColumnarBatchRow to distribute and close
@@ -120,6 +122,7 @@ object ArrowColumnarBatchRowDistributors {
    */
   def distributeByBatches(key: ArrowColumnarBatchRow, partitionIds: Array[Int]): Map[Int, ArrowColumnarBatchRow] = {
     Resources.autoCloseTryGet(key) { key =>
+      val t1 = System.nanoTime()
       val distributed = mutable.Map[Int, ArrayBuffer[ArrowColumnarBatchRow]]()
 
       partitionIds.zipWithIndex foreach { case (partitionId, index) =>
@@ -130,9 +133,13 @@ object ArrowColumnarBatchRowDistributors {
           distributed(partitionId) = ArrayBuffer(newRow)
       }
 
-      distributed.map ( items =>
+      val ret = distributed.map ( items =>
         (items._1, ArrowColumnarBatchRow.create(key.allocator.getRoot.asInstanceOf[RootAllocator], items._2.toIterator))
       ).toMap
+
+      val t2 = System.nanoTime()
+      totalTimeDistributeByBatches.addAndGet(t2 - t1)
+      ret
     }
   }
 }
